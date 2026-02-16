@@ -1,0 +1,327 @@
+"use client";
+
+import { useEffect, useRef, useCallback, useState } from "react";
+import maplibregl from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
+import type { FishabilityRow } from "@/lib/types";
+import type { BiteTier } from "@/lib/types";
+import { RIVER_FOCUS_POINTS } from "@/lib/river-focus-points";
+import { MapControls } from "./MapControls";
+
+const MONTANA_CENTER: [number, number] = [-110.9, 46.9];
+const DEFAULT_ZOOM = 5.2;
+const FLY_ZOOM = 9.5;
+const FLY_DURATION = 667; // ~800/1.2 for speed 1.2
+const FLY_CURVE = 1.5;
+
+// Muted tier colors (avoid neon)
+const BITE_TIER_COLORS: Record<BiteTier, string> = {
+  HOT: "#dc2626",   // red-600, muted
+  GOOD: "#16a34a",  // green-600, muted
+  FAIR: "#ca8a04",  // yellow-600, muted
+  TOUGH: "#64748b", // slate-500
+};
+
+function getMarkerColor(tier: BiteTier | null): string {
+  return tier ? BITE_TIER_COLORS[tier] : "#94a3b8";
+}
+
+interface MapViewProps {
+  rivers: FishabilityRow[];
+  selectedRiver: FishabilityRow | null;
+  selectedRiverId: string | null;
+  selectedRiverGeojson: GeoJSON.GeoJSON | null;
+  onSelectRiver: (river: FishabilityRow) => void;
+  className?: string;
+  onMapReady?: (map: maplibregl.Map) => void;
+}
+
+const RIVER_LINE_SOURCE = "selected-river-source";
+
+/** Optional: when geojson is available, draw selected river with glow + core line layers. */
+const ENABLE_SELECTED_RIVER_LINE = true;
+
+/**
+ * Add full river line (OnX-style: optional glow + core layers).
+ */
+export function addSelectedRiverLine(map: any, geojson: GeoJSON.GeoJSON): void {
+  if (!ENABLE_SELECTED_RIVER_LINE) return;
+  if (!map.getSource(RIVER_LINE_SOURCE)) {
+    map.addSource(RIVER_LINE_SOURCE, { type: "geojson", data: geojson });
+    map.addLayer({
+      id: "selected-river-glow",
+      type: "line",
+      source: RIVER_LINE_SOURCE,
+      layout: { "line-join": "round", "line-cap": "round" },
+      paint: {
+        "line-color": "rgb(56, 189, 248)",
+        "line-width": 12,
+        "line-opacity": 0.28,
+        "line-blur": 3,
+      },
+    });
+    map.addLayer({
+      id: "selected-river-core",
+      type: "line",
+      source: RIVER_LINE_SOURCE,
+      layout: { "line-join": "round", "line-cap": "round" },
+      paint: {
+        "line-color": "rgb(125, 211, 252)",
+        "line-width": 4,
+        "line-opacity": 0.95,
+      },
+    });
+  } else {
+    const src = map.getSource(RIVER_LINE_SOURCE) as {
+      setData: (d: GeoJSON.GeoJSON) => void;
+    };
+    if (src?.setData) src.setData(geojson);
+  }
+}
+
+/**
+ * Remove selected river line.
+ */
+export function clearSelectedRiverLine(map: any): void {
+  if (map.getLayer("selected-river-core")) map.removeLayer("selected-river-core");
+  if (map.getLayer("selected-river-glow")) map.removeLayer("selected-river-glow");
+  if (map.getSource(RIVER_LINE_SOURCE)) map.removeSource(RIVER_LINE_SOURCE);
+}
+
+function geojsonBbox(geojson: GeoJSON.GeoJSON): [number, number, number, number] | null {
+  const coords: [number, number][] = [];
+  const collect = (g: GeoJSON.Geometry) => {
+    if (g.type === "Point") {
+      coords.push(g.coordinates as [number, number]);
+    } else if (g.type === "LineString") {
+      for (const c of g.coordinates) coords.push(c as [number, number]);
+    } else if (g.type === "MultiLineString") {
+      for (const line of g.coordinates) {
+        for (const c of line) coords.push(c as [number, number]);
+      }
+    } else if (g.type === "Polygon") {
+      for (const ring of g.coordinates) {
+        for (const c of ring) coords.push(c as [number, number]);
+      }
+    } else if (g.type === "MultiPoint") {
+      for (const c of g.coordinates) coords.push(c as [number, number]);
+    }
+  };
+  if ("geometry" in geojson && geojson.geometry) {
+    collect(geojson.geometry);
+  } else if ("coordinates" in geojson) {
+    collect(geojson as GeoJSON.Geometry);
+  } else if ("features" in geojson) {
+    for (const f of geojson.features) {
+      if (f.geometry) collect(f.geometry);
+    }
+  }
+  if (coords.length === 0) return null;
+  const lons = coords.map((c) => c[0]);
+  const lats = coords.map((c) => c[1]);
+  return [Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)];
+}
+
+export function MapView({
+  rivers,
+  selectedRiver,
+  selectedRiverId,
+  selectedRiverGeojson,
+  onSelectRiver,
+  className,
+  onMapReady,
+}: MapViewProps) {
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<maplibregl.Map | null>(null);
+  const markersRef = useRef<{ marker: maplibregl.Marker; riverId: string; el: HTMLElement }[]>([]);
+  const lastFlownRef = useRef<string | null>(null);
+  const [mapReady, setMapReady] = useState(false);
+
+  const initMap = useCallback(() => {
+    if (!mapContainerRef.current) return;
+
+    const map = new maplibregl.Map({
+      container: mapContainerRef.current,
+      style: "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
+      center: MONTANA_CENTER,
+      zoom: DEFAULT_ZOOM,
+      pitch: 22,
+      bearing: -5,
+    });
+
+    map.addControl(new maplibregl.NavigationControl(), "top-right");
+    mapRef.current = map;
+    map.on("load", () => {
+      map.resize();
+      setMapReady(true);
+      onMapReady?.(map);
+      // Resize again after layout settles (handles flex/async layout)
+      requestAnimationFrame(() => map.resize());
+      setTimeout(() => map.resize(), 100);
+    });
+  }, []);
+
+  useEffect(() => {
+    initMap();
+    return () => {
+      markersRef.current.forEach((m) => m?.marker?.remove());
+      markersRef.current = [];
+      mapRef.current?.remove();
+      mapRef.current = null;
+      lastFlownRef.current = null;
+    };
+  }, [initMap]);
+
+  // Fullscreen resize support: window resize + ResizeObserver
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapContainerRef.current) return;
+
+    const handleResize = () => map.resize();
+    window.addEventListener("resize", handleResize);
+
+    const resizeObserver = new ResizeObserver(() => map.resize());
+    resizeObserver.observe(mapContainerRef.current);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      resizeObserver.disconnect();
+    };
+  }, [mapReady]);
+
+  // Create markers once when map + rivers ready; only recreate if rivers change
+  const riversKeyRef = useRef<string>("");
+  const riversKey = rivers.map((r) => r.river_id).join(",");
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    if (riversKeyRef.current === riversKey && markersRef.current.length > 0) {
+      return; // markers already present, skip
+    }
+    riversKeyRef.current = riversKey;
+
+    markersRef.current.forEach((m) => m?.marker?.remove());
+    markersRef.current = [];
+
+    const bounds = new maplibregl.LngLatBounds();
+
+    for (const river of rivers) {
+      const lat = river.lat ?? (river as { latitude?: number }).latitude;
+      const lng = river.lng ?? (river as { longitude?: number }).longitude;
+      const coords: [number, number] | undefined =
+        lat != null && lng != null
+          ? [lng, lat]
+          : RIVER_FOCUS_POINTS[river.river_id];
+      if (!coords) continue;
+
+      bounds.extend(coords);
+
+      const el = document.createElement("div");
+      el.className = "river-marker";
+      el.style.width = "12px";
+      el.style.height = "12px";
+      el.style.borderRadius = "50%";
+      el.style.backgroundColor = getMarkerColor(river.bite_tier);
+      el.style.border = "2px solid white";
+      el.style.boxShadow = "0 1px 3px rgba(0,0,0,0.2)";
+      el.style.transform = "scale(1)";
+      el.style.cursor = "pointer";
+      el.style.transition = "transform 0.2s ease, box-shadow 0.2s ease, border 0.2s ease";
+      el.style.zIndex = "1";
+      el.setAttribute("data-river-id", river.river_id);
+      el.title = river.river_name;
+
+      const popup = new maplibregl.Popup({ offset: 12 }).setHTML(
+        `<strong>${river.river_name}</strong><br/>Score: ${river.fishability_score_calc ?? "N/A"}`
+      );
+
+      const marker = new maplibregl.Marker({ element: el })
+        .setLngLat(coords)
+        .setPopup(popup)
+        .addTo(map);
+
+      el.addEventListener("click", () => onSelectRiver(river));
+
+      markersRef.current.push({ marker, riverId: river.river_id, el });
+    }
+
+    if (markersRef.current.length > 0 && bounds && !bounds.isEmpty()) {
+      map.fitBounds(bounds, { padding: 40 });
+    }
+  }, [rivers, riversKey, mapReady, onSelectRiver]);
+
+  // Update marker selected styles when selectedRiverId changes (no flyTo, no recreate)
+  useEffect(() => {
+    for (const { el, riverId } of markersRef.current) {
+      const isSelected = selectedRiverId === riverId;
+      el.style.border = isSelected ? "3px solid white" : "2px solid white";
+      el.style.boxShadow = isSelected
+        ? "0 0 0 3px rgba(59, 130, 246, 0.7), 0 0 16px rgba(59, 130, 246, 0.5), 0 2px 6px rgba(0,0,0,0.25)"
+        : "0 1px 3px rgba(0,0,0,0.2)";
+      el.style.transform = isSelected ? "scale(1.35)" : "scale(1)";
+      el.style.zIndex = isSelected ? "10" : "1";
+    }
+  }, [selectedRiverId]);
+
+  // Pan/zoom + river line when selection changes (flyTo ONLY when selectedRiverId changes)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!mapReady) return;
+    if (typeof map.isStyleLoaded === "function" && !map.isStyleLoaded()) return;
+
+    clearSelectedRiverLine(map);
+
+    if (!selectedRiverId) {
+      lastFlownRef.current = null;
+      return;
+    }
+    if (lastFlownRef.current === selectedRiverId) return;
+
+    lastFlownRef.current = selectedRiverId;
+
+    const focus: [number, number] | undefined =
+      selectedRiver?.lat != null && selectedRiver?.lng != null
+        ? [selectedRiver.lng, selectedRiver.lat]
+        : RIVER_FOCUS_POINTS[selectedRiverId];
+
+    if (selectedRiverGeojson) {
+      addSelectedRiverLine(map, selectedRiverGeojson);
+      const bbox = geojsonBbox(selectedRiverGeojson);
+      if (bbox && map.fitBounds) {
+        map.fitBounds(
+          [
+            [bbox[0], bbox[1]],
+            [bbox[2], bbox[3]],
+          ],
+          { padding: 60, duration: 700, essential: true }
+        );
+        return;
+      }
+    }
+
+    if (focus) {
+      map.flyTo({
+        center: focus,
+        zoom: FLY_ZOOM,
+        duration: FLY_DURATION,
+        curve: FLY_CURVE,
+        essential: true,
+      });
+    }
+  }, [selectedRiverId, selectedRiverGeojson, mapReady]);
+
+  return (
+    <div
+      id="map"
+      ref={mapContainerRef}
+      className={`absolute inset-0 w-full h-full min-h-0 [&_.maplibregl-marker]:cursor-pointer ${className ?? ""}`.trim()}
+      aria-label="Montana river map"
+    >
+      {mapReady && mapRef.current && (
+        <MapControls map={mapRef.current} />
+      )}
+    </div>
+  );
+}

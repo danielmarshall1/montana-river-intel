@@ -1,0 +1,27 @@
+export type BiteTier = "HOT" | "GOOD" | "FAIR" | "TOUGH";
+
+export interface FishabilityRow {
+  river_id: string;
+  slug?: string;
+  river_name: string;
+  /** Optional map coords from DB (lon, lat) - used when RIVER_FOCUS_POINTS has no entry */
+  lat?: number | null;
+  lng?: number | null;
+  gauge_label: string;
+  usgs_site_no: string;
+  date: string;
+  flow_cfs: number | null;
+  median_flow_cfs: number | null;
+  flow_ratio_calc: number | null;
+  change_48h_pct_calc: number | null;
+  water_temp_f: number | null;
+  wind_am_mph: number | null;
+  wind_pm_mph: number | null;
+  fishability_score_calc: number | null;
+  bite_tier: BiteTier | null;
+}
+
+export interface RiverGeom {
+  river_id: string;
+  geom: GeoJSON.Geometry;
+}
