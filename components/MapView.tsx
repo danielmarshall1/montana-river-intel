@@ -25,6 +25,11 @@ interface MapViewProps {
   selectedRiver: FishabilityRow | null;
   selectedRiverId: string | null;
   selectedRiverGeojson: GeoJSON.GeoJSON | null;
+  showRiverPoints?: boolean;
+  showSelectedRiverLine?: boolean;
+  scoreColoring?: boolean;
+  showPublicLands?: boolean;
+  showFishingAccess?: boolean;
   onSelectRiver: (river: FishabilityRow) => void;
   className?: string;
   initialStyleUrl?: string;
@@ -38,6 +43,15 @@ const RIVERS_SOURCE = "rivers-source";
 const UNCLUSTERED_LAYER = "rivers-unclustered";
 const SELECTED_HALO_LAYER = "rivers-selected-halo";
 const SELECTED_CORE_LAYER = "rivers-selected-core";
+const PUBLIC_LANDS_SOURCE = "public-lands-source";
+const PUBLIC_LANDS_FILL_LAYER = "public-lands-fill";
+const PUBLIC_LANDS_LINE_LAYER = "public-lands-line";
+const ACCESS_SOURCE = "fishing-access-source";
+const ACCESS_LAYER = "fishing-access-points";
+const BLM_PUBLIC_LANDS_TILES =
+  "https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA_Cached_without_PriUnk/MapServer/tile/{z}/{y}/{x}";
+const FWP_FISHING_ACCESS_GEOJSON =
+  "https://fwp-gis.mt.gov/arcgis/rest/services/fwplnd/fwpLands/MapServer/1/query?where=1%3D1&outFields=NAME&returnGeometry=true&f=geojson";
 
 function normalizeGeojson(g: any): any {
   if (!g) return null;
@@ -71,8 +85,12 @@ export function addSelectedRiverLine(map: any, geojson: any): void {
   });
 
   try {
-    const layers = map.getStyle()?.layers;
-    if (layers?.length) map.moveLayer(RIVER_LINE_LAYER, layers[layers.length - 1].id);
+    // Keep selected line below point layers so observation dots remain visible.
+    if (map.getLayer(SELECTED_HALO_LAYER)) {
+      map.moveLayer(RIVER_LINE_LAYER, SELECTED_HALO_LAYER);
+    } else if (map.getLayer(UNCLUSTERED_LAYER)) {
+      map.moveLayer(RIVER_LINE_LAYER, UNCLUSTERED_LAYER);
+    }
   } catch {}
 }
 
@@ -134,7 +152,9 @@ function ensureRiverLayers(
   riversRef: React.MutableRefObject<FishabilityRow[]>,
   onSelectRiverRef: React.MutableRefObject<(river: FishabilityRow) => void>,
   hoverIdRef: React.MutableRefObject<number | string | null>,
-  selectedRiverIdRef: React.MutableRefObject<string | null>
+  selectedRiverIdRef: React.MutableRefObject<string | null>,
+  showRiverPointsRef: React.MutableRefObject<boolean>,
+  scoreColoringRef: React.MutableRefObject<boolean>
 ) {
   const rivers = riversRef.current;
   const fc = riversToFeatureCollection(rivers);
@@ -243,6 +263,111 @@ function ensureRiverLayers(
       map.setFilter(SELECTED_CORE_LAYER, ["==", ["get", "river_id"], rid]);
     } catch { /* ignore */ }
   }
+
+  const showPoints = showRiverPointsRef.current;
+  const visibility = showPoints ? "visible" : "none";
+  for (const layerId of [UNCLUSTERED_LAYER, SELECTED_HALO_LAYER, SELECTED_CORE_LAYER]) {
+    if (!map.getLayer(layerId)) continue;
+    try {
+      map.setLayoutProperty(layerId, "visibility", visibility);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (map.getLayer(UNCLUSTERED_LAYER)) {
+    const circleColor = scoreColoringRef.current
+      ? [
+          "case",
+          ["==", ["get", "bite_tier"], "HOT"], BITE_TIER_COLORS.HOT,
+          ["==", ["get", "bite_tier"], "GOOD"], BITE_TIER_COLORS.GOOD,
+          ["==", ["get", "bite_tier"], "FAIR"], BITE_TIER_COLORS.FAIR,
+          ["==", ["get", "bite_tier"], "TOUGH"], BITE_TIER_COLORS.TOUGH,
+          "#94a3b8",
+        ]
+      : "#94a3b8";
+    try {
+      map.setPaintProperty(UNCLUSTERED_LAYER, "circle-color", circleColor as any);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function ensureOverlayLayers(
+  map: maplibregl.Map,
+  showPublicLandsRef: React.MutableRefObject<boolean>,
+  showFishingAccessRef: React.MutableRefObject<boolean>
+) {
+  const publicSrc = map.getSource(PUBLIC_LANDS_SOURCE);
+  if (!publicSrc) {
+    map.addSource(PUBLIC_LANDS_SOURCE, {
+      type: "raster",
+      tiles: [BLM_PUBLIC_LANDS_TILES],
+      tileSize: 256,
+      attribution: "BLM Surface Management Agency",
+    });
+  }
+
+  if (!map.getLayer(PUBLIC_LANDS_FILL_LAYER)) {
+    map.addLayer({
+      id: PUBLIC_LANDS_FILL_LAYER,
+      type: "raster",
+      source: PUBLIC_LANDS_SOURCE,
+      minzoom: 7,
+      paint: {
+        // Keep BLM ownership readable without overwhelming the basemap.
+        "raster-opacity": 0.24,
+        "raster-saturation": -0.55,
+        "raster-contrast": -0.2,
+        "raster-brightness-min": 0.15,
+        "raster-brightness-max": 0.82,
+      },
+    });
+  }
+  if (map.getLayer(PUBLIC_LANDS_LINE_LAYER)) map.removeLayer(PUBLIC_LANDS_LINE_LAYER);
+
+  const accessSrc = map.getSource(ACCESS_SOURCE);
+  if (!accessSrc) {
+    map.addSource(ACCESS_SOURCE, {
+      type: "geojson",
+      data: FWP_FISHING_ACCESS_GEOJSON as any,
+    } as any);
+  }
+
+  if (!map.getLayer(ACCESS_LAYER)) {
+    map.addLayer({
+      id: ACCESS_LAYER,
+      type: "circle",
+      source: ACCESS_SOURCE,
+      paint: {
+        "circle-color": "#38bdf8",
+        "circle-radius": 5,
+        "circle-stroke-color": "#e2e8f0",
+        "circle-stroke-width": 1.5,
+        "circle-opacity": 0.95,
+      },
+    });
+  }
+
+  const publicVisibility = showPublicLandsRef.current ? "visible" : "none";
+  const accessVisibility = showFishingAccessRef.current ? "visible" : "none";
+  for (const layerId of [PUBLIC_LANDS_FILL_LAYER]) {
+    if (map.getLayer(layerId)) {
+      try {
+        map.setLayoutProperty(layerId, "visibility", publicVisibility);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  if (map.getLayer(ACCESS_LAYER)) {
+    try {
+      map.setLayoutProperty(ACCESS_LAYER, "visibility", accessVisibility);
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 export function MapView({
@@ -250,6 +375,11 @@ export function MapView({
   selectedRiver,
   selectedRiverId,
   selectedRiverGeojson,
+  showRiverPoints = true,
+  showSelectedRiverLine = true,
+  scoreColoring = true,
+  showPublicLands = false,
+  showFishingAccess = false,
   onSelectRiver,
   className,
   initialStyleUrl,
@@ -262,9 +392,17 @@ export function MapView({
   const riversRef = useRef(rivers);
   const onSelectRiverRef = useRef(onSelectRiver);
   const selectedRiverIdRef = useRef(selectedRiverId);
+  const showRiverPointsRef = useRef(showRiverPoints);
+  const scoreColoringRef = useRef(scoreColoring);
+  const showPublicLandsRef = useRef(showPublicLands);
+  const showFishingAccessRef = useRef(showFishingAccess);
   riversRef.current = rivers;
   onSelectRiverRef.current = onSelectRiver;
   selectedRiverIdRef.current = selectedRiverId;
+  showRiverPointsRef.current = showRiverPoints;
+  scoreColoringRef.current = scoreColoring;
+  showPublicLandsRef.current = showPublicLands;
+  showFishingAccessRef.current = showFishingAccess;
   const [mapReady, setMapReady] = useState(false);
 
   const initMap = useCallback(() => {
@@ -289,7 +427,16 @@ export function MapView({
       requestAnimationFrame(() => map.resize());
       setTimeout(() => map.resize(), 100);
       try {
-        ensureRiverLayers(map, riversRef, onSelectRiverRef, hoverIdRef, selectedRiverIdRef);
+        ensureRiverLayers(
+          map,
+          riversRef,
+          onSelectRiverRef,
+          hoverIdRef,
+          selectedRiverIdRef,
+          showRiverPointsRef,
+          scoreColoringRef
+        );
+        ensureOverlayLayers(map, showPublicLandsRef, showFishingAccessRef);
       } catch { /* ignore */ }
     });
   }, [onMapReady]);
@@ -326,7 +473,16 @@ export function MapView({
     if (typeof map.isStyleLoaded === "function" && !map.isStyleLoaded()) return;
 
     try {
-      ensureRiverLayers(map, riversRef, onSelectRiverRef, hoverIdRef, selectedRiverIdRef);
+      ensureRiverLayers(
+        map,
+        riversRef,
+        onSelectRiverRef,
+        hoverIdRef,
+        selectedRiverIdRef,
+        showRiverPointsRef,
+        scoreColoringRef
+      );
+      ensureOverlayLayers(map, showPublicLandsRef, showFishingAccessRef);
     } catch { /* ignore */ }
 
     const fc = riversToFeatureCollection(rivers);
@@ -338,7 +494,16 @@ export function MapView({
       for (const f of fc.features) bounds.extend(f.geometry.coordinates as [number, number]);
       map.fitBounds(bounds, { padding: 60, duration: 450 });
     }
-  }, [riversKey, mapReady, rivers, onSelectRiver]);
+  }, [
+    riversKey,
+    mapReady,
+    rivers,
+    onSelectRiver,
+    showRiverPoints,
+    scoreColoring,
+    showPublicLands,
+    showFishingAccess,
+  ]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -361,8 +526,6 @@ export function MapView({
 
     clearSelectedRiverLine(map);
 
-    console.log("[selectedRiverGeojson]", selectedRiverGeojson);
-
     if (!selectedRiverId) {
       lastFlownRef.current = null;
       return;
@@ -376,7 +539,9 @@ export function MapView({
         : RIVER_FOCUS_POINTS[selectedRiverId];
 
     if (selectedRiverGeojson) {
-      addSelectedRiverLine(map, selectedRiverGeojson);
+      if (showSelectedRiverLine) {
+        addSelectedRiverLine(map, selectedRiverGeojson);
+      }
       const bbox = geojsonBbox(selectedRiverGeojson);
       if (bbox && map.fitBounds) {
         map.fitBounds(
@@ -399,7 +564,7 @@ export function MapView({
         essential: true,
       });
     }
-  }, [selectedRiverId, selectedRiverGeojson, selectedRiver, mapReady]);
+  }, [selectedRiverId, selectedRiverGeojson, selectedRiver, mapReady, showSelectedRiverLine]);
 
   // Re-apply selected river line when basemap changes (map.setStyle wipes custom layers)
   useEffect(() => {
@@ -408,10 +573,20 @@ export function MapView({
 
     const reapply = () => {
       try {
+        ensureRiverLayers(
+          map,
+          riversRef,
+          onSelectRiverRef,
+          hoverIdRef,
+          selectedRiverIdRef,
+          showRiverPointsRef,
+          scoreColoringRef
+        );
+        ensureOverlayLayers(map, showPublicLandsRef, showFishingAccessRef);
         clearSelectedRiverLine(map);
-        if (selectedRiverGeojson) addSelectedRiverLine(map, selectedRiverGeojson);
+        if (selectedRiverGeojson && showSelectedRiverLine) addSelectedRiverLine(map, selectedRiverGeojson);
       } catch (e) {
-        console.warn("[MapView] reapply selected river line failed", e);
+        console.warn("[MapView] reapply map layers failed", e);
       }
     };
 
@@ -419,7 +594,15 @@ export function MapView({
     return () => {
       map.off("load", reapply);
     };
-  }, [mapReady, selectedRiverGeojson]);
+  }, [
+    mapReady,
+    selectedRiverGeojson,
+    showSelectedRiverLine,
+    showRiverPoints,
+    scoreColoring,
+    showPublicLands,
+    showFishingAccess,
+  ]);
 
   return (
     <div

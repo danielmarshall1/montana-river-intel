@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState, useEffect, useRef } from "react";
 import maplibregl from "maplibre-gl";
-import { Plus, Minus, Maximize2, Crosshair, Type, Layers, List } from "lucide-react";
+import { Plus, Minus, Maximize2, Crosshair, Layers, List } from "lucide-react";
 import { MapView } from "@/components/MapView";
 import { fetchRiverGeom } from "@/lib/supabase";
 import { fetchRiverGeojsonBrowser } from "@/lib/supabaseBrowser";
@@ -66,6 +66,7 @@ export default function OnxShell({
   const dragRef = useRef<{ startY: number; startSheetY: number } | null>(null);
   const [selectedGeojson, setSelectedGeojson] = useState<GeoJSON.GeoJSON | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   function clamp(n: number, lo: number, hi: number) {
     return Math.max(lo, Math.min(hi, n));
@@ -103,7 +104,13 @@ export default function OnxShell({
     document.addEventListener("touchend", onUp);
   }
   const [labelsOn, setLabelsOn] = useState(true);
-  const [basemap, setBasemap] = useState<"voyager" | "dark" | "satellite">("voyager");
+  const [basemap, setBasemap] = useState<"voyager" | "dark" | "satellite">("dark");
+  const [layersOpen, setLayersOpen] = useState(false);
+  const [showRiverPoints, setShowRiverPoints] = useState(true);
+  const [showSelectedRiverLine, setShowSelectedRiverLine] = useState(true);
+  const [scoreColoring, setScoreColoring] = useState(true);
+  const [showPublicLands, setShowPublicLands] = useState(false);
+  const [showFishingAccess, setShowFishingAccess] = useState(false);
 
   const filtered = useMemo(() => {
     const s = search.trim().toLowerCase();
@@ -170,6 +177,69 @@ export default function OnxShell({
     );
   }, [filtered, rivers, selectedId]);
 
+  useEffect(() => {
+    // Keep empty-state details collapsed by default so it does not block the map.
+    if (selected) {
+      setDetailsOpen(true);
+      return;
+    }
+    setDetailsOpen(false);
+  }, [selected]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("mri.layers.v1");
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<{
+        labelsOn: boolean;
+        basemap: "voyager" | "dark" | "satellite";
+        showRiverPoints: boolean;
+        showSelectedRiverLine: boolean;
+        scoreColoring: boolean;
+        showPublicLands: boolean;
+        showFishingAccess: boolean;
+      }>;
+      if (typeof parsed.labelsOn === "boolean") setLabelsOn(parsed.labelsOn);
+      if (parsed.basemap === "voyager" || parsed.basemap === "dark" || parsed.basemap === "satellite") {
+        setBasemap(parsed.basemap);
+      }
+      if (typeof parsed.showRiverPoints === "boolean") setShowRiverPoints(parsed.showRiverPoints);
+      if (typeof parsed.showSelectedRiverLine === "boolean") setShowSelectedRiverLine(parsed.showSelectedRiverLine);
+      if (typeof parsed.scoreColoring === "boolean") setScoreColoring(parsed.scoreColoring);
+      if (typeof parsed.showPublicLands === "boolean") setShowPublicLands(parsed.showPublicLands);
+      if (typeof parsed.showFishingAccess === "boolean") setShowFishingAccess(parsed.showFishingAccess);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        "mri.layers.v1",
+        JSON.stringify({
+          labelsOn,
+          basemap,
+          showRiverPoints,
+          showSelectedRiverLine,
+          scoreColoring,
+          showPublicLands,
+          showFishingAccess,
+        })
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [
+    labelsOn,
+    basemap,
+    showRiverPoints,
+    showSelectedRiverLine,
+    scoreColoring,
+    showPublicLands,
+    showFishingAccess,
+  ]);
+
   function zoomIn() {
     mapRef.current?.zoomIn?.({ duration: 180 });
   }
@@ -202,9 +272,8 @@ export default function OnxShell({
       map.fitBounds?.(bounds, { padding: 60, duration: 450, essential: true });
     }
   }
-  function toggleBasemap() {
+  function setBasemapStyle(next: "voyager" | "dark" | "satellite") {
     const map = mapRef.current;
-    const next = basemap === "voyager" ? "dark" : basemap === "dark" ? "satellite" : "voyager";
     setBasemap(next);
     if (!map) return;
 
@@ -264,6 +333,11 @@ export default function OnxShell({
           selectedRiver={selected}
           selectedRiverId={selectedId}
           selectedRiverGeojson={selectedGeojson}
+          showRiverPoints={showRiverPoints}
+          showSelectedRiverLine={showSelectedRiverLine}
+          scoreColoring={scoreColoring}
+          showPublicLands={showPublicLands}
+          showFishingAccess={showFishingAccess}
           onSelectRiver={(r) => setSelectedId(r.river_id)}
           className="absolute inset-0"
           initialStyleUrl={styleForBasemap(basemap)}
@@ -361,10 +435,11 @@ export default function OnxShell({
         <button className="onx-iconbtn" title="Recenter Montana" onClick={recenter}>
           <Crosshair size={18} strokeWidth={2.5} />
         </button>
-        <button className="onx-iconbtn" title="Toggle labels" onClick={toggleLabels}>
-          <Type size={18} strokeWidth={2.5} className={!labelsOn ? "opacity-50" : ""} />
-        </button>
-        <button className="onx-iconbtn" title="Toggle basemap" onClick={toggleBasemap}>
+        <button
+          className={`onx-iconbtn ${layersOpen ? "ring-2 ring-cyan-300/60" : ""}`}
+          title="Layers"
+          onClick={() => setLayersOpen((v) => !v)}
+        >
           <Layers size={18} strokeWidth={2.5} />
         </button>
         <button
@@ -380,79 +455,200 @@ export default function OnxShell({
         </button>
       </div>
 
+      {/* LAYERS PANEL */}
+      {layersOpen ? (
+        <div className="absolute right-14 top-3 z-30 hidden sm:block w-[320px]">
+          <div className="onx-card rounded-2xl p-4 shadow-xl border border-slate-200/70">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-semibold text-slate-900">Layers</div>
+                <div className="text-[11px] text-slate-500">Map display controls</div>
+              </div>
+              <button
+                className="text-[11px] text-slate-500 hover:text-slate-700"
+                onClick={() => setLayersOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              Basemap
+            </div>
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              {([
+                ["dark", "Dark"],
+                ["voyager", "Light"],
+                ["satellite", "Satellite"],
+              ] as const).map(([id, label]) => (
+                <button
+                  key={id}
+                  className={[
+                    "rounded-lg px-2 py-1.5 text-xs font-medium border",
+                    basemap === id
+                      ? "border-slate-800 bg-slate-900 text-white"
+                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
+                  ].join(" ")}
+                  onClick={() => setBasemapStyle(id)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              Public Data
+            </div>
+            <div className="mt-2 space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-2.5 text-xs text-slate-700">
+              <label className="flex items-center justify-between">
+                <span>BLM Public Lands</span>
+                <input
+                  type="checkbox"
+                  checked={showPublicLands}
+                  onChange={(e) => setShowPublicLands(e.target.checked)}
+                />
+              </label>
+              <label className="flex items-center justify-between">
+                <span>FWP Fishing Access Sites</span>
+                <input
+                  type="checkbox"
+                  checked={showFishingAccess}
+                  onChange={(e) => setShowFishingAccess(e.target.checked)}
+                />
+              </label>
+            </div>
+
+            <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              MRI Data
+            </div>
+            <div className="mt-2 space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-2.5 text-xs text-slate-700">
+              <label className="flex items-center justify-between">
+                <span>Labels</span>
+                <input
+                  type="checkbox"
+                  checked={labelsOn}
+                  onChange={() => toggleLabels()}
+                />
+              </label>
+              <label className="flex items-center justify-between">
+                <span>River Points</span>
+                <input
+                  type="checkbox"
+                  checked={showRiverPoints}
+                  onChange={(e) => setShowRiverPoints(e.target.checked)}
+                />
+              </label>
+              <label className="flex items-center justify-between">
+                <span>Selected River Line</span>
+                <input
+                  type="checkbox"
+                  checked={showSelectedRiverLine}
+                  onChange={(e) => setShowSelectedRiverLine(e.target.checked)}
+                />
+              </label>
+              <label className="flex items-center justify-between">
+                <span>Score Coloring</span>
+                <input
+                  type="checkbox"
+                  checked={scoreColoring}
+                  onChange={(e) => setScoreColoring(e.target.checked)}
+                />
+              </label>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {/* DETAILS PANEL (right) */}
       <div className="absolute right-3 top-[120px] z-30 hidden sm:block w-[224px]">
-        <div className="onx-card rounded-2xl p-3 shadow-xl">
-          {selected ? (
-            <>
-              <div className="text-sm font-semibold text-slate-900">
-                {selected.river_name}
-              </div>
-              <div className="text-xs text-slate-600">
-                {selected.gauge_label ?? ""}
-              </div>
+        {detailsOpen ? (
+          <div className="onx-card rounded-2xl p-3 shadow-xl">
+            <div className="flex items-center justify-end">
+              <button
+                className="text-[11px] text-slate-500 hover:text-slate-700"
+                onClick={() => setDetailsOpen(false)}
+              >
+                Collapse
+              </button>
+            </div>
+            {selected ? (
+              <>
+                <div className="text-sm font-semibold text-slate-900">
+                  {selected.river_name}
+                </div>
+                <div className="text-xs text-slate-600">
+                  {selected.gauge_label ?? ""}
+                </div>
 
-              <div className="mt-2">
-                <TierPill
-                  tier={
-                    selected.bite_tier === "HOT" || selected.bite_tier === "GOOD"
-                      ? "Good"
-                      : selected.bite_tier === "FAIR"
-                      ? "Fair"
-                      : selected.bite_tier === "TOUGH"
-                      ? "Tough"
-                      : undefined
-                  }
-                />
-              </div>
+                <div className="mt-2">
+                  <TierPill
+                    tier={
+                      selected.bite_tier === "HOT" || selected.bite_tier === "GOOD"
+                        ? "Good"
+                        : selected.bite_tier === "FAIR"
+                        ? "Fair"
+                        : selected.bite_tier === "TOUGH"
+                        ? "Tough"
+                        : undefined
+                    }
+                  />
+                </div>
 
-              <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                <div className="rounded-xl bg-slate-50 p-2">
-                  <div className="text-slate-500">Score</div>
-                  <div className="font-semibold text-slate-900">
-                    {selected.fishability_score_calc ?? "—"}
+                <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                  <div className="rounded-xl bg-slate-50 p-2">
+                    <div className="text-slate-500">Score</div>
+                    <div className="font-semibold text-slate-900">
+                      {selected.fishability_score_calc ?? "—"}
+                    </div>
+                  </div>
+                  <div className="rounded-xl bg-slate-50 p-2">
+                    <div className="text-slate-500">Flow</div>
+                    <div className="font-semibold text-slate-900">
+                      {selected.flow_cfs ?? "—"}
+                    </div>
+                  </div>
+                  <div className="rounded-xl bg-slate-50 p-2">
+                    <div className="text-slate-500">Temp</div>
+                    <div className="font-semibold text-slate-900">
+                      {selected.water_temp_f != null
+                        ? `${Number(selected.water_temp_f).toFixed(1)}°F`
+                        : "—"}
+                    </div>
+                  </div>
+                  <div className="rounded-xl bg-slate-50 p-2">
+                    <div className="text-slate-500">Ratio</div>
+                    <div className="font-semibold text-slate-900">
+                      {selected.flow_ratio_calc != null
+                        ? `${Number(selected.flow_ratio_calc).toFixed(2)}x`
+                        : "—"}
+                    </div>
                   </div>
                 </div>
-                <div className="rounded-xl bg-slate-50 p-2">
-                  <div className="text-slate-500">Flow</div>
-                  <div className="font-semibold text-slate-900">
-                    {selected.flow_cfs ?? "—"}
-                  </div>
-                </div>
-                <div className="rounded-xl bg-slate-50 p-2">
-                  <div className="text-slate-500">Temp</div>
-                  <div className="font-semibold text-slate-900">
-                    {selected.water_temp_f != null
-                      ? `${Number(selected.water_temp_f).toFixed(1)}°F`
-                      : "—"}
-                  </div>
-                </div>
-                <div className="rounded-xl bg-slate-50 p-2">
-                  <div className="text-slate-500">Ratio</div>
-                  <div className="font-semibold text-slate-900">
-                    {selected.flow_ratio_calc != null
-                      ? `${Number(selected.flow_ratio_calc).toFixed(2)}x`
-                      : "—"}
-                  </div>
-                </div>
-              </div>
 
-              <div className="mt-2 text-[11px] text-slate-600">
-                Wind AM {selected.wind_am_mph ?? "—"} • PM{" "}
-                {selected.wind_pm_mph ?? "—"}
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="text-sm font-semibold text-slate-900">
-                Montana River Intel
-              </div>
-              <div className="text-xs text-slate-600">
-                Tap a river in the list to preview details here.
-              </div>
-            </>
-          )}
-        </div>
+                <div className="mt-2 text-[11px] text-slate-600">
+                  Wind AM {selected.wind_am_mph ?? "—"} • PM{" "}
+                  {selected.wind_pm_mph ?? "—"}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="text-sm font-semibold text-slate-900">
+                  Montana River Intel
+                </div>
+                <div className="text-xs text-slate-600">
+                  Tap a river in the list to preview details here.
+                </div>
+              </>
+            )}
+          </div>
+        ) : (
+          <button
+            className="onx-glass rounded-xl px-3 py-2 text-xs font-medium text-white/90 hover:text-white"
+            onClick={() => setDetailsOpen(true)}
+          >
+            Details
+          </button>
+        )}
       </div>
 
       {/* BOTTOM LIST SHEET */}
