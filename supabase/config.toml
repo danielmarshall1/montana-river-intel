@@ -1,0 +1,2 @@
+[functions.usgs-ingest]
+verify_jwt = false

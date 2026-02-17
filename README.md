@@ -39,9 +39,20 @@ Map-first outdoor intelligence platform for Montana rivers. Premium, data-forwar
 
 ## Data
 
-- **Primary view:** `public.v_today_fishability_canonical`
-- **Fallback:** `public.v_today_fishability`
-- **River geometry (optional):** `public.river_geoms` (river_id, geom GeoJSON)
+- **Primary list/map view:** `public.v_river_latest`
+- **Selected river detail view:** `public.v_river_detail`
+- **Mini-chart RPC (14 day):** `public.river_history_14d(p_river_id bigint)`
+- **Health/Audit views:** `public.v_river_health`, `public.v_usgs_pull_log`
+- **River geometry RPC:** `public.get_river_geojson_by_slug(p_slug text)`
+
+Core normalized table:
+
+- `public.river_daily` (one row per river per date; source timestamps + parameter codes + payload summary for auditability)
+
+USGS ingestion logs:
+
+- `public.usgs_pull_runs`
+- `public.usgs_pull_sites`
 
 If Supabase env vars are missing, the app uses mocked data.
 
@@ -84,3 +95,68 @@ Or from a cron job. Response includes `inserted`, `skipped`, `errors`, and `bySo
 - `npm run build` – Production build
 - `npm run start` – Start production server
 - `npx tsx scripts/ingestDaily.ts` – Daily data ingestion
+
+## USGS Edge Function Ingestion
+
+1. Apply latest migration in Supabase SQL editor:
+
+```sql
+-- file:
+-- supabase/migrations/20260217090000_core_data_model_and_usgs_audit.sql
+```
+
+2. Deploy function:
+
+```bash
+supabase functions deploy usgs-ingest
+```
+
+3. Invoke once manually:
+
+```bash
+supabase functions invoke usgs-ingest --method POST
+```
+
+4. Verify:
+
+```sql
+-- file:
+-- supabase/sql/verify_usgs_backend.sql
+```
+
+## Map Layers Configuration
+
+Layers are defined in one place:
+
+- `src/map/layers/registry.ts`
+
+The registry is the single source of truth for:
+
+- Basemap options
+- Layer groups (`Public Lands`, `Access`, `MRI Overlays`)
+- Layer defaults
+- Source metadata and map layer ids
+- Optional UI hints (`comingSoon`, `minZoomNote`)
+
+Layer UI state is persisted in localStorage using `mri.layers.v2`.
+
+### Add a new overlay
+
+1. Add a typed entry in `src/map/layers/registry.ts` to `LAYER_REGISTRY`.
+2. Give it a unique `id`, `group`, `defaultOn`, `source`, and `layers`.
+3. Implement sync behavior in `components/MapView.tsx` (add/remove layer without map re-init).
+4. The Layers panel in `components/OnxShell.tsx` renders it automatically from the registry.
+
+## Seasonal Intel Placeholder
+
+The current Seasonal Intel panel is UI-first and uses lightweight month-based logic:
+
+- `lib/seasonalIntel.ts`
+
+Output includes:
+
+- Season label
+- Likely bugs
+- Recommended approach
+
+This is intentionally simple and can be replaced later with hatch-probability modeling without changing panel structure.
