@@ -27,6 +27,7 @@ interface MapViewProps {
   selectedRiverName?: string | null;
   selectedRiverId: string | null;
   selectedRiverGeojson: GeoJSON.GeoJSON | null;
+  riverLinesGeojson?: GeoJSON.FeatureCollection | null;
   layerState?: Record<LayerId, boolean>;
   onSelectRiver: (river: FishabilityRow) => void;
   className?: string;
@@ -40,9 +41,10 @@ const SELECTED_HALO_LAYER = "rivers-selected-halo";
 const SELECTED_CORE_LAYER = "rivers-selected-core";
 
 const SELECTED_RIVER_SOURCE = "selected-river-source";
-const SELECTED_RIVER_BASE_LAYER = "selected-river-base";
-const SELECTED_RIVER_CASING_LAYER = "selected-river-casing";
-const SELECTED_RIVER_MAIN_LAYER = "selected-river-main";
+const SELECTED_RIVER_HIT_LAYER = "rivers-hit";
+const SELECTED_RIVER_HALO_LAYER = "rivers-halo";
+const SELECTED_RIVER_CASING_LAYER = "rivers-casing";
+const SELECTED_RIVER_MAIN_LAYER = "rivers-main";
 const SELECTED_RIVER_LABEL_LAYER = "selected-river-label";
 
 const STATEWIDE_HYDRO_SOURCE = "statewide-hydrology-source";
@@ -53,11 +55,48 @@ const FEDERAL_LANDS_LAYER = "public-lands-federal-layer";
 
 const ACCESS_SOURCE = "access-fishing-sites-source";
 const ACCESS_LAYER = "access-fishing-sites-layer";
+const HYDRO_FLOW_LAYER = "hydro-flow-magnitude-layer";
+const HYDRO_CHANGE_LAYER = "hydro-change-indicator-layer";
+const HYDRO_TEMP_LAYER = "hydro-temp-stress-layer";
 
 const BLM_TILES =
   "https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA_Cached_without_PriUnk/MapServer/tile/{z}/{y}/{x}";
 const FWP_ACCESS_GEOJSON =
   "https://fwp-gis.mt.gov/arcgis/rest/services/fwplnd/fwpLands/MapServer/1/query?where=1%3D1&outFields=NAME&returnGeometry=true&f=geojson";
+const RIVER_ID_PROP = "river_id";
+
+function riverIdExpr() {
+  return [
+    "to-string",
+    [
+      "coalesce",
+      ["get", RIVER_ID_PROP],
+      ["get", "river_uuid"],
+      ["get", "riverId"],
+      ["get", "id"],
+      "",
+    ],
+  ] as any;
+}
+
+function selectedRiverFilter(selectedRiverId: string | null | undefined) {
+  const sid = selectedRiverId ? String(selectedRiverId) : "";
+  if (!sid) return ["==", ["literal", 1], ["literal", 0]] as any;
+  return ["==", riverIdExpr(), sid] as any;
+}
+
+function extractRiverId(properties?: Record<string, unknown> | null): string | null {
+  if (!properties) return null;
+  const value =
+    properties[RIVER_ID_PROP] ??
+    properties.river_uuid ??
+    properties.riverId ??
+    properties.id ??
+    null;
+  if (value == null) return null;
+  const s = String(value).trim();
+  return s.length > 0 ? s : null;
+}
 
 function normalizeGeojson(g: GeoJSON.GeoJSON | null): GeoJSON.GeoJSON | null {
   if (!g) return null;
@@ -69,15 +108,23 @@ function normalizeGeojson(g: GeoJSON.GeoJSON | null): GeoJSON.GeoJSON | null {
   return g;
 }
 
-function withSelectedRiverName(
+function withSelectedRiverMetadata(
   g: GeoJSON.GeoJSON,
+  selectedRiverId?: string | null,
   selectedRiverName?: string | null
 ): GeoJSON.GeoJSON {
-  if (!selectedRiverName) return g;
+  if (!selectedRiverName && !selectedRiverId) return g;
   if (g.type === "Feature") {
+    const props = { ...(g.properties ?? {}) } as Record<string, unknown>;
+    const hasRiverId =
+      props.river_id != null || props.river_uuid != null || props.riverId != null || props.id != null;
     return {
       ...g,
-      properties: { ...(g.properties ?? {}), name: selectedRiverName, river_name: selectedRiverName },
+      properties: {
+        ...props,
+        ...(!hasRiverId && selectedRiverId ? { river_id: selectedRiverId } : {}),
+        ...(selectedRiverName ? { name: selectedRiverName, river_name: selectedRiverName } : {}),
+      },
     };
   }
   if (g.type === "FeatureCollection") {
@@ -85,15 +132,61 @@ function withSelectedRiverName(
       ...g,
       features: g.features.map((f) => ({
         ...f,
-        properties: { ...(f.properties ?? {}), name: selectedRiverName, river_name: selectedRiverName },
+        properties: (() => {
+          const props = { ...(f.properties ?? {}) } as Record<string, unknown>;
+          const hasRiverId =
+            props.river_id != null || props.river_uuid != null || props.riverId != null || props.id != null;
+          return {
+            ...props,
+            ...(!hasRiverId && selectedRiverId ? { river_id: selectedRiverId } : {}),
+            ...(selectedRiverName ? { name: selectedRiverName, river_name: selectedRiverName } : {}),
+          };
+        })(),
       })),
     };
   }
   return {
     type: "Feature",
-    properties: { name: selectedRiverName, river_name: selectedRiverName },
+    properties: {
+      ...(selectedRiverId ? { river_id: selectedRiverId } : {}),
+      ...(selectedRiverName ? { name: selectedRiverName, river_name: selectedRiverName } : {}),
+    },
     geometry: g as GeoJSON.Geometry,
   } as GeoJSON.Feature;
+}
+
+function toneRasterBasemap(map: maplibregl.Map) {
+  const style = map.getStyle();
+  const rasterLayers = (style.layers ?? []).filter((layer) => layer.type === "raster");
+  let tonedCount = 0;
+
+  for (const layer of rasterLayers) {
+    const id = layer.id ?? "";
+    const lid = id.toLowerCase();
+    const isImagery =
+      !lid.includes("label") &&
+      !lid.includes("reference") &&
+      !lid.includes("boundaries") &&
+      id !== FEDERAL_LANDS_LAYER;
+    if (!isImagery) continue;
+
+    try {
+      map.setPaintProperty(id, "raster-saturation", -0.15);
+      map.setPaintProperty(id, "raster-brightness-min", 0.05);
+      map.setPaintProperty(id, "raster-brightness-max", 0.95);
+      tonedCount += 1;
+    } catch {
+      /* ignore per-layer paint failures */
+    }
+  }
+
+  if (tonedCount === 0 && rasterLayers.length > 0) {
+    // Useful when style ids change across providers.
+    console.log(
+      "MAP RASTER LAYERS",
+      rasterLayers.map((layer) => ({ id: layer.id, type: layer.type }))
+    );
+  }
 }
 
 function geojsonBbox(geojson: GeoJSON.GeoJSON): [number, number, number, number] | null {
@@ -143,6 +236,9 @@ function riversToFeatureCollection(
         river_name: river.river_name,
         bite_tier: river.bite_tier ?? null,
         fishability_score: river.fishability_score_calc ?? null,
+        flow_ratio_calc: river.flow_ratio_calc ?? null,
+        change_48h_pct_calc: river.change_48h_pct_calc ?? null,
+        water_temp_f: river.water_temp_f ?? null,
       },
     });
   }
@@ -262,28 +358,35 @@ function syncRiverPointPresentation(
 
 function clearSelectedRiverLine(map: maplibregl.Map) {
   if (map.getLayer(SELECTED_RIVER_LABEL_LAYER)) map.removeLayer(SELECTED_RIVER_LABEL_LAYER);
+  if (map.getLayer(SELECTED_RIVER_HIT_LAYER)) map.removeLayer(SELECTED_RIVER_HIT_LAYER);
   if (map.getLayer(SELECTED_RIVER_MAIN_LAYER)) map.removeLayer(SELECTED_RIVER_MAIN_LAYER);
   if (map.getLayer(SELECTED_RIVER_CASING_LAYER)) map.removeLayer(SELECTED_RIVER_CASING_LAYER);
-  if (map.getLayer(SELECTED_RIVER_BASE_LAYER)) map.removeLayer(SELECTED_RIVER_BASE_LAYER);
+  if (map.getLayer(SELECTED_RIVER_HALO_LAYER)) map.removeLayer(SELECTED_RIVER_HALO_LAYER);
   if (map.getSource(SELECTED_RIVER_SOURCE)) map.removeSource(SELECTED_RIVER_SOURCE);
 }
 
 function syncSelectedRiverLine(
   map: maplibregl.Map,
   geojson: GeoJSON.GeoJSON | null,
+  selectedRiverId: string | null | undefined,
   selectedRiverName: string | null | undefined,
   showRiverLines: boolean,
   showSelectedHighlight: boolean,
   showLabels: boolean
 ) {
-  if (!geojson || (!showRiverLines && !showSelectedHighlight)) {
+  const highlightEnabled = showRiverLines && showSelectedHighlight;
+  if (!geojson || (!showRiverLines && !highlightEnabled)) {
     clearSelectedRiverLine(map);
     return;
   }
 
   const data = normalizeGeojson(geojson);
   if (!data) return;
-  const namedData = withSelectedRiverName(data, selectedRiverName);
+  const namedData = withSelectedRiverMetadata(data, selectedRiverId, selectedRiverName);
+  const rid = selectedRiverId ? String(selectedRiverId) : "";
+  const selectedFilter = selectedRiverFilter(rid);
+  const noSelectionExpr = ["==", ["literal", rid], ""] as any;
+  const selectedMatchExpr = ["==", riverIdExpr(), rid] as any;
 
   const src = map.getSource(SELECTED_RIVER_SOURCE) as
     | { setData?: (d: GeoJSON.GeoJSON) => void }
@@ -295,52 +398,143 @@ function syncSelectedRiverLine(
     src.setData?.(namedData);
   }
 
-  if (showRiverLines && !map.getLayer(SELECTED_RIVER_BASE_LAYER)) {
+  if (highlightEnabled && !map.getLayer(SELECTED_RIVER_HALO_LAYER)) {
     map.addLayer({
-      id: SELECTED_RIVER_BASE_LAYER,
+      id: SELECTED_RIVER_HALO_LAYER,
       type: "line",
       source: SELECTED_RIVER_SOURCE,
+      filter: selectedFilter,
       layout: { "line-join": "round", "line-cap": "round" },
       paint: {
-        "line-color": "#4F6F7A",
-        "line-width": ["interpolate", ["linear"], ["zoom"], 6, 2, 10, 2.8, 12, 3.4],
-        "line-opacity": 0.9,
+        "line-color": "rgba(255,255,255,0.25)",
+        "line-width": 7,
+        "line-blur": 0.5,
+        "line-opacity": 1,
       },
     });
-  } else if (!showRiverLines && map.getLayer(SELECTED_RIVER_BASE_LAYER)) {
-    map.removeLayer(SELECTED_RIVER_BASE_LAYER);
+  } else if (!highlightEnabled && map.getLayer(SELECTED_RIVER_HALO_LAYER)) {
+    map.removeLayer(SELECTED_RIVER_HALO_LAYER);
   }
 
-  if (showSelectedHighlight && !map.getLayer(SELECTED_RIVER_CASING_LAYER)) {
+  if (highlightEnabled && !map.getLayer(SELECTED_RIVER_CASING_LAYER)) {
     map.addLayer({
       id: SELECTED_RIVER_CASING_LAYER,
       type: "line",
       source: SELECTED_RIVER_SOURCE,
+      filter: selectedFilter,
       layout: { "line-join": "round", "line-cap": "round" },
       paint: {
-        "line-color": "#1E2E33",
-        "line-width": ["interpolate", ["linear"], ["zoom"], 6, 4.4, 10, 5.8, 12, 6.6],
-        "line-opacity": 0.95,
+        "line-color": "rgba(0,0,0,0.35)",
+        "line-width": 5,
+        "line-opacity": 1,
       },
     });
-  } else if (!showSelectedHighlight && map.getLayer(SELECTED_RIVER_CASING_LAYER)) {
+  } else if (!highlightEnabled && map.getLayer(SELECTED_RIVER_CASING_LAYER)) {
     map.removeLayer(SELECTED_RIVER_CASING_LAYER);
   }
 
-  if (showSelectedHighlight && !map.getLayer(SELECTED_RIVER_MAIN_LAYER)) {
+  if (showRiverLines && !map.getLayer(SELECTED_RIVER_MAIN_LAYER)) {
     map.addLayer({
       id: SELECTED_RIVER_MAIN_LAYER,
       type: "line",
       source: SELECTED_RIVER_SOURCE,
+      minzoom: 4,
+      maxzoom: 24,
       layout: { "line-join": "round", "line-cap": "round" },
       paint: {
-        "line-color": "#2F5D62",
-        "line-width": ["interpolate", ["linear"], ["zoom"], 6, 3.2, 10, 4.4, 12, 5.2],
-        "line-opacity": 0.98,
+        "line-color": [
+          "case",
+          selectedMatchExpr,
+          "#2c6e8f",
+          "#4a6a78",
+        ],
+        "line-width": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          5,
+          ["case", selectedMatchExpr, 3.1, 2.6],
+          7,
+          ["case", selectedMatchExpr, 3.9, 3.2],
+          9,
+          ["case", selectedMatchExpr, 5.0, 4.2],
+          11,
+          ["case", selectedMatchExpr, 6.3, 5.4],
+        ],
+        "line-opacity": [
+          "case",
+          noSelectionExpr,
+          0.75,
+          selectedMatchExpr,
+          0.95,
+          0.35,
+        ],
       },
     });
-  } else if (!showSelectedHighlight && map.getLayer(SELECTED_RIVER_MAIN_LAYER)) {
+  } else if (!showRiverLines && map.getLayer(SELECTED_RIVER_MAIN_LAYER)) {
     map.removeLayer(SELECTED_RIVER_MAIN_LAYER);
+  }
+
+  if (showRiverLines && !map.getLayer(SELECTED_RIVER_HIT_LAYER)) {
+    map.addLayer({
+      id: SELECTED_RIVER_HIT_LAYER,
+      type: "line",
+      source: SELECTED_RIVER_SOURCE,
+      minzoom: 4,
+      maxzoom: 24,
+      layout: { "line-join": "round", "line-cap": "round" },
+      paint: {
+        "line-color": "rgba(0,0,0,0)",
+        "line-width": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          5, 16,
+          7, 18,
+          9, 22,
+          11, 26,
+        ],
+        "line-opacity": 0,
+      },
+    });
+  } else if (!showRiverLines && map.getLayer(SELECTED_RIVER_HIT_LAYER)) {
+    map.removeLayer(SELECTED_RIVER_HIT_LAYER);
+  }
+
+  if (map.getLayer(SELECTED_RIVER_HALO_LAYER)) {
+    map.setFilter(SELECTED_RIVER_HALO_LAYER, selectedFilter);
+  }
+  if (map.getLayer(SELECTED_RIVER_CASING_LAYER)) {
+    map.setFilter(SELECTED_RIVER_CASING_LAYER, selectedFilter);
+  }
+  if (map.getLayer(SELECTED_RIVER_MAIN_LAYER)) {
+    map.setPaintProperty(SELECTED_RIVER_MAIN_LAYER, "line-color", [
+      "case",
+      selectedMatchExpr,
+      "#2c6e8f",
+      "#4a6a78",
+    ] as any);
+    map.setPaintProperty(SELECTED_RIVER_MAIN_LAYER, "line-width", [
+      "interpolate",
+      ["linear"],
+      ["zoom"],
+      5,
+      ["case", selectedMatchExpr, 3.1, 2.6],
+      7,
+      ["case", selectedMatchExpr, 3.9, 3.2],
+      9,
+      ["case", selectedMatchExpr, 5.0, 4.2],
+      11,
+      ["case", selectedMatchExpr, 6.3, 5.4],
+    ] as any);
+    map.setPaintProperty(SELECTED_RIVER_MAIN_LAYER, "line-opacity", [
+      "case",
+      noSelectionExpr,
+      0.75,
+      selectedMatchExpr,
+      0.95,
+      0.35,
+    ] as any);
   }
 
   if (showLabels && !map.getLayer(SELECTED_RIVER_LABEL_LAYER)) {
@@ -365,11 +559,11 @@ function syncSelectedRiverLine(
   }
 
   try {
-    if (map.getLayer(STATEWIDE_HYDRO_LAYER) && map.getLayer(SELECTED_RIVER_BASE_LAYER)) {
-      map.moveLayer(SELECTED_RIVER_BASE_LAYER);
+    if (map.getLayer(STATEWIDE_HYDRO_LAYER) && map.getLayer(SELECTED_RIVER_HALO_LAYER)) {
+      map.moveLayer(SELECTED_RIVER_HALO_LAYER);
     }
-    if (map.getLayer(SELECTED_RIVER_BASE_LAYER) && map.getLayer(UNCLUSTERED_LAYER)) {
-      map.moveLayer(SELECTED_RIVER_BASE_LAYER, UNCLUSTERED_LAYER);
+    if (map.getLayer(SELECTED_RIVER_HALO_LAYER) && map.getLayer(UNCLUSTERED_LAYER)) {
+      map.moveLayer(SELECTED_RIVER_HALO_LAYER, UNCLUSTERED_LAYER);
     }
     if (map.getLayer(SELECTED_RIVER_CASING_LAYER) && map.getLayer(UNCLUSTERED_LAYER)) {
       map.moveLayer(SELECTED_RIVER_CASING_LAYER, UNCLUSTERED_LAYER);
@@ -377,8 +571,20 @@ function syncSelectedRiverLine(
     if (map.getLayer(SELECTED_RIVER_MAIN_LAYER) && map.getLayer(UNCLUSTERED_LAYER)) {
       map.moveLayer(SELECTED_RIVER_MAIN_LAYER, UNCLUSTERED_LAYER);
     }
+    if (map.getLayer(SELECTED_RIVER_HIT_LAYER) && map.getLayer(UNCLUSTERED_LAYER)) {
+      map.moveLayer(SELECTED_RIVER_HIT_LAYER, UNCLUSTERED_LAYER);
+    }
     if (map.getLayer(SELECTED_RIVER_LABEL_LAYER) && map.getLayer(UNCLUSTERED_LAYER)) {
       map.moveLayer(SELECTED_RIVER_LABEL_LAYER, UNCLUSTERED_LAYER);
+    }
+    if (map.getLayer(UNCLUSTERED_LAYER)) {
+      map.moveLayer(UNCLUSTERED_LAYER);
+    }
+    if (map.getLayer(SELECTED_HALO_LAYER)) {
+      map.moveLayer(SELECTED_HALO_LAYER);
+    }
+    if (map.getLayer(SELECTED_CORE_LAYER)) {
+      map.moveLayer(SELECTED_CORE_LAYER);
     }
   } catch {
     /* ignore */
@@ -406,8 +612,8 @@ function syncStatewideHydrologyLayer(map: maplibregl.Map, enabled: boolean) {
       });
     }
     try {
-      if (map.getLayer(SELECTED_RIVER_BASE_LAYER)) {
-        map.moveLayer(STATEWIDE_HYDRO_LAYER, SELECTED_RIVER_BASE_LAYER);
+      if (map.getLayer(SELECTED_RIVER_HALO_LAYER)) {
+        map.moveLayer(STATEWIDE_HYDRO_LAYER, SELECTED_RIVER_HALO_LAYER);
       } else if (map.getLayer(UNCLUSTERED_LAYER)) {
         map.moveLayer(STATEWIDE_HYDRO_LAYER, UNCLUSTERED_LAYER);
       }
@@ -482,6 +688,111 @@ function syncFishingAccessLayer(map: maplibregl.Map, enabled: boolean) {
   }
 }
 
+function syncHydrologyOverlays(
+  map: maplibregl.Map,
+  showFlowMagnitude: boolean,
+  showChangeIndicator: boolean,
+  showTempStress: boolean
+) {
+  if (showFlowMagnitude) {
+    if (!map.getLayer(HYDRO_FLOW_LAYER)) {
+      map.addLayer({
+        id: HYDRO_FLOW_LAYER,
+        type: "circle",
+        source: RIVERS_SOURCE,
+        filter: ["==", ["geometry-type"], "Point"],
+        paint: {
+          "circle-color": [
+            "interpolate",
+            ["linear"],
+            ["coalesce", ["get", "flow_ratio_calc"], 1],
+            0.4, "#60a5fa",
+            0.8, "#34d399",
+            1.0, "#fbbf24",
+            1.5, "#f97316",
+            2.0, "#ef4444",
+          ],
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 2.5, 9, 4.2, 12, 5.2],
+          "circle-opacity": 0.8,
+        },
+      });
+    }
+  } else if (map.getLayer(HYDRO_FLOW_LAYER)) {
+    map.removeLayer(HYDRO_FLOW_LAYER);
+  }
+
+  if (showChangeIndicator) {
+    if (!map.getLayer(HYDRO_CHANGE_LAYER)) {
+      map.addLayer({
+        id: HYDRO_CHANGE_LAYER,
+        type: "symbol",
+        source: RIVERS_SOURCE,
+        filter: ["==", ["geometry-type"], "Point"],
+        layout: {
+          "text-field": [
+            "case",
+            [">", ["coalesce", ["get", "change_48h_pct_calc"], 0], 12], "▲",
+            ["<", ["coalesce", ["get", "change_48h_pct_calc"], 0], -12], "▼",
+            "•",
+          ],
+          "text-size": ["interpolate", ["linear"], ["zoom"], 6, 9, 10, 12],
+          "text-offset": [0, 1.3],
+        },
+        paint: {
+          "text-color": [
+            "case",
+            [">", ["coalesce", ["get", "change_48h_pct_calc"], 0], 12], "#22c55e",
+            ["<", ["coalesce", ["get", "change_48h_pct_calc"], 0], -12], "#ef4444",
+            "#94a3b8",
+          ],
+          "text-halo-color": "rgba(15,23,42,0.9)",
+          "text-halo-width": 1,
+        },
+      });
+    }
+  } else if (map.getLayer(HYDRO_CHANGE_LAYER)) {
+    map.removeLayer(HYDRO_CHANGE_LAYER);
+  }
+
+  if (showTempStress) {
+    if (!map.getLayer(HYDRO_TEMP_LAYER)) {
+      map.addLayer({
+        id: HYDRO_TEMP_LAYER,
+        type: "circle",
+        source: RIVERS_SOURCE,
+        filter: [
+          "all",
+          ["==", ["geometry-type"], "Point"],
+          [">=", ["coalesce", ["get", "water_temp_f"], 0], 67],
+        ],
+        paint: {
+          "circle-color": "#ef4444",
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 5, 10, 7.5],
+          "circle-stroke-color": "rgba(255,255,255,0.95)",
+          "circle-stroke-width": 1.2,
+          "circle-opacity": 0.8,
+        },
+      });
+    }
+  } else if (map.getLayer(HYDRO_TEMP_LAYER)) {
+    map.removeLayer(HYDRO_TEMP_LAYER);
+  }
+
+  try {
+    if (map.getLayer(HYDRO_FLOW_LAYER) && map.getLayer(UNCLUSTERED_LAYER)) {
+      map.moveLayer(HYDRO_FLOW_LAYER, UNCLUSTERED_LAYER);
+    }
+    if (map.getLayer(HYDRO_CHANGE_LAYER) && map.getLayer(UNCLUSTERED_LAYER)) {
+      map.moveLayer(HYDRO_CHANGE_LAYER, UNCLUSTERED_LAYER);
+    }
+    if (map.getLayer(HYDRO_TEMP_LAYER) && map.getLayer(UNCLUSTERED_LAYER)) {
+      map.moveLayer(HYDRO_TEMP_LAYER, UNCLUSTERED_LAYER);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 function syncLabels(map: maplibregl.Map, visible: boolean) {
   const style = map.getStyle();
   const visibility = visible ? "visible" : "none";
@@ -504,6 +815,7 @@ export function MapView({
   selectedRiverName,
   selectedRiverId,
   selectedRiverGeojson,
+  riverLinesGeojson,
   layerState,
   onSelectRiver,
   className,
@@ -518,6 +830,7 @@ export function MapView({
   const selectedRiverNameRef = useRef(selectedRiverName);
   const selectedRiverIdRef = useRef(selectedRiverId);
   const selectedRiverGeojsonRef = useRef(selectedRiverGeojson);
+  const riverLinesGeojsonRef = useRef<GeoJSON.FeatureCollection | null>(riverLinesGeojson ?? null);
   const layerStateRef = useRef<Record<LayerId, boolean>>(effectiveLayerState);
   const hoverIdRef = useRef<number | string | null>(null);
   const lastFlownRef = useRef<string | null>(null);
@@ -528,9 +841,11 @@ export function MapView({
   selectedRiverNameRef.current = selectedRiverName;
   selectedRiverIdRef.current = selectedRiverId;
   selectedRiverGeojsonRef.current = selectedRiverGeojson;
+  riverLinesGeojsonRef.current = riverLinesGeojson ?? null;
   layerStateRef.current = effectiveLayerState;
 
   const syncRuntimeLayers = useCallback((map: maplibregl.Map) => {
+    toneRasterBasemap(map);
     ensureRiversSource(map, riversRef.current);
     ensureRiverPointLayers(map);
     syncRiverPointPresentation(
@@ -541,7 +856,8 @@ export function MapView({
     );
     syncSelectedRiverLine(
       map,
-      selectedRiverGeojsonRef.current,
+      riverLinesGeojsonRef.current ?? selectedRiverGeojsonRef.current,
+      selectedRiverIdRef.current,
       selectedRiverNameRef.current,
       layerStateRef.current.mri_river_lines,
       layerStateRef.current.mri_selected_highlight,
@@ -550,6 +866,12 @@ export function MapView({
     syncStatewideHydrologyLayer(map, layerStateRef.current.statewide_hydrology);
     syncFederalLandsLayer(map, layerStateRef.current.public_federal);
     syncFishingAccessLayer(map, layerStateRef.current.access_fishing_sites);
+    syncHydrologyOverlays(
+      map,
+      layerStateRef.current.hydro_flow_magnitude,
+      layerStateRef.current.hydro_change_indicator,
+      layerStateRef.current.hydro_temp_stress
+    );
     syncLabels(map, layerStateRef.current.mri_labels);
   }, []);
 
@@ -572,17 +894,60 @@ export function MapView({
       setMapReady(true);
       onMapReady?.(map);
       syncRuntimeLayers(map);
+      const styleLayers = (map.getStyle().layers ?? []).map((layer) => ({
+        id: layer.id,
+        type: layer.type,
+      }));
+      console.log("MAP STYLE LAYERS", styleLayers);
+      console.log("RIVER/STATION LAYERS", {
+        riverHit: SELECTED_RIVER_HIT_LAYER,
+        riverMain: SELECTED_RIVER_MAIN_LAYER,
+        riverCasing: SELECTED_RIVER_CASING_LAYER,
+        riverHalo: SELECTED_RIVER_HALO_LAYER,
+        stationLayers: [UNCLUSTERED_LAYER, SELECTED_HALO_LAYER, SELECTED_CORE_LAYER],
+      });
       map.resize();
     });
 
     if (!(map as any).__mriHandlers) {
       (map as any).__mriHandlers = true;
       map.on("click", UNCLUSTERED_LAYER, (e: maplibregl.MapLayerMouseEvent) => {
+        if (e.originalEvent && "cancelBubble" in e.originalEvent) {
+          (e.originalEvent as MouseEvent).cancelBubble = true;
+        }
         const f = e.features?.[0];
         const rid = f?.properties?.river_id as string | undefined;
         if (!rid) return;
         const river = riversRef.current.find((r) => r.river_id === rid);
         if (river) onSelectRiverRef.current(river);
+      });
+
+      const handleRiverLineClick = (e: maplibregl.MapLayerMouseEvent) => {
+        if (!layerStateRef.current.mri_river_lines) return;
+        const stationFeatures = map.queryRenderedFeatures(e.point, {
+          layers: [UNCLUSTERED_LAYER, SELECTED_HALO_LAYER, SELECTED_CORE_LAYER],
+        });
+        if (stationFeatures.length > 0) return;
+        const f = e.features?.[0];
+        console.log("river click props", f?.properties);
+        const rid = extractRiverId((f?.properties as Record<string, unknown> | undefined) ?? null)
+          ?? selectedRiverIdRef.current
+          ?? undefined;
+        if (!rid) return;
+        const river = riversRef.current.find((r) => r.river_id === rid || r.slug === rid);
+        if (!river) return;
+        // Force refit even if the same river is clicked again.
+        lastFlownRef.current = null;
+        onSelectRiverRef.current(river);
+      };
+
+      map.on("click", SELECTED_RIVER_HIT_LAYER, handleRiverLineClick);
+
+      map.on("mouseenter", SELECTED_RIVER_HIT_LAYER, () => {
+        map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mouseleave", SELECTED_RIVER_HIT_LAYER, () => {
+        map.getCanvas().style.cursor = "";
       });
 
       map.on("mousemove", UNCLUSTERED_LAYER, (e: maplibregl.MapLayerMouseEvent) => {
@@ -679,6 +1044,7 @@ export function MapView({
     const map = mapRef.current;
     if (!map || !mapReady) return;
     if (typeof map.isStyleLoaded === "function" && !map.isStyleLoaded()) return;
+    console.log("SELECTED RIVER STYLE UPDATE", selectedRiverId);
 
     syncRiverPointPresentation(
       map,
@@ -688,7 +1054,8 @@ export function MapView({
     );
     syncSelectedRiverLine(
       map,
-      selectedRiverGeojson,
+      riverLinesGeojson ?? selectedRiverGeojson,
+      selectedRiverId,
       selectedRiverName,
       effectiveLayerState.mri_river_lines,
       effectiveLayerState.mri_selected_highlight,
@@ -734,6 +1101,7 @@ export function MapView({
   }, [
     selectedRiverId,
     selectedRiverGeojson,
+    riverLinesGeojson,
     selectedRiver,
     effectiveLayerState.mri_river_lines,
     effectiveLayerState.mri_selected_highlight,
@@ -750,12 +1118,21 @@ export function MapView({
     syncStatewideHydrologyLayer(map, effectiveLayerState.statewide_hydrology);
     syncFederalLandsLayer(map, effectiveLayerState.public_federal);
     syncFishingAccessLayer(map, effectiveLayerState.access_fishing_sites);
+    syncHydrologyOverlays(
+      map,
+      effectiveLayerState.hydro_flow_magnitude,
+      effectiveLayerState.hydro_change_indicator,
+      effectiveLayerState.hydro_temp_stress
+    );
     syncLabels(map, effectiveLayerState.mri_labels);
   }, [
     mapReady,
     effectiveLayerState.statewide_hydrology,
     effectiveLayerState.public_federal,
     effectiveLayerState.access_fishing_sites,
+    effectiveLayerState.hydro_flow_magnitude,
+    effectiveLayerState.hydro_change_indicator,
+    effectiveLayerState.hydro_temp_stress,
     effectiveLayerState.mri_labels,
   ]);
 
@@ -779,6 +1156,7 @@ export function MapView({
       id="map"
       ref={mapContainerRef}
       className={`absolute inset-0 h-full w-full min-h-0 [&_.maplibregl-marker]:cursor-pointer ${className ?? ""}`.trim()}
+      style={{ position: "absolute", inset: 0, height: "100%", width: "100%", minHeight: 320 }}
       aria-label="Montana river map"
     >
       {mapReady && mapRef.current && <MapControls map={mapRef.current} />}

@@ -40,6 +40,9 @@ type RiverLatestRow = {
   bite_tier?: string | null;
   latitude?: number | null;
   longitude?: number | null;
+  source_flow_observed_at?: string | null;
+  source_temp_observed_at?: string | null;
+  updated_at?: string | null;
 };
 
 export async function fetchRiverGeom(
@@ -85,7 +88,7 @@ export async function fetchLatestRiverScores(): Promise<RiverScoreRow[]> {
 
   const fromLatest = await supabase
     .from("v_river_latest")
-    .select("river_id,slug,river_name,gauge_label,usgs_site_no,date,fishability_score_calc,flow_cfs,change_48h_pct_calc,water_temp_f,wind_am_mph,wind_pm_mph,bite_tier,median_flow_cfs,flow_ratio_calc");
+    .select("river_id,slug,river_name,gauge_label,usgs_site_no,date,fishability_score_calc,flow_cfs,change_48h_pct_calc,water_temp_f,wind_am_mph,wind_pm_mph,bite_tier,median_flow_cfs,flow_ratio_calc,source_flow_observed_at,source_temp_observed_at,updated_at");
 
   if (!fromLatest.error && fromLatest.data && fromLatest.data.length > 0) {
     return (fromLatest.data as RiverLatestRow[]).map((r) => ({
@@ -103,6 +106,9 @@ export async function fetchLatestRiverScores(): Promise<RiverScoreRow[]> {
       bite_tier: r.bite_tier ?? null,
       median_flow_cfs: r.median_flow_cfs ?? null,
       flow_ratio_calc: r.flow_ratio_calc ?? null,
+      source_flow_observed_at: r.source_flow_observed_at ?? null,
+      source_temp_observed_at: r.source_temp_observed_at ?? null,
+      updated_at: r.updated_at ?? null,
     }));
   }
   return [];
@@ -115,7 +121,7 @@ export async function fetchRiversWithLatest(): Promise<FishabilityRow[]> {
 
   const latestRes = await supabase
     .from("v_river_latest")
-    .select("river_id,slug,river_name,gauge_label,usgs_site_no,latitude,longitude,date,flow_cfs,median_flow_cfs,flow_ratio_calc,change_48h_pct_calc,water_temp_f,wind_am_mph,wind_pm_mph,fishability_score_calc,bite_tier")
+    .select("river_id,slug,river_name,gauge_label,usgs_site_no,latitude,longitude,date,flow_cfs,median_flow_cfs,flow_ratio_calc,change_48h_pct_calc,water_temp_f,wind_am_mph,wind_pm_mph,fishability_score_calc,bite_tier,source_flow_observed_at,source_temp_observed_at,updated_at")
     .order("fishability_score_calc", { ascending: false, nullsFirst: false });
 
   if (!latestRes.error && latestRes.data && latestRes.data.length > 0) {
@@ -137,6 +143,9 @@ export async function fetchRiversWithLatest(): Promise<FishabilityRow[]> {
       bite_tier: normalizeBiteTier(r.bite_tier),
       lat: r.latitude ?? null,
       lng: r.longitude ?? null,
+      source_flow_observed_at: r.source_flow_observed_at ?? null,
+      source_temp_observed_at: r.source_temp_observed_at ?? null,
+      updated_at: r.updated_at ?? null,
     })) as FishabilityRow[];
 
     rows.sort((a, b) => (b.fishability_score_calc ?? 0) - (a.fishability_score_calc ?? 0));
@@ -215,6 +224,9 @@ export async function fetchRiverDetailByIdOrSlug(
       bite_tier: normalizeBiteTier(row.bite_tier),
       lat: row.latitude ?? null,
       lng: row.longitude ?? null,
+      source_flow_observed_at: row.source_flow_observed_at ?? null,
+      source_temp_observed_at: row.source_temp_observed_at ?? null,
+      updated_at: row.updated_at ?? null,
     };
   }
 

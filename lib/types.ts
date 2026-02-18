@@ -19,6 +19,9 @@ export interface FishabilityRow {
   wind_pm_mph: number | null;
   fishability_score_calc: number | null;
   bite_tier: BiteTier | null;
+  source_flow_observed_at?: string | null;
+  source_temp_observed_at?: string | null;
+  updated_at?: string | null;
 }
 
 export interface RiverGeom {

@@ -11,7 +11,10 @@ export type LayerId =
   | "mri_selected_highlight"
   | "mri_river_markers"
   | "mri_score_coloring"
-  | "mri_labels";
+  | "mri_labels"
+  | "hydro_flow_magnitude"
+  | "hydro_change_indicator"
+  | "hydro_temp_stress";
 
 export type SourceType = "raster" | "geojson" | "none";
 
@@ -47,6 +50,40 @@ export interface LayerDefinition {
 const maptilerKey = process.env.NEXT_PUBLIC_MAPTILER_KEY;
 const hasMaptiler = Boolean(maptilerKey);
 
+function esriRasterStyle(withLabels: boolean): string {
+  const satellite = {
+    id: "esri_satellite",
+    type: "raster",
+    tiles: [
+      "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    ],
+    tileSize: 256,
+    attribution: "Esri, Maxar, Earthstar Geographics",
+  };
+  const labels = {
+    id: "esri_labels",
+    type: "raster",
+    tiles: [
+      "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+    ],
+    tileSize: 256,
+    attribution: "Esri",
+  };
+  const layers = withLabels
+    ? [
+        { id: "esri_satellite", type: "raster", source: "esri_satellite" },
+        { id: "esri_labels", type: "raster", source: "esri_labels", paint: { "raster-opacity": 0.92 } },
+      ]
+    : [{ id: "esri_satellite", type: "raster", source: "esri_satellite" }];
+
+  return JSON.stringify({
+    version: 8,
+    sources: withLabels ? { esri_satellite: satellite, esri_labels: labels } : { esri_satellite: satellite },
+    layers,
+    glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+  });
+}
+
 export const BASEMAP_OPTIONS: BasemapOption[] = [
   {
     id: "dark",
@@ -66,18 +103,16 @@ export const BASEMAP_OPTIONS: BasemapOption[] = [
     label: "Satellite",
     styleUrl: hasMaptiler
       ? `https://api.maptiler.com/maps/satellite/style.json?key=${maptilerKey}`
-      : undefined,
-    enabled: hasMaptiler,
-    comingSoon: !hasMaptiler,
+      : `data:application/json,${encodeURIComponent(esriRasterStyle(false))}`,
+    enabled: true,
   },
   {
     id: "hybrid",
     label: "Hybrid",
     styleUrl: hasMaptiler
       ? `https://api.maptiler.com/maps/hybrid/style.json?key=${maptilerKey}`
-      : undefined,
-    enabled: hasMaptiler,
-    comingSoon: !hasMaptiler,
+      : `data:application/json,${encodeURIComponent(esriRasterStyle(true))}`,
+    enabled: true,
   },
 ];
 
@@ -135,11 +170,11 @@ export const LAYER_REGISTRY: LayerDefinition[] = [
   },
   {
     id: "mri_river_lines",
-    label: "River lines",
+    label: "Rivers",
     group: "MRI Overlays",
     defaultOn: true,
     source: { id: "selected-river-source", type: "geojson" },
-    layers: ["selected-river-base"],
+    layers: ["rivers-main", "rivers-hit"],
   },
   {
     id: "mri_selected_highlight",
@@ -147,7 +182,7 @@ export const LAYER_REGISTRY: LayerDefinition[] = [
     group: "MRI Overlays",
     defaultOn: true,
     source: { id: "selected-river-source", type: "geojson" },
-    layers: ["selected-river-casing", "selected-river-main"],
+    layers: ["rivers-halo", "rivers-casing"],
   },
   {
     id: "mri_river_markers",
@@ -173,6 +208,30 @@ export const LAYER_REGISTRY: LayerDefinition[] = [
     defaultOn: true,
     source: { id: "basemap-style", type: "none" },
     layers: ["selected-river-label"],
+  },
+  {
+    id: "hydro_flow_magnitude",
+    label: "Flow magnitude",
+    group: "MRI Overlays",
+    defaultOn: false,
+    source: { id: "rivers-source", type: "geojson" },
+    layers: ["hydro-flow-magnitude-layer"],
+  },
+  {
+    id: "hydro_change_indicator",
+    label: "48h change indicator",
+    group: "MRI Overlays",
+    defaultOn: false,
+    source: { id: "rivers-source", type: "geojson" },
+    layers: ["hydro-change-indicator-layer"],
+  },
+  {
+    id: "hydro_temp_stress",
+    label: "Temp stress flag",
+    group: "MRI Overlays",
+    defaultOn: false,
+    source: { id: "rivers-source", type: "geojson" },
+    layers: ["hydro-temp-stress-layer"],
   },
 ];
 

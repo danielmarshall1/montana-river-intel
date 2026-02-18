@@ -124,6 +124,22 @@ supabase functions invoke usgs-ingest --method POST
 -- supabase/sql/verify_usgs_backend.sql
 ```
 
+### Hourly Auto-Refresh (USGS + Weather)
+
+Run this once in Supabase SQL editor:
+
+```sql
+-- file:
+-- supabase/sql/setup_hourly_ingest_schedule.sql
+```
+
+This schedules:
+
+- `usgs-ingest` at minute `05` each hour
+- `weather-ingest` at minute `12` each hour
+
+The UI shows pull freshness in the top bar (`Last pull ... MT`) and in selected river details (`Updated ... MT`).
+
 ## Map Layers Configuration
 
 Layers are defined in one place:

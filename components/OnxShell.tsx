@@ -52,6 +52,20 @@ function formatNum(value: number | null | undefined, digits = 0): string {
   return Number(value).toFixed(digits);
 }
 
+function formatPullTime(value: string | null | undefined): string {
+  if (!value) return "—";
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return "—";
+  return dt.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: "America/Denver",
+  });
+}
+
 export default function OnxShell({
   rivers,
   dateLabel = new Date().toLocaleDateString("en-US", {
@@ -73,6 +87,7 @@ export default function OnxShell({
   const dragRef = useRef<{ startY: number; startSheetY: number } | null>(null);
 
   const [selectedGeojson, setSelectedGeojson] = useState<GeoJSON.GeoJSON | null>(null);
+  const [riverLinesGeojson, setRiverLinesGeojson] = useState<GeoJSON.FeatureCollection | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
 
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -133,6 +148,18 @@ export default function OnxShell({
     return "Low";
   }, [seasonalIntel.season]);
 
+  const latestPullAt = useMemo(() => {
+    let latestMs = 0;
+    for (const r of rivers) {
+      const candidate =
+        r.source_flow_observed_at ?? r.source_temp_observed_at ?? r.updated_at ?? null;
+      if (!candidate) continue;
+      const ms = new Date(candidate).getTime();
+      if (!Number.isNaN(ms) && ms > latestMs) latestMs = ms;
+    }
+    return latestMs > 0 ? new Date(latestMs).toISOString() : null;
+  }, [rivers]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -174,6 +201,84 @@ export default function OnxShell({
       cancelled = true;
     };
   }, [selectedId, filtered, rivers]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadRiverLines() {
+      const tasks = rivers.map(async (river) => {
+        const key = river.slug ?? river.river_id;
+        const gj = await fetchRiverGeojsonBrowser(key);
+        if (!gj) return null;
+        return { river, gj };
+      });
+
+      const results = await Promise.all(tasks);
+      if (cancelled) return;
+
+      const features: GeoJSON.Feature[] = [];
+      for (const item of results) {
+        if (!item?.gj) continue;
+        const rid = item.river.river_id;
+        const rname = item.river.river_name;
+
+        if (item.gj.type === "FeatureCollection") {
+          for (const f of item.gj.features ?? []) {
+            if (!f?.geometry) continue;
+            features.push({
+              type: "Feature",
+              geometry: f.geometry,
+              properties: {
+                ...(f.properties ?? {}),
+                river_id: rid,
+                river_name: rname,
+                name: rname,
+              },
+            });
+          }
+          continue;
+        }
+
+        if (item.gj.type === "Feature") {
+          if (item.gj.geometry) {
+            features.push({
+              type: "Feature",
+              geometry: item.gj.geometry,
+              properties: {
+                ...(item.gj.properties ?? {}),
+                river_id: rid,
+                river_name: rname,
+                name: rname,
+              },
+            });
+          }
+          continue;
+        }
+
+        if (item.gj.type === "LineString" || item.gj.type === "MultiLineString") {
+          features.push({
+            type: "Feature",
+            geometry: item.gj,
+            properties: {
+              river_id: rid,
+              river_name: rname,
+              name: rname,
+            },
+          });
+        }
+      }
+
+      setRiverLinesGeojson({ type: "FeatureCollection", features });
+    }
+
+    loadRiverLines().catch(() => {
+      if (!cancelled) setRiverLinesGeojson({ type: "FeatureCollection", features: [] });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [rivers]);
 
   useEffect(() => {
     if (selected) {
@@ -356,7 +461,10 @@ export default function OnxShell({
   );
 
   return (
-    <div className="relative h-[100dvh] w-full overflow-hidden bg-black">
+    <div
+      className="relative h-[100dvh] w-full overflow-hidden bg-black"
+      style={{ position: "relative", height: "100dvh", width: "100%", overflow: "hidden", background: "#000" }}
+    >
       <div className="absolute inset-0">
         <MapView
           rivers={filtered}
@@ -364,6 +472,7 @@ export default function OnxShell({
           selectedRiverName={selected?.river_name ?? null}
           selectedRiverId={selectedId}
           selectedRiverGeojson={selectedGeojson}
+          riverLinesGeojson={riverLinesGeojson}
           layerState={layerState}
           onSelectRiver={(r) => setSelectedId(r.river_id)}
           className="absolute inset-0"
@@ -414,6 +523,9 @@ export default function OnxShell({
         <div className="onx-glass flex items-center gap-2 rounded-2xl px-3 py-2">
           <div className="hidden text-xs font-semibold text-white/80 sm:block">
             {dateLabel} • {filtered.length} rivers
+          </div>
+          <div className="hidden text-[11px] text-white/70 sm:block">
+            Last pull {formatPullTime(latestPullAt)} MT
           </div>
 
           <div className="flex-1">
@@ -635,6 +747,20 @@ export default function OnxShell({
                   {selected.river_name}
                 </div>
                 <div className="text-xs text-slate-600">{selected.gauge_label ?? ""}</div>
+                <div className="mt-1 text-[11px] text-slate-500">
+                  Updated {formatPullTime(selected.source_flow_observed_at ?? selected.source_temp_observed_at ?? selected.updated_at)} MT
+                </div>
+                <div className="mt-2 grid grid-cols-1 gap-0.5 text-[11px] text-slate-500">
+                  <div>
+                    Flow source: {formatPullTime(selected.source_flow_observed_at)} MT
+                  </div>
+                  <div>
+                    Temp source: {formatPullTime(selected.source_temp_observed_at)} MT
+                  </div>
+                  <div>
+                    Weather/score: {formatPullTime(selected.updated_at)} MT
+                  </div>
+                </div>
 
                 <div className="mt-2">
                   <TierPill

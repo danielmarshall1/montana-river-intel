@@ -1,2 +1,5 @@
 [functions.usgs-ingest]
 verify_jwt = false
+
+[functions.weather-ingest]
+verify_jwt = false
