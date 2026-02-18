@@ -12,7 +12,7 @@ import { MapControls } from "./MapControls";
 const MONTANA_CENTER: [number, number] = [-110.9, 46.9];
 const DEFAULT_ZOOM = 5.2;
 const FLY_ZOOM = 9.5;
-const FLY_DURATION = 667;
+const FLY_DURATION = 300;
 const FLY_CURVE = 1.5;
 
 const BITE_TIER_COLORS: Record<BiteTier, string> = {
@@ -31,6 +31,8 @@ interface MapViewProps {
   riverLinesGeojson?: GeoJSON.FeatureCollection | null;
   basemap?: BasemapId;
   layerState?: Record<LayerId, boolean>;
+  rightPanelOpen?: boolean;
+  drawerState?: "collapsed" | "mid" | "expanded";
   onSelectRiver: (river: FishabilityRow) => void;
   className?: string;
   initialStyleUrl?: string;
@@ -48,7 +50,7 @@ const SELECTED_RIVER_HIT_LAYER = "rivers-hit";
 const SELECTED_RIVER_HALO_LAYER = "rivers-halo";
 const SELECTED_RIVER_CASING_LAYER = "rivers-casing";
 const SELECTED_RIVER_MAIN_LAYER = "rivers-main";
-const RIVER_NAMES_LAYER = "rivers-names";
+const RIVER_NAMES_LAYER = "river-labels";
 
 const STATEWIDE_HYDRO_SOURCE = "statewide-hydrology-source";
 const STATEWIDE_HYDRO_LAYER = "statewide-hydrology-line";
@@ -294,6 +296,72 @@ function geojsonBbox(geojson: GeoJSON.GeoJSON): [number, number, number, number]
   const lons = coords.map((c) => c[0]);
   const lats = coords.map((c) => c[1]);
   return [Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)];
+}
+
+export function computeBboxFromGeoJSON(
+  features: Array<GeoJSON.Feature<GeoJSON.Geometry, Record<string, unknown>>>
+): [number, number, number, number] | null {
+  let minLng = Infinity;
+  let minLat = Infinity;
+  let maxLng = -Infinity;
+  let maxLat = -Infinity;
+  let hasAny = false;
+
+  const pushCoord = (coord: number[]) => {
+    const lng = coord[0];
+    const lat = coord[1];
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) return;
+    minLng = Math.min(minLng, lng);
+    minLat = Math.min(minLat, lat);
+    maxLng = Math.max(maxLng, lng);
+    maxLat = Math.max(maxLat, lat);
+    hasAny = true;
+  };
+
+  for (const feature of features) {
+    const geom = feature.geometry;
+    if (!geom) continue;
+    if (geom.type === "LineString") {
+      for (const c of geom.coordinates) pushCoord(c as number[]);
+      continue;
+    }
+    if (geom.type === "MultiLineString") {
+      for (const seg of geom.coordinates) {
+        for (const c of seg) pushCoord(c as number[]);
+      }
+    }
+  }
+
+  if (!hasAny) return null;
+  return [minLng, minLat, maxLng, maxLat];
+}
+
+function selectedRiverBoundsFromGeojson(
+  geojson: GeoJSON.GeoJSON | null | undefined,
+  selectedId: string | null | undefined
+): [number, number, number, number] | null {
+  if (!geojson || !selectedId) return null;
+  const sid = String(selectedId);
+
+  const collectFeatures = (): Array<GeoJSON.Feature<GeoJSON.Geometry, Record<string, unknown>>> => {
+    if (geojson.type === "FeatureCollection") {
+      return geojson.features
+        .filter((f): f is GeoJSON.Feature<GeoJSON.Geometry, Record<string, unknown>> => Boolean(f?.geometry))
+        .filter((f) => extractRiverId((f.properties as Record<string, unknown> | undefined) ?? null) === sid);
+    }
+    if (geojson.type === "Feature") {
+      if (!geojson.geometry) return [];
+      const rid = extractRiverId((geojson.properties as Record<string, unknown> | undefined) ?? null);
+      return rid === sid ? [geojson as GeoJSON.Feature<GeoJSON.Geometry, Record<string, unknown>>] : [];
+    }
+    if (geojson.type === "LineString" || geojson.type === "MultiLineString") {
+      return [{ type: "Feature", geometry: geojson, properties: { river_id: sid } }];
+    }
+    return [];
+  };
+
+  const selectedFeatures = collectFeatures();
+  return computeBboxFromGeoJSON(selectedFeatures);
 }
 
 function riversToFeatureCollection(
@@ -681,15 +749,22 @@ function syncSelectedRiverLine(
       minzoom: 7,
       layout: {
         "symbol-placement": "line",
-        "symbol-spacing": 900,
+        "symbol-spacing": 500,
         "text-field": ["coalesce", ["get", "river_name"], ["get", "name"], ""],
-        "text-size": ["interpolate", ["linear"], ["zoom"], 7, 10, 10, 12, 13, 14],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 7, 11, 10, 13, 12, 15],
+        "text-font": ["Open Sans Semibold", "Arial Unicode MS Bold"],
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "text-padding": 2,
+        "text-max-angle": 30,
+        "text-letter-spacing": 0.02,
       },
       paint: {
-        "text-color": "#6b7a83",
-        "text-opacity": ["interpolate", ["linear"], ["zoom"], 7, 0, 8.2, 0.62, 11, 0.82],
+        "text-color": "rgba(203,213,225,0.88)",
+        "text-opacity": ["interpolate", ["linear"], ["zoom"], 7, 0, 8, 0.6, 10, 0.82],
         "text-halo-color": "rgba(255,255,255,0.7)",
         "text-halo-width": 1,
+        "text-halo-blur": 0.5,
       },
     });
   } else if (showLabels && map.getLayer(RIVER_NAMES_LAYER)) {
@@ -963,6 +1038,8 @@ export function MapView({
   riverLinesGeojson,
   basemap = "hybrid",
   layerState,
+  rightPanelOpen = false,
+  drawerState = "mid",
   onSelectRiver,
   className,
   onMapReady,
@@ -980,6 +1057,7 @@ export function MapView({
   const layerStateRef = useRef<Record<LayerId, boolean>>(effectiveLayerState);
   const hoverIdRef = useRef<number | string | null>(null);
   const lastFlownRef = useRef<string | null>(null);
+  const lastFitSignatureRef = useRef<string | null>(null);
   const [mapReady, setMapReady] = useState(false);
 
   riversRef.current = rivers;
@@ -1211,36 +1289,50 @@ export function MapView({
 
     if (!selectedRiverId) {
       lastFlownRef.current = null;
+      lastFitSignatureRef.current = null;
       return;
     }
 
-    if (lastFlownRef.current === selectedRiverId) return;
+    const fitSignature = `${selectedRiverId}|${rightPanelOpen ? 1 : 0}|${drawerState}`;
+    if (lastFitSignatureRef.current === fitSignature) return;
+    lastFitSignatureRef.current = fitSignature;
     lastFlownRef.current = selectedRiverId;
+
+    const paddingBottom =
+      drawerState === "expanded" ? 360 : drawerState === "mid" ? 220 : 120;
+    const padding: maplibregl.PaddingOptions = {
+      top: 80,
+      left: 40,
+      right: rightPanelOpen ? 420 : 40,
+      bottom: paddingBottom,
+    };
 
     const focus: [number, number] | undefined =
       selectedRiver?.lat != null && selectedRiver?.lng != null
         ? [selectedRiver.lng, selectedRiver.lat]
         : RIVER_FOCUS_POINTS[selectedRiverId];
 
-    if (selectedRiverGeojson) {
-      const bbox = geojsonBbox(selectedRiverGeojson);
-      if (bbox && map.fitBounds) {
-        map.fitBounds(
-          [
-            [bbox[0], bbox[1]],
-            [bbox[2], bbox[3]],
-          ],
-          { padding: 60, duration: 700, essential: true }
-        );
-        return;
-      }
+    const fullRiverBbox =
+      selectedRiverBoundsFromGeojson(riverLinesGeojson, selectedRiverId) ??
+      selectedRiverBoundsFromGeojson(selectedRiverGeojson, selectedRiverId) ??
+      (selectedRiverGeojson ? geojsonBbox(selectedRiverGeojson) : null);
+
+    if (fullRiverBbox && map.fitBounds) {
+      map.fitBounds(
+        [
+          [fullRiverBbox[0], fullRiverBbox[1]],
+          [fullRiverBbox[2], fullRiverBbox[3]],
+        ],
+        { padding, duration: 450, maxZoom: 11, essential: true }
+      );
+      return;
     }
 
     if (focus) {
       map.flyTo({
         center: focus,
         zoom: FLY_ZOOM,
-        duration: FLY_DURATION,
+        duration: 450,
         curve: FLY_CURVE,
         essential: true,
       });
@@ -1254,6 +1346,8 @@ export function MapView({
     effectiveLayerState.mri_selected_highlight,
     effectiveLayerState.mri_labels,
     effectiveLayerState.mri_score_coloring,
+    rightPanelOpen,
+    drawerState,
     mapReady,
   ]);
 

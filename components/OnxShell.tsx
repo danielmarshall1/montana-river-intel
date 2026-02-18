@@ -81,11 +81,19 @@ export default function OnxShell({
   rivers: River[];
   dateLabel?: string;
 }) {
+  type TopPanel = "none" | "layers";
+  type DrawerSnap = "collapsed" | "mid" | "expanded";
+  const DRAWER_SNAP_Y: Record<DrawerSnap, number> = {
+    collapsed: 0.84,
+    mid: 0.42,
+    expanded: 0,
+  };
+
   const [search, setSearch] = useState("");
   const [tier, setTier] = useState<"All" | "Good" | "Fair" | "Tough">("All");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [sheetOpen, setSheetOpen] = useState(true);
-  const [sheetY, setSheetY] = useState(0);
+  const [drawerSnap, setDrawerSnap] = useState<DrawerSnap>("mid");
+  const [sheetY, setSheetY] = useState<number>(DRAWER_SNAP_Y.mid);
   const [isDragging, setIsDragging] = useState(false);
   const dragRef = useRef<{ startY: number; startSheetY: number } | null>(null);
 
@@ -94,7 +102,7 @@ export default function OnxShell({
   const mapRef = useRef<maplibregl.Map | null>(null);
 
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [layersOpen, setLayersOpen] = useState(false);
+  const [openTopPanel, setOpenTopPanel] = useState<TopPanel>("none");
   const [transparencyOpen, setTransparencyOpen] = useState(false);
   const [advancedLayersOpen, setAdvancedLayersOpen] = useState(false);
 
@@ -343,6 +351,7 @@ export default function OnxShell({
 
     dragRef.current = { startY: y, startSheetY: sheetY };
     setIsDragging(true);
+    document.body.style.userSelect = "none";
 
     const onMove = (e2: PointerEvent | TouchEvent) => {
       const y2 =
@@ -358,10 +367,18 @@ export default function OnxShell({
       if (!dragRef.current) return;
       dragRef.current = null;
       setIsDragging(false);
+      document.body.style.userSelect = "";
       setSheetY((current) => {
-        const snap = current > 0.45 ? 1 : 0;
-        setSheetOpen(snap === 0);
-        return snap;
+        const snaps: DrawerSnap[] = ["expanded", "mid", "collapsed"];
+        const nearest = snaps.reduce(
+          (best, next) =>
+            Math.abs(current - DRAWER_SNAP_Y[next]) < Math.abs(current - DRAWER_SNAP_Y[best])
+              ? next
+              : best,
+          "mid" as DrawerSnap
+        );
+        setDrawerSnap(nearest);
+        return DRAWER_SNAP_Y[nearest];
       });
 
       document.removeEventListener("pointermove", onMove);
@@ -431,6 +448,12 @@ export default function OnxShell({
     setBasemap(DEFAULT_BASEMAP);
   }
 
+  function toggleTopPanel(panel: TopPanel) {
+    setOpenTopPanel((prev) => (prev === panel ? "none" : panel));
+  }
+
+  const layersOpen = openTopPanel === "layers";
+
   const groupedLayers = useMemo(
     () =>
       LAYER_GROUP_ORDER.map((group) => ({
@@ -445,7 +468,7 @@ export default function OnxShell({
       className="relative h-[100dvh] w-full overflow-hidden bg-black"
       style={{ position: "relative", height: "100dvh", width: "100%", overflow: "hidden", background: "#000" }}
     >
-      <div className="absolute inset-0">
+      <div className="absolute inset-0 z-0">
         <MapView
           rivers={filtered}
           selectedRiver={selected}
@@ -455,6 +478,8 @@ export default function OnxShell({
           riverLinesGeojson={riverLinesGeojson}
           basemap={basemap}
           layerState={layerState}
+          rightPanelOpen={detailsOpen}
+          drawerState={drawerSnap}
           onSelectRiver={(r) => setSelectedId(r.river_id)}
           className="absolute inset-0"
           onMapReady={(m) => {
@@ -463,7 +488,7 @@ export default function OnxShell({
         />
       </div>
 
-      <div className="absolute left-3 top-3 z-30 hidden sm:block">
+      <div className="absolute left-3 top-3 z-20 hidden sm:block">
         <div className="onx-glass w-[84px] overflow-hidden rounded-2xl">
           <div className="border-b border-white/10 px-3 py-3">
             <div className="text-sm font-semibold leading-tight text-white">MRI</div>
@@ -480,26 +505,11 @@ export default function OnxShell({
             <button className="onx-iconbtn" title="Reports">
               📄
             </button>
-            <button
-              className={`onx-iconbtn ${layersOpen ? "ring-2 ring-cyan-300/60" : ""}`}
-              title="Layers"
-              onClick={() => setLayersOpen((v) => !v)}
-            >
-              <Layers size={18} strokeWidth={2.5} />
-            </button>
           </div>
         </div>
       </div>
 
-      <button
-        className="onx-iconbtn absolute bottom-24 right-3 z-30 sm:hidden"
-        title="Layers"
-        onClick={() => setLayersOpen((v) => !v)}
-      >
-        <Layers size={18} strokeWidth={2.5} />
-      </button>
-
-      <div className="absolute left-3 right-3 top-3 z-30 sm:left-[108px] sm:right-[240px]">
+      <div className="absolute left-3 right-3 top-3 z-20 sm:left-[108px] sm:right-[240px]">
         <div className="onx-glass flex items-center gap-2 rounded-2xl px-3 py-2">
           <div className="hidden text-xs font-semibold text-white/80 sm:block">
             {dateLabel} • {filtered.length} rivers
@@ -547,42 +557,56 @@ export default function OnxShell({
         </div>
       </div>
 
-      <div className="absolute right-3 top-3 z-30 hidden flex-col gap-2 sm:flex">
-        <button className="onx-iconbtn" title="Zoom in" onClick={zoomIn}>
-          <Plus size={18} strokeWidth={2.5} />
-        </button>
-        <button className="onx-iconbtn" title="Zoom out" onClick={zoomOut}>
-          <Minus size={18} strokeWidth={2.5} />
-        </button>
-        <button className="onx-iconbtn" title="Fit to rivers" onClick={fitToRivers}>
-          <Maximize2 size={18} strokeWidth={2.5} />
-        </button>
-        <button className="onx-iconbtn" title="Recenter Montana" onClick={recenter}>
-          <Crosshair size={18} strokeWidth={2.5} />
-        </button>
+      <div className="absolute right-3 top-3 z-30 flex flex-col items-end gap-2">
+        <div className="hidden flex-col gap-2 sm:flex">
+          <button
+            className={`onx-iconbtn ${layersOpen ? "ring-2 ring-cyan-300/60" : ""}`}
+            title="Layers"
+            onClick={() => toggleTopPanel("layers")}
+          >
+            <Layers size={18} strokeWidth={2.5} />
+          </button>
+          <button className="onx-iconbtn" title="Zoom in" onClick={zoomIn}>
+            <Plus size={18} strokeWidth={2.5} />
+          </button>
+          <button className="onx-iconbtn" title="Zoom out" onClick={zoomOut}>
+            <Minus size={18} strokeWidth={2.5} />
+          </button>
+          <button className="onx-iconbtn" title="Fit to rivers" onClick={fitToRivers}>
+            <Maximize2 size={18} strokeWidth={2.5} />
+          </button>
+          <button className="onx-iconbtn" title="Recenter Montana" onClick={recenter}>
+            <Crosshair size={18} strokeWidth={2.5} />
+          </button>
+          <button
+            className="onx-iconbtn"
+            title="Toggle river list"
+            onClick={() => {
+              const next = drawerSnap === "collapsed" ? "mid" : "collapsed";
+              setDrawerSnap(next);
+              setSheetY(DRAWER_SNAP_Y[next]);
+            }}
+          >
+            <List size={18} strokeWidth={2.5} />
+          </button>
+        </div>
         <button
-          className="onx-iconbtn"
-          title="Toggle river list"
-          onClick={() => {
-            const next = !sheetOpen;
-            setSheetOpen(next);
-            setSheetY(next ? 0 : 1);
-          }}
+          className={`onx-iconbtn sm:hidden ${layersOpen ? "ring-2 ring-cyan-300/60" : ""}`}
+          title="Layers"
+          onClick={() => toggleTopPanel("layers")}
         >
-          <List size={18} strokeWidth={2.5} />
+          <Layers size={18} strokeWidth={2.5} />
         </button>
-      </div>
-
-      <div
-        className={[
-          "absolute left-3 top-16 z-40 w-[calc(100%-1rem)] sm:left-[108px] sm:top-[96px] sm:w-[360px]",
-          "transition-all duration-200",
-          layersOpen
-            ? "translate-y-0 opacity-100"
-            : "pointer-events-none -translate-y-1 opacity-0",
-        ].join(" ")}
-      >
+        <div
+          className={[
+            "w-[calc(100vw-1.5rem)] max-w-[360px] transition-all duration-200",
+            layersOpen
+              ? "translate-y-0 opacity-100"
+              : "pointer-events-none -translate-y-1 opacity-0",
+          ].join(" ")}
+        >
           <div className="onx-card rounded-2xl border border-slate-200/70 p-4 shadow-xl">
+          <div className="max-h-[70vh] overflow-auto pr-1">
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm font-semibold text-slate-900">Layers</div>
@@ -597,7 +621,7 @@ export default function OnxShell({
               </button>
               <button
                 className="text-[11px] font-medium text-slate-500 hover:text-slate-700"
-                onClick={() => setLayersOpen(false)}
+                onClick={() => setOpenTopPanel("none")}
               >
                 Close
               </button>
@@ -703,12 +727,14 @@ export default function OnxShell({
               </div>
             </div>
           )) : null}
+          </div>
         </div>
       </div>
+      </div>
 
-      <div className="absolute right-3 top-[120px] z-30 hidden w-[280px] sm:block">
+      <div className="absolute right-3 top-[120px] z-20 hidden w-[280px] sm:block">
         {detailsOpen ? (
-          <div className="onx-card rounded-2xl p-8 shadow-xl">
+          <div className="onx-card rounded-3xl p-8 shadow-[0_12px_28px_rgba(15,23,42,0.20)] transition-opacity duration-150">
             <div className="flex items-center justify-between">
               <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                 River Detail
@@ -742,21 +768,8 @@ export default function OnxShell({
                   </div>
                 </div>
 
-                <div className="mt-2">
-                  <TierPill
-                    tier={
-                      selected.bite_tier === "HOT" || selected.bite_tier === "GOOD"
-                        ? "Good"
-                        : selected.bite_tier === "FAIR"
-                        ? "Fair"
-                        : selected.bite_tier === "TOUGH"
-                        ? "Tough"
-                        : undefined
-                    }
-                  />
-                </div>
                 <div
-                  className="mt-2 text-[11px] leading-4 text-slate-500"
+                  className="mt-3 text-[11px] leading-4 text-slate-500"
                   style={{
                     display: "-webkit-box",
                     WebkitLineClamp: 2,
@@ -770,15 +783,28 @@ export default function OnxShell({
 
                 <div className="my-4 h-px bg-slate-200/80" />
 
-                <div className="mt-4 grid grid-cols-2 gap-x-5 gap-y-4 text-xs">
+                <div className="mt-5 grid grid-cols-2 gap-x-5 gap-y-6 text-xs">
                   <div>
-                    <div className="font-semibold leading-none text-slate-900 text-[56px]">
+                    <div className="font-semibold leading-none tracking-[-0.02em] text-slate-900 text-[56px]">
                       {selected.fishability_score_calc ?? "—"}
+                    </div>
+                    <div className="mt-2">
+                      <TierPill
+                        tier={
+                          selected.bite_tier === "HOT" || selected.bite_tier === "GOOD"
+                            ? "Good"
+                            : selected.bite_tier === "FAIR"
+                            ? "Fair"
+                            : selected.bite_tier === "TOUGH"
+                            ? "Tough"
+                            : undefined
+                        }
+                      />
                     </div>
                   </div>
                   <div>
-                    <div className="text-[11px] text-slate-500">Flow</div>
-                    <div className="font-semibold text-slate-900">
+                    <div className="text-[10px] text-slate-500">Flow</div>
+                    <div className="font-medium text-slate-900">
                       {selected.flow_cfs ?? "—"}
                       <span className="ml-1 text-[11px] font-medium text-slate-500">
                         {getFlowTrendArrow(selected.change_48h_pct_calc)}
@@ -786,14 +812,14 @@ export default function OnxShell({
                     </div>
                   </div>
                   <div>
-                    <div className="text-[11px] text-slate-500">Temp</div>
-                    <div className="font-semibold text-slate-900">
+                    <div className="text-[10px] text-slate-500">Temp</div>
+                    <div className="font-medium text-slate-900">
                       {selected.water_temp_f != null ? `${Number(selected.water_temp_f).toFixed(1)}°F` : "—"}
                     </div>
                   </div>
                   <div>
-                    <div className="text-[11px] text-slate-500">Stability</div>
-                    <div className="font-semibold text-slate-900">
+                    <div className="text-[10px] text-slate-500">Stability</div>
+                    <div className="font-medium text-slate-900">
                       {selected.change_48h_pct_calc == null
                         ? "—"
                         : `${Number(selected.change_48h_pct_calc).toFixed(1)}% 48h`}
@@ -803,14 +829,14 @@ export default function OnxShell({
                     </div>
                   </div>
                   <div>
-                    <div className="text-[11px] text-slate-500">Ratio</div>
-                    <div className="font-semibold text-slate-900">
+                    <div className="text-[10px] text-slate-500">Ratio</div>
+                    <div className="font-medium text-slate-900">
                       {selected.flow_ratio_calc != null ? `${Number(selected.flow_ratio_calc).toFixed(2)}x` : "—"}
                     </div>
                   </div>
                   <div>
-                    <div className="text-[11px] text-slate-500">Hatch likelihood</div>
-                    <div className="font-semibold text-slate-900">{hatchLikelihood}</div>
+                    <div className="text-[10px] text-slate-500">Hatch likelihood</div>
+                    <div className="font-medium text-slate-900">{hatchLikelihood}</div>
                   </div>
                 </div>
 
@@ -904,16 +930,16 @@ export default function OnxShell({
       </div>
 
       <div
-        className="absolute bottom-0 left-0 right-0 z-30"
+        className="absolute bottom-0 left-0 right-0 z-10"
         style={{
-          transform: `translateY(${(sheetOpen ? sheetY : Math.max(sheetY, 0.75)) * 78}%)`,
-          transition: isDragging ? "none" : "transform 180ms ease-out",
+          transform: `translateY(${sheetY * 78}%)`,
+          transition: isDragging ? "none" : "transform 220ms ease-out",
         }}
       >
-        <div className="mx-auto max-w-6xl px-3 pb-3">
+        <div className={`mx-auto max-w-6xl px-3 pb-3 ${detailsOpen ? "sm:pr-[300px]" : ""}`}>
           <div className="onx-glass overflow-hidden rounded-3xl shadow-2xl">
             <div
-              className="mx-auto mt-2 h-1.5 w-12 flex-shrink-0 cursor-grab rounded-full bg-white/25 active:cursor-grabbing"
+              className={`mx-auto mt-2 h-1.5 w-12 flex-shrink-0 cursor-grab rounded-full bg-white/25 active:cursor-grabbing ${isDragging ? "select-none" : ""}`}
               onPointerDown={onSheetPointerDown}
               onTouchStart={onSheetPointerDown}
               title="Drag to expand/collapse"
@@ -923,17 +949,23 @@ export default function OnxShell({
               <button
                 className="text-xs text-white/80 hover:text-white"
                 onClick={() => {
-                  const next = !sheetOpen;
-                  setSheetOpen(next);
-                  setSheetY(next ? 0 : 1);
+                  const next = drawerSnap === "collapsed" ? "mid" : "collapsed";
+                  setDrawerSnap(next);
+                  setSheetY(DRAWER_SNAP_Y[next]);
                 }}
               >
-                {sheetOpen ? "Collapse" : "Expand"}
+                {drawerSnap === "collapsed" ? "Expand" : "Collapse"}
               </button>
             </div>
 
             <div className="px-3 pb-3 pt-2">
-              <div className="max-h-[34vh] overflow-auto pr-1">
+              <div
+                className="overflow-auto pr-1 transition-[max-height] duration-200"
+                style={{
+                  maxHeight:
+                    drawerSnap === "expanded" ? "58vh" : drawerSnap === "mid" ? "34vh" : "80px",
+                }}
+              >
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
                   {filtered.map((r) => (
                     <button
