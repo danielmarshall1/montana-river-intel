@@ -1,4 +1,4 @@
-export type BasemapId = "dark" | "light" | "satellite" | "hybrid";
+export type BasemapId = "dark" | "light" | "satellite" | "hybrid" | "topo";
 
 export type LayerGroup = "Public Lands" | "Access" | "MRI Overlays";
 
@@ -86,10 +86,18 @@ function esriRasterStyle(withLabels: boolean): string {
 
 export const BASEMAP_OPTIONS: BasemapOption[] = [
   {
+    id: "hybrid",
+    label: "Hybrid",
+    styleUrl: hasMaptiler
+      ? `https://api.maptiler.com/maps/hybrid/style.json?key=${maptilerKey}`
+      : `data:application/json,${encodeURIComponent(esriRasterStyle(true))}`,
+    defaultOn: true,
+    enabled: true,
+  },
+  {
     id: "dark",
     label: "Dark",
     styleUrl: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
-    defaultOn: true,
     enabled: true,
   },
   {
@@ -107,11 +115,11 @@ export const BASEMAP_OPTIONS: BasemapOption[] = [
     enabled: true,
   },
   {
-    id: "hybrid",
-    label: "Hybrid",
+    id: "topo",
+    label: "Topo",
     styleUrl: hasMaptiler
-      ? `https://api.maptiler.com/maps/hybrid/style.json?key=${maptilerKey}`
-      : `data:application/json,${encodeURIComponent(esriRasterStyle(true))}`,
+      ? `https://api.maptiler.com/maps/topo-v2/style.json?key=${maptilerKey}`
+      : "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
     enabled: true,
   },
 ];

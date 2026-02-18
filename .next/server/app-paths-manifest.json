@@ -1,7 +1,3 @@
 {
-  "/_not-found/page": "app/_not-found/page.js",
-  "/api/ingest/pai/route": "app/api/ingest/pai/route.js",
-  "/page": "app/page.js",
-  "/river/[river_id]/page": "app/river/[river_id]/page.js",
-  "/reports/page": "app/reports/page.js"
+  "/page": "app/page.js"
 }

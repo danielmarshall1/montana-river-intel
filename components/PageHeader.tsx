@@ -1,4 +1,5 @@
 "use client";
+import { MRI_COLORS } from "@/lib/theme";
 
 type Props = {
   dateLabel: string;
@@ -66,15 +67,15 @@ export default function PageHeader({
       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
         <span className="font-medium text-slate-700">Legend:</span>
         <span className="inline-flex items-center gap-2">
-          <span className="h-2.5 w-2.5 rounded-full bg-green-500" />
+          <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: MRI_COLORS.good }} />
           Good
         </span>
         <span className="inline-flex items-center gap-2">
-          <span className="h-2.5 w-2.5 rounded-full bg-yellow-500" />
+          <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: MRI_COLORS.fair }} />
           Fair
         </span>
         <span className="inline-flex items-center gap-2">
-          <span className="h-2.5 w-2.5 rounded-full bg-gray-400" />
+          <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: MRI_COLORS.tough }} />
           Tough
         </span>
       </div>

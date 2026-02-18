@@ -17,6 +17,7 @@ export interface FishabilityRow {
   water_temp_f: number | null;
   wind_am_mph: number | null;
   wind_pm_mph: number | null;
+  precip_mm?: number | null;
   fishability_score_calc: number | null;
   bite_tier: BiteTier | null;
   source_flow_observed_at?: string | null;

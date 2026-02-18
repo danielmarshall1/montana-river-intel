@@ -1,8 +1,8 @@
 {
   "lib/supabase.ts -> ./mock-data": {
-    "id": 3694,
+    "id": "lib/supabase.ts -> ./mock-data",
     "files": [
-      "static/chunks/694.a5e4e88985e597e5.js"
+      "static/chunks/_app-pages-browser_lib_mock-data_ts.js"
     ]
   }
 }

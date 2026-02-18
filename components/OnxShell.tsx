@@ -9,6 +9,9 @@ import { fetchRiverGeojsonBrowser } from "@/lib/supabaseBrowser";
 import { RIVER_FOCUS_POINTS } from "@/lib/river-focus-points";
 import { deriveScoreBreakdown } from "@/lib/scoreBreakdown";
 import { getSeasonalIntel } from "@/lib/seasonalIntel";
+import { generateTodaysRead } from "@/lib/todaysRead";
+import { MRI_COLORS } from "@/lib/theme";
+import { getFlowTrendArrow } from "@/lib/trend";
 import {
   BASEMAP_OPTIONS,
   DEFAULT_BASEMAP,
@@ -24,12 +27,12 @@ import type { FishabilityRow } from "@/lib/types";
 type River = FishabilityRow;
 
 function TierPill({ tier }: { tier?: string }) {
-  const cls =
+  const dotColor =
     tier === "Good" || tier === "HOT" || tier === "GOOD"
-      ? "bg-green-500"
+      ? MRI_COLORS.good
       : tier === "Fair" || tier === "FAIR"
-      ? "bg-yellow-500"
-      : "bg-slate-400";
+      ? MRI_COLORS.fair
+      : MRI_COLORS.tough;
   const label =
     tier === "HOT" || tier === "GOOD"
       ? "Good"
@@ -41,7 +44,7 @@ function TierPill({ tier }: { tier?: string }) {
 
   return (
     <span className="inline-flex items-center gap-2 text-xs font-semibold text-white/90">
-      <span className={`h-2.5 w-2.5 rounded-full ${cls}`} />
+      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: dotColor }} />
       {label}
     </span>
   );
@@ -95,7 +98,7 @@ export default function OnxShell({
   const [transparencyOpen, setTransparencyOpen] = useState(false);
   const [advancedLayersOpen, setAdvancedLayersOpen] = useState(false);
 
-  const [basemap, setBasemap] = useState<BasemapId>(DEFAULT_BASEMAP);
+  const [basemap, setBasemap] = useState<BasemapId>("hybrid");
   const [layerState, setLayerState] = useState<Record<LayerId, boolean>>(
     createDefaultLayerState()
   );
@@ -142,6 +145,7 @@ export default function OnxShell({
 
   const seasonalIntel = useMemo(() => getSeasonalIntel(), []);
   const breakdown = useMemo(() => (selected ? deriveScoreBreakdown(selected) : null), [selected]);
+  const todaysRead = useMemo(() => generateTodaysRead(selected), [selected]);
   const hatchLikelihood = useMemo(() => {
     if (seasonalIntel.season === "Summer") return "High";
     if (seasonalIntel.season === "Spring" || seasonalIntel.season === "Fall") return "Moderate";
@@ -329,8 +333,6 @@ export default function OnxShell({
     }
   }, [basemap, layerState]);
 
-  const currentStyleUrl = basemapById[basemap]?.styleUrl ?? basemapById[DEFAULT_BASEMAP].styleUrl;
-
   function clamp(n: number, lo: number, hi: number) {
     return Math.max(lo, Math.min(hi, n));
   }
@@ -416,30 +418,8 @@ export default function OnxShell({
 
   function setBasemapStyle(next: BasemapId) {
     const option = basemapById[next];
-    if (!option?.enabled || !option.styleUrl) return;
-
+    if (!option?.enabled) return;
     setBasemap(next);
-
-    const map = mapRef.current;
-    if (!map) return;
-
-    const center = map.getCenter?.();
-    const zoom = map.getZoom?.();
-    const bearing = map.getBearing?.();
-    const pitch = map.getPitch?.();
-
-    map.setStyle(option.styleUrl);
-    map.once("load", () => {
-      try {
-        if (center) map.setCenter(center);
-        if (zoom != null) map.setZoom(zoom);
-        if (bearing != null) map.setBearing(bearing);
-        if (pitch != null) map.setPitch(pitch);
-      } catch {
-        /* ignore */
-      }
-      map.resize?.();
-    });
   }
 
   function setLayerEnabled(layerId: LayerId, enabled: boolean) {
@@ -473,10 +453,10 @@ export default function OnxShell({
           selectedRiverId={selectedId}
           selectedRiverGeojson={selectedGeojson}
           riverLinesGeojson={riverLinesGeojson}
+          basemap={basemap}
           layerState={layerState}
           onSelectRiver={(r) => setSelectedId(r.river_id)}
           className="absolute inset-0"
-          initialStyleUrl={currentStyleUrl}
           onMapReady={(m) => {
             mapRef.current = m;
           }}
@@ -728,7 +708,7 @@ export default function OnxShell({
 
       <div className="absolute right-3 top-[120px] z-30 hidden w-[280px] sm:block">
         {detailsOpen ? (
-          <div className="onx-card rounded-2xl p-4 shadow-xl">
+          <div className="onx-card rounded-2xl p-8 shadow-xl">
             <div className="flex items-center justify-between">
               <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                 River Detail
@@ -775,38 +755,61 @@ export default function OnxShell({
                     }
                   />
                 </div>
+                <div
+                  className="mt-2 text-[11px] leading-4 text-slate-500"
+                  style={{
+                    display: "-webkit-box",
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: "vertical",
+                    overflow: "hidden",
+                  }}
+                >
+                  <span className="text-slate-600">Today&apos;s Read: </span>
+                  {todaysRead}
+                </div>
 
-                <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                <div className="my-4 h-px bg-slate-200/80" />
+
+                <div className="mt-4 grid grid-cols-2 gap-x-5 gap-y-4 text-xs">
                   <div>
-                    <div className="text-slate-500">Score</div>
-                    <div className="font-semibold text-slate-900">{selected.fishability_score_calc ?? "—"}</div>
+                    <div className="font-semibold leading-none text-slate-900 text-[56px]">
+                      {selected.fishability_score_calc ?? "—"}
+                    </div>
                   </div>
                   <div>
-                    <div className="text-slate-500">Flow</div>
-                    <div className="font-semibold text-slate-900">{selected.flow_cfs ?? "—"}</div>
+                    <div className="text-[11px] text-slate-500">Flow</div>
+                    <div className="font-semibold text-slate-900">
+                      {selected.flow_cfs ?? "—"}
+                      <span className="ml-1 text-[11px] font-medium text-slate-500">
+                        {getFlowTrendArrow(selected.change_48h_pct_calc)}
+                      </span>
+                    </div>
                   </div>
                   <div>
-                    <div className="text-slate-500">Temp</div>
+                    <div className="text-[11px] text-slate-500">Temp</div>
                     <div className="font-semibold text-slate-900">
                       {selected.water_temp_f != null ? `${Number(selected.water_temp_f).toFixed(1)}°F` : "—"}
                     </div>
                   </div>
                   <div>
-                    <div className="text-slate-500">Stability</div>
+                    <div className="text-[11px] text-slate-500">Stability</div>
                     <div className="font-semibold text-slate-900">
                       {selected.change_48h_pct_calc == null
                         ? "—"
                         : `${Number(selected.change_48h_pct_calc).toFixed(1)}% 48h`}
+                      <span className="ml-1 text-[11px] font-medium text-slate-500">
+                        {getFlowTrendArrow(selected.change_48h_pct_calc)}
+                      </span>
                     </div>
                   </div>
                   <div>
-                    <div className="text-slate-500">Ratio</div>
+                    <div className="text-[11px] text-slate-500">Ratio</div>
                     <div className="font-semibold text-slate-900">
                       {selected.flow_ratio_calc != null ? `${Number(selected.flow_ratio_calc).toFixed(2)}x` : "—"}
                     </div>
                   </div>
                   <div>
-                    <div className="text-slate-500">Hatch likelihood</div>
+                    <div className="text-[11px] text-slate-500">Hatch likelihood</div>
                     <div className="font-semibold text-slate-900">{hatchLikelihood}</div>
                   </div>
                 </div>
@@ -969,7 +972,12 @@ export default function OnxShell({
                           </div>
                           <div>
                             <div className="text-white/60">Flow</div>
-                            <div className="font-semibold">{r.flow_cfs ?? "—"}</div>
+                            <div className="font-semibold">
+                              {r.flow_cfs ?? "—"}
+                              <span className="ml-1 text-[11px] font-medium text-white/60">
+                                {getFlowTrendArrow(r.change_48h_pct_calc)}
+                              </span>
+                            </div>
                           </div>
                           <div>
                             <div className="text-white/60">Temp</div>
