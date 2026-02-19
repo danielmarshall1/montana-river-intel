@@ -80,6 +80,7 @@ const BASEMAP_LAYER_IDS = [
   "satellite",
   "satellite-labels",
 ] as const;
+const CLICK_PRIORITY_LAYERS = [UNCLUSTERED_LAYER, ACCESS_LAYER] as const;
 const BASEMAPS: Record<
   BasemapId,
   { rasterLayers: (typeof BASEMAP_LAYER_IDS)[number][]; labelLayers: (typeof BASEMAP_LAYER_IDS)[number][] }
@@ -864,15 +865,24 @@ function syncFederalLandsLayer(map: maplibregl.Map, enabled: boolean) {
         id: FEDERAL_LANDS_LAYER,
         type: "raster",
         source: FEDERAL_LANDS_SOURCE,
-        minzoom: 7,
+        minzoom: 8,
         paint: {
-          "raster-opacity": 0.24,
-          "raster-saturation": -0.55,
-          "raster-contrast": -0.2,
-          "raster-brightness-min": 0.15,
-          "raster-brightness-max": 0.82,
+          "raster-opacity": 0.16,
+          "raster-saturation": -0.72,
+          "raster-contrast": -0.28,
+          "raster-brightness-min": 0.22,
+          "raster-brightness-max": 0.86,
         },
       });
+    }
+    try {
+      if (map.getLayer(STATEWIDE_HYDRO_LAYER)) {
+        map.moveLayer(FEDERAL_LANDS_LAYER, STATEWIDE_HYDRO_LAYER);
+      } else if (map.getLayer(SELECTED_RIVER_HALO_LAYER)) {
+        map.moveLayer(FEDERAL_LANDS_LAYER, SELECTED_RIVER_HALO_LAYER);
+      }
+    } catch {
+      /* ignore */
     }
     return;
   }
@@ -895,13 +905,22 @@ function syncStateLandsLayer(map: maplibregl.Map, enabled: boolean) {
         id: STATE_LANDS_LAYER,
         type: "fill",
         source: STATE_LANDS_SOURCE,
-        minzoom: 7,
+        minzoom: 8,
         paint: {
-          "fill-color": "#7f8f72",
-          "fill-opacity": 0.18,
-          "fill-outline-color": "rgba(226,232,240,0.38)",
+          "fill-color": "#5f725e",
+          "fill-opacity": 0.12,
+          "fill-outline-color": "rgba(148,163,184,0.3)",
         },
       });
+    }
+    try {
+      if (map.getLayer(STATEWIDE_HYDRO_LAYER)) {
+        map.moveLayer(STATE_LANDS_LAYER, STATEWIDE_HYDRO_LAYER);
+      } else if (map.getLayer(SELECTED_RIVER_HALO_LAYER)) {
+        map.moveLayer(STATE_LANDS_LAYER, SELECTED_RIVER_HALO_LAYER);
+      }
+    } catch {
+      /* ignore */
     }
     return;
   }
@@ -923,14 +942,22 @@ function syncFishingAccessLayer(map: maplibregl.Map, enabled: boolean) {
         id: ACCESS_LAYER,
         type: "circle",
         source: ACCESS_SOURCE,
+        minzoom: 8,
         paint: {
-          "circle-color": MRI_COLORS.riverSelected,
-          "circle-radius": 4,
+          "circle-color": "#6f8491",
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 8, 2.4, 11, 4.6],
           "circle-stroke-color": "#e2e8f0",
-          "circle-stroke-width": 1.25,
-          "circle-opacity": 0.95,
+          "circle-stroke-width": 1,
+          "circle-opacity": 0.88,
         },
       });
+    }
+    try {
+      if (map.getLayer(UNCLUSTERED_LAYER)) {
+        map.moveLayer(ACCESS_LAYER, UNCLUSTERED_LAYER);
+      }
+    } catch {
+      /* ignore */
     }
     return;
   }
@@ -1171,7 +1198,7 @@ export function MapView({
       const handleRiverLineClick = (e: maplibregl.MapLayerMouseEvent) => {
         if (!layerStateRef.current.mri_river_lines) return;
         const stationFeatures = map.queryRenderedFeatures(e.point, {
-          layers: [UNCLUSTERED_LAYER, SELECTED_HALO_LAYER, SELECTED_CORE_LAYER, ACCESS_LAYER],
+          layers: [...CLICK_PRIORITY_LAYERS],
         });
         if (stationFeatures.length > 0) return;
         const f = e.features?.[0];
