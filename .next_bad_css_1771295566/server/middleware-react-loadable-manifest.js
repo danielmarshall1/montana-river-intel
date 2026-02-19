@@ -1,1 +1,0 @@
-self.__REACT_LOADABLE_MANIFEST="{\"lib/supabase.ts -> ./mock-data\":{\"id\":\"lib/supabase.ts -> ./mock-data\",\"files\":[\"static/chunks/_app-pages-browser_lib_mock-data_ts.js\"]}}"
