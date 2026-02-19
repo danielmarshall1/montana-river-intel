@@ -12,6 +12,9 @@ import { getSeasonalIntel } from "@/lib/seasonalIntel";
 import { generateTodaysRead } from "@/lib/todaysRead";
 import { MRI_COLORS } from "@/lib/theme";
 import { getFlowTrendArrow } from "@/lib/trend";
+import { riskFlags } from "@/lib/riskFlags";
+import { fetchRiverHistory14d } from "@/lib/supabase";
+import { Sparkline } from "@/components/Sparkline";
 import {
   BASEMAP_OPTIONS,
   DEFAULT_BASEMAP,
@@ -69,6 +72,19 @@ function formatPullTime(value: string | null | undefined): string {
   });
 }
 
+function formatUpdatedAgo(value: string | null | undefined): string {
+  if (!value) return "Updated recently";
+  const ms = new Date(value).getTime();
+  if (Number.isNaN(ms)) return "Updated recently";
+  const diffMin = Math.max(0, Math.floor((Date.now() - ms) / 60000));
+  if (diffMin < 1) return "Updated just now";
+  if (diffMin < 60) return `Updated ${diffMin} min ago`;
+  const h = Math.floor(diffMin / 60);
+  if (h < 24) return `Updated ${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `Updated ${d}d ago`;
+}
+
 export default function OnxShell({
   rivers,
   dateLabel = new Date().toLocaleDateString("en-US", {
@@ -81,7 +97,7 @@ export default function OnxShell({
   rivers: River[];
   dateLabel?: string;
 }) {
-  type TopPanel = "none" | "layers";
+  type TopPanel = "none" | "layers" | "detail";
   type DrawerSnap = "collapsed" | "mid" | "expanded";
   const DRAWER_SNAP_Y: Record<DrawerSnap, number> = {
     collapsed: 0.84,
@@ -101,10 +117,13 @@ export default function OnxShell({
   const [riverLinesGeojson, setRiverLinesGeojson] = useState<GeoJSON.FeatureCollection | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
 
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const [openTopPanel, setOpenTopPanel] = useState<TopPanel>("none");
   const [transparencyOpen, setTransparencyOpen] = useState(false);
   const [advancedLayersOpen, setAdvancedLayersOpen] = useState(false);
+  const [historyRows, setHistoryRows] = useState<
+    Array<{ obs_date: string; flow_cfs: number | null; water_temp_f: number | null; fishability_score: number | null }>
+  >([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const [basemap, setBasemap] = useState<BasemapId>("hybrid");
   const [layerState, setLayerState] = useState<Record<LayerId, boolean>>(
@@ -154,6 +173,11 @@ export default function OnxShell({
   const seasonalIntel = useMemo(() => getSeasonalIntel(), []);
   const breakdown = useMemo(() => (selected ? deriveScoreBreakdown(selected) : null), [selected]);
   const todaysRead = useMemo(() => generateTodaysRead(selected), [selected]);
+  const flags = useMemo(() => riskFlags(selected), [selected]);
+  const topRivers = useMemo(
+    () => filtered.filter((r) => (r.fishability_score_calc ?? null) != null).slice(0, 5),
+    [filtered]
+  );
   const hatchLikelihood = useMemo(() => {
     if (seasonalIntel.season === "Summer") return "High";
     if (seasonalIntel.season === "Spring" || seasonalIntel.season === "Fall") return "Moderate";
@@ -294,12 +318,39 @@ export default function OnxShell({
 
   useEffect(() => {
     if (selected) {
-      setDetailsOpen(true);
+      setOpenTopPanel((prev) => (prev === "layers" ? prev : "detail"));
       return;
     }
-    setDetailsOpen(false);
+    if (openTopPanel === "detail") {
+      setOpenTopPanel("none");
+    }
     setTransparencyOpen(false);
-  }, [selected]);
+  }, [selected, openTopPanel]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadHistory() {
+      if (!selected?.river_id) {
+        setHistoryRows([]);
+        return;
+      }
+      setHistoryLoading(true);
+      const data = await fetchRiverHistory14d(selected.river_id);
+      if (!cancelled) {
+        setHistoryRows(data);
+        setHistoryLoading(false);
+      }
+    }
+    loadHistory().catch(() => {
+      if (!cancelled) {
+        setHistoryRows([]);
+        setHistoryLoading(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.river_id]);
 
   useEffect(() => {
     try {
@@ -453,6 +504,7 @@ export default function OnxShell({
   }
 
   const layersOpen = openTopPanel === "layers";
+  const detailsOpen = openTopPanel === "detail";
 
   const groupedLayers = useMemo(
     () =>
@@ -741,7 +793,7 @@ export default function OnxShell({
               </div>
               <button
                 className="text-[11px] text-slate-500 hover:text-slate-700"
-                onClick={() => setDetailsOpen(false)}
+                onClick={() => setOpenTopPanel("none")}
               >
                 Collapse
               </button>
@@ -754,7 +806,7 @@ export default function OnxShell({
                 </div>
                 <div className="text-xs text-slate-600">{selected.gauge_label ?? ""}</div>
                 <div className="mt-1 text-[11px] text-slate-500">
-                  Updated {formatPullTime(selected.source_flow_observed_at ?? selected.source_temp_observed_at ?? selected.updated_at)} MT
+                  {formatUpdatedAgo(selected.source_flow_observed_at ?? selected.source_temp_observed_at ?? selected.updated_at)}
                 </div>
                 <div className="mt-2 grid grid-cols-1 gap-0.5 text-[11px] text-slate-500">
                   <div>
@@ -780,6 +832,18 @@ export default function OnxShell({
                   <span className="text-slate-600">Today&apos;s Read: </span>
                   {todaysRead}
                 </div>
+                {flags.length ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {flags.map((flag) => (
+                      <span
+                        key={flag}
+                        className="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600"
+                      >
+                        {flag}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
 
                 <div className="my-4 h-px bg-slate-200/80" />
 
@@ -800,6 +864,16 @@ export default function OnxShell({
                             : undefined
                         }
                       />
+                    </div>
+                    <div className="mt-2 text-[11px] text-slate-500">
+                      {selected.fishability_rank != null && filtered.length > 0
+                        ? `Rank ${selected.fishability_rank} / ${filtered.length}`
+                        : "Rank unavailable"}
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      {selected.fishability_percentile != null
+                        ? `Top ${Math.max(1, Math.round(100 - Number(selected.fishability_percentile)))}%`
+                        : "Percentile unavailable"}
                     </div>
                   </div>
                   <div>
@@ -842,6 +916,50 @@ export default function OnxShell({
 
                 <div className="mt-2 text-[11px] text-slate-600">
                   Wind AM {selected.wind_am_mph ?? "—"} • PM {selected.wind_pm_mph ?? "—"}
+                </div>
+
+                <div className="my-3 h-px bg-slate-200/80" />
+
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    Trend (14D)
+                  </div>
+                  {historyLoading ? (
+                    <div className="mt-2 text-xs text-slate-500">Loading trend...</div>
+                  ) : (
+                    <div className="mt-2 space-y-2">
+                      <div>
+                        <div className="mb-0.5 text-[10px] text-slate-500">
+                          Flow {historyRows[0]?.flow_cfs != null ? `(${historyRows[0]?.flow_cfs})` : ""}
+                        </div>
+                        <Sparkline
+                          className="h-12 w-full"
+                          stroke={MRI_COLORS.riverSelected}
+                          values={historyRows.slice().reverse().map((x) => x.flow_cfs)}
+                        />
+                      </div>
+                      <div>
+                        <div className="mb-0.5 text-[10px] text-slate-500">
+                          Temp {historyRows[0]?.water_temp_f != null ? `(${Number(historyRows[0]?.water_temp_f).toFixed(1)}°F)` : ""}
+                        </div>
+                        <Sparkline
+                          className="h-12 w-full"
+                          stroke="#6b7280"
+                          values={historyRows.slice().reverse().map((x) => x.water_temp_f)}
+                        />
+                      </div>
+                      <div>
+                        <div className="mb-0.5 text-[10px] text-slate-500">
+                          Score {historyRows[0]?.fishability_score != null ? `(${historyRows[0]?.fishability_score})` : ""}
+                        </div>
+                        <Sparkline
+                          className="h-12 w-full"
+                          stroke={MRI_COLORS.good}
+                          values={historyRows.slice().reverse().map((x) => x.fishability_score)}
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="my-3 h-px bg-slate-200/80" />
@@ -922,7 +1040,7 @@ export default function OnxShell({
         ) : (
           <button
             className="onx-glass rounded-xl px-3 py-2 text-xs font-medium text-white/90 hover:text-white"
-            onClick={() => setDetailsOpen(true)}
+            onClick={() => setOpenTopPanel("detail")}
           >
             Details
           </button>
@@ -958,6 +1076,30 @@ export default function OnxShell({
               </button>
             </div>
 
+            {topRivers.length > 0 ? (
+              <div className="px-4 pt-2">
+                <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/60">
+                  Top Rivers Today
+                </div>
+                <div className="flex gap-2 overflow-auto pb-1">
+                  {topRivers.map((r) => (
+                    <button
+                      key={`top-${r.river_id}`}
+                      onClick={() => setSelectedId(r.river_id)}
+                      className={[
+                        "whitespace-nowrap rounded-full border px-2.5 py-1 text-xs transition",
+                        r.river_id === selectedId
+                          ? "border-white/50 bg-white/20 text-white"
+                          : "border-white/20 bg-white/10 text-white/85 hover:bg-white/15",
+                      ].join(" ")}
+                    >
+                      #{r.fishability_rank ?? "—"} {r.river_name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
             <div className="px-3 pb-3 pt-2">
               <div
                 className="overflow-auto pr-1 transition-[max-height] duration-200"
@@ -981,7 +1123,16 @@ export default function OnxShell({
                       <div className="p-3">
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <div className="text-sm font-semibold text-white">{r.river_name}</div>
+                            <div className="flex items-center gap-1.5">
+                              <div className="text-sm font-semibold text-white">{r.river_name}</div>
+                              {r.is_stale ? (
+                                <span
+                                  className="h-2 w-2 rounded-full"
+                                  title={r.stale_reason ?? "Stale"}
+                                  style={{ backgroundColor: MRI_COLORS.fair, opacity: 0.9 }}
+                                />
+                              ) : null}
+                            </div>
                             <div className="text-xs text-white/70">{r.gauge_label ?? ""}</div>
                           </div>
                           <TierPill

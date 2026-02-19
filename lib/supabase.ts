@@ -36,6 +36,10 @@ type RiverLatestRow = {
   water_temp_f?: number | null;
   wind_am_mph?: number | null;
   wind_pm_mph?: number | null;
+  precip_mm?: number | null;
+  precip_probability_pct?: number | null;
+  fishability_rank?: number | null;
+  fishability_percentile?: number | null;
   fishability_score_calc?: number | null;
   bite_tier?: string | null;
   latitude?: number | null;
@@ -43,6 +47,20 @@ type RiverLatestRow = {
   source_flow_observed_at?: string | null;
   source_temp_observed_at?: string | null;
   updated_at?: string | null;
+  is_stale?: boolean | null;
+  stale_reason?: string | null;
+  last_usgs_pull_at?: string | null;
+  last_weather_pull_at?: string | null;
+  last_river_daily_date?: string | null;
+};
+
+type RiverHealthRow = {
+  river_id?: string | number | null;
+  is_stale?: boolean | null;
+  stale_reason?: string | null;
+  last_usgs_pull_at?: string | null;
+  last_weather_pull_at?: string | null;
+  last_river_daily_date?: string | null;
 };
 
 export async function fetchRiverGeom(
@@ -114,19 +132,46 @@ export async function fetchLatestRiverScores(): Promise<RiverScoreRow[]> {
   return [];
 }
 
+async function fetchHealthMap(supabase: SupabaseClient): Promise<Map<string, RiverHealthRow>> {
+  const out = new Map<string, RiverHealthRow>();
+  const healthRes = await supabase
+    .from("v_river_health")
+    .select("river_id,is_stale,stale_reason,last_usgs_pull_at,last_weather_pull_at,last_river_daily_date");
+  if (healthRes.error || !healthRes.data) return out;
+  for (const row of healthRes.data as RiverHealthRow[]) {
+    const id = String(row.river_id ?? "");
+    if (!id) continue;
+    out.set(id, row);
+  }
+  return out;
+}
+
 /** Fetch rivers metadata + latest scores, merge to FishabilityRow[] */
 export async function fetchRiversWithLatest(): Promise<FishabilityRow[]> {
   const supabase = createSupabaseClient();
   if (!supabase) return [];
 
-  const latestRes = await supabase
+  const latestSelectEnriched =
+    "river_id,slug,river_name,gauge_label,usgs_site_no,latitude,longitude,date,flow_cfs,median_flow_cfs,flow_ratio_calc,change_48h_pct_calc,water_temp_f,wind_am_mph,wind_pm_mph,precip_mm,precip_probability_pct,fishability_score_calc,fishability_rank,fishability_percentile,bite_tier,source_flow_observed_at,source_temp_observed_at,updated_at,is_stale,stale_reason,last_usgs_pull_at,last_weather_pull_at,last_river_daily_date";
+  const latestSelectFallback =
+    "river_id,slug,river_name,gauge_label,usgs_site_no,latitude,longitude,date,flow_cfs,median_flow_cfs,flow_ratio_calc,change_48h_pct_calc,water_temp_f,wind_am_mph,wind_pm_mph,fishability_score_calc,bite_tier,source_flow_observed_at,source_temp_observed_at,updated_at";
+
+  let latestRes: any = await supabase
     .from("v_river_latest")
-    .select("river_id,slug,river_name,gauge_label,usgs_site_no,latitude,longitude,date,flow_cfs,median_flow_cfs,flow_ratio_calc,change_48h_pct_calc,water_temp_f,wind_am_mph,wind_pm_mph,fishability_score_calc,bite_tier,source_flow_observed_at,source_temp_observed_at,updated_at")
+    .select(latestSelectEnriched)
     .order("fishability_score_calc", { ascending: false, nullsFirst: false });
 
+  if (latestRes.error) {
+    latestRes = await supabase
+      .from("v_river_latest")
+      .select(latestSelectFallback)
+      .order("fishability_score_calc", { ascending: false, nullsFirst: false });
+  }
+
   if (!latestRes.error && latestRes.data && latestRes.data.length > 0) {
+    const healthMap = await fetchHealthMap(supabase);
     const rows = (latestRes.data as RiverLatestRow[]).map((r) => ({
-      river_id: String(r.slug ?? r.river_id ?? ""),
+      river_id: String(r.river_id ?? ""),
       slug: r.slug ?? undefined,
       river_name: r.river_name ?? formatSlug(String(r.slug ?? r.river_id ?? "")),
       gauge_label: r.gauge_label ?? "",
@@ -139,13 +184,37 @@ export async function fetchRiversWithLatest(): Promise<FishabilityRow[]> {
       water_temp_f: r.water_temp_f ?? null,
       wind_am_mph: r.wind_am_mph ?? null,
       wind_pm_mph: r.wind_pm_mph ?? null,
+      precip_mm: r.precip_mm ?? null,
+      precip_probability_pct: r.precip_probability_pct ?? null,
       fishability_score_calc: r.fishability_score_calc ?? null,
+      fishability_rank: r.fishability_rank ?? null,
+      fishability_percentile: r.fishability_percentile ?? null,
       bite_tier: normalizeBiteTier(r.bite_tier),
       lat: r.latitude ?? null,
       lng: r.longitude ?? null,
       source_flow_observed_at: r.source_flow_observed_at ?? null,
       source_temp_observed_at: r.source_temp_observed_at ?? null,
       updated_at: r.updated_at ?? null,
+      is_stale:
+        r.is_stale ??
+        healthMap.get(String(r.river_id ?? ""))?.is_stale ??
+        null,
+      stale_reason:
+        r.stale_reason ??
+        healthMap.get(String(r.river_id ?? ""))?.stale_reason ??
+        null,
+      last_usgs_pull_at:
+        r.last_usgs_pull_at ??
+        healthMap.get(String(r.river_id ?? ""))?.last_usgs_pull_at ??
+        null,
+      last_weather_pull_at:
+        r.last_weather_pull_at ??
+        healthMap.get(String(r.river_id ?? ""))?.last_weather_pull_at ??
+        null,
+      last_river_daily_date:
+        r.last_river_daily_date ??
+        healthMap.get(String(r.river_id ?? ""))?.last_river_daily_date ??
+        null,
     })) as FishabilityRow[];
 
     rows.sort((a, b) => (b.fishability_score_calc ?? 0) - (a.fishability_score_calc ?? 0));
@@ -207,7 +276,7 @@ export async function fetchRiverDetailByIdOrSlug(
   const row = (!bySlug.error ? bySlug.data : null) as RiverLatestRow | null;
   if (row) {
     return {
-      river_id: String(row.slug ?? row.river_id ?? ""),
+      river_id: String(row.river_id ?? ""),
       slug: row.slug ?? undefined,
       river_name: row.river_name ?? formatSlug(String(row.slug ?? row.river_id ?? "")),
       gauge_label: row.gauge_label ?? "",
@@ -220,13 +289,22 @@ export async function fetchRiverDetailByIdOrSlug(
       water_temp_f: row.water_temp_f ?? null,
       wind_am_mph: row.wind_am_mph ?? null,
       wind_pm_mph: row.wind_pm_mph ?? null,
+      precip_mm: row.precip_mm ?? null,
+      precip_probability_pct: row.precip_probability_pct ?? null,
       fishability_score_calc: row.fishability_score_calc ?? null,
+      fishability_rank: row.fishability_rank ?? null,
+      fishability_percentile: row.fishability_percentile ?? null,
       bite_tier: normalizeBiteTier(row.bite_tier),
       lat: row.latitude ?? null,
       lng: row.longitude ?? null,
       source_flow_observed_at: row.source_flow_observed_at ?? null,
       source_temp_observed_at: row.source_temp_observed_at ?? null,
       updated_at: row.updated_at ?? null,
+      is_stale: row.is_stale ?? null,
+      stale_reason: row.stale_reason ?? null,
+      last_usgs_pull_at: row.last_usgs_pull_at ?? null,
+      last_weather_pull_at: row.last_weather_pull_at ?? null,
+      last_river_daily_date: row.last_river_daily_date ?? null,
     };
   }
 
@@ -239,9 +317,43 @@ export async function fetchRiverHistory14d(
   const client = createSupabaseClient();
   if (!client) return [];
 
+  const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  let resolvedRiverId = riverDbId;
+  if (!uuidLike.test(riverDbId)) {
+    const bySlug = await client
+      .from("rivers")
+      .select("id")
+      .eq("slug", riverDbId)
+      .maybeSingle();
+    if (bySlug.error || !bySlug.data?.id) return [];
+    resolvedRiverId = String(bySlug.data.id);
+  }
+
   const { data, error } = await client.rpc("river_history_14d", {
-    p_river_id: riverDbId,
+    p_river_id: resolvedRiverId,
   });
-  if (error || !data) return [];
-  return data as Array<{ obs_date: string; flow_cfs: number | null; water_temp_f: number | null; fishability_score: number | null }>;
+  if (!error && data) {
+    return data as Array<{
+      obs_date: string;
+      flow_cfs: number | null;
+      water_temp_f: number | null;
+      fishability_score: number | null;
+    }>;
+  }
+
+  // Fallback path when RPC is missing/mismatched: read directly from river_daily.
+  const dailyRes = await client
+    .from("river_daily")
+    .select("obs_date,flow_cfs,water_temp_f,fishability_score")
+    .eq("river_id", resolvedRiverId)
+    .order("obs_date", { ascending: false })
+    .limit(14);
+
+  if (dailyRes.error || !dailyRes.data) return [];
+  return (dailyRes.data as Array<{
+    obs_date: string;
+    flow_cfs: number | null;
+    water_temp_f: number | null;
+    fishability_score: number | null;
+  }>);
 }

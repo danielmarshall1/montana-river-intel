@@ -41,7 +41,7 @@ Map-first outdoor intelligence platform for Montana rivers. Premium, data-forwar
 
 - **Primary list/map view:** `public.v_river_latest`
 - **Selected river detail view:** `public.v_river_detail`
-- **Mini-chart RPC (14 day):** `public.river_history_14d(p_river_id bigint)`
+- **Mini-chart RPC (14 day):** `public.river_history_14d(p_river_id uuid)`
 - **Health/Audit views:** `public.v_river_health`, `public.v_usgs_pull_log`
 - **River geometry RPC:** `public.get_river_geojson_by_slug(p_slug text)`
 
@@ -138,7 +138,30 @@ This schedules:
 - `usgs-ingest` at minute `05` each hour
 - `weather-ingest` at minute `12` each hour
 
+Hourly pulls satisfy the "at least daily" requirement; data should refresh every hour and is stale-flagged in `v_river_health` when today's row is missing.
+
 The UI shows pull freshness in the top bar (`Last pull ... MT`) and in selected river details (`Updated ... MT`).
+
+Freshness/ranking verification SQL:
+
+```sql
+-- file:
+-- supabase/sql/verify_freshness_and_ranking.sql
+```
+
+If your project is missing `river_history_14d(uuid)`, run:
+
+```sql
+-- file:
+-- supabase/sql/ensure_river_history_uuid_rpc.sql
+```
+
+If view replacement fails with `42P16` (column rename/order error), run:
+
+```sql
+-- file:
+-- supabase/sql/apply_ranked_latest_hotfix.sql
+```
 
 ## Map Layers Configuration
 

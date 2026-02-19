@@ -160,9 +160,13 @@ export const LAYER_REGISTRY: LayerDefinition[] = [
     label: "State",
     group: "Public Lands",
     defaultOn: false,
-    source: { id: "public-lands-state-source", type: "none" },
-    layers: [],
-    comingSoon: true,
+    source: {
+      id: "public-lands-state-source",
+      type: "geojson",
+      data: "https://fwp-gis.mt.gov/arcgis/rest/services/fwplnd/fwpLands/MapServer/5/query?where=1%3D1&outFields=NAME&returnGeometry=true&f=geojson",
+    },
+    layers: ["public-lands-state-layer"],
+    minZoomNote: "Visible at zoom 7+",
   },
   {
     id: "access_fishing_sites",
@@ -215,7 +219,7 @@ export const LAYER_REGISTRY: LayerDefinition[] = [
     group: "MRI Overlays",
     defaultOn: true,
     source: { id: "basemap-style", type: "none" },
-    layers: ["selected-river-label"],
+    layers: ["river-labels"],
   },
   {
     id: "hydro_flow_magnitude",

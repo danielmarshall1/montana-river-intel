@@ -18,11 +18,19 @@ export interface FishabilityRow {
   wind_am_mph: number | null;
   wind_pm_mph: number | null;
   precip_mm?: number | null;
+  precip_probability_pct?: number | null;
   fishability_score_calc: number | null;
+  fishability_rank?: number | null;
+  fishability_percentile?: number | null;
   bite_tier: BiteTier | null;
   source_flow_observed_at?: string | null;
   source_temp_observed_at?: string | null;
   updated_at?: string | null;
+  is_stale?: boolean | null;
+  stale_reason?: string | null;
+  last_usgs_pull_at?: string | null;
+  last_weather_pull_at?: string | null;
+  last_river_daily_date?: string | null;
 }
 
 export interface RiverGeom {

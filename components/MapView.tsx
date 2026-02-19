@@ -57,6 +57,8 @@ const STATEWIDE_HYDRO_LAYER = "statewide-hydrology-line";
 
 const FEDERAL_LANDS_SOURCE = "public-lands-federal-source";
 const FEDERAL_LANDS_LAYER = "public-lands-federal-layer";
+const STATE_LANDS_SOURCE = "public-lands-state-source";
+const STATE_LANDS_LAYER = "public-lands-state-layer";
 
 const ACCESS_SOURCE = "access-fishing-sites-source";
 const ACCESS_LAYER = "access-fishing-sites-layer";
@@ -66,6 +68,8 @@ const HYDRO_TEMP_LAYER = "hydro-temp-stress-layer";
 
 const BLM_TILES =
   "https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA_Cached_without_PriUnk/MapServer/tile/{z}/{y}/{x}";
+const STATE_LANDS_GEOJSON =
+  "https://fwp-gis.mt.gov/arcgis/rest/services/fwplnd/fwpLands/MapServer/5/query?where=1%3D1&outFields=NAME&returnGeometry=true&f=geojson";
 const FWP_ACCESS_GEOJSON =
   "https://fwp-gis.mt.gov/arcgis/rest/services/fwplnd/fwpLands/MapServer/1/query?where=1%3D1&outFields=NAME&returnGeometry=true&f=geojson";
 const RIVER_ID_PROP = "river_id";
@@ -878,6 +882,34 @@ function syncFederalLandsLayer(map: maplibregl.Map, enabled: boolean) {
   }
 }
 
+function syncStateLandsLayer(map: maplibregl.Map, enabled: boolean) {
+  if (enabled) {
+    if (!map.getSource(STATE_LANDS_SOURCE)) {
+      map.addSource(STATE_LANDS_SOURCE, {
+        type: "geojson",
+        data: STATE_LANDS_GEOJSON as any,
+      } as any);
+    }
+    if (!map.getLayer(STATE_LANDS_LAYER)) {
+      map.addLayer({
+        id: STATE_LANDS_LAYER,
+        type: "fill",
+        source: STATE_LANDS_SOURCE,
+        minzoom: 7,
+        paint: {
+          "fill-color": "#7f8f72",
+          "fill-opacity": 0.18,
+          "fill-outline-color": "rgba(226,232,240,0.38)",
+        },
+      });
+    }
+    return;
+  }
+  if (map.getLayer(STATE_LANDS_LAYER)) {
+    map.removeLayer(STATE_LANDS_LAYER);
+  }
+}
+
 function syncFishingAccessLayer(map: maplibregl.Map, enabled: boolean) {
   if (enabled) {
     if (!map.getSource(ACCESS_SOURCE)) {
@@ -1090,6 +1122,7 @@ export function MapView({
     );
     syncStatewideHydrologyLayer(map, layerStateRef.current.statewide_hydrology);
     syncFederalLandsLayer(map, layerStateRef.current.public_federal);
+    syncStateLandsLayer(map, layerStateRef.current.public_state);
     syncFishingAccessLayer(map, layerStateRef.current.access_fishing_sites);
     syncHydrologyOverlays(
       map,
@@ -1119,18 +1152,6 @@ export function MapView({
       setMapReady(true);
       onMapReady?.(map);
       syncRuntimeLayers(map);
-      const styleLayers = (map.getStyle().layers ?? []).map((layer) => ({
-        id: layer.id,
-        type: layer.type,
-      }));
-      console.log("MAP STYLE LAYERS", styleLayers);
-      console.log("RIVER/STATION LAYERS", {
-        riverHit: SELECTED_RIVER_HIT_LAYER,
-        riverMain: SELECTED_RIVER_MAIN_LAYER,
-        riverCasing: SELECTED_RIVER_CASING_LAYER,
-        riverHalo: SELECTED_RIVER_HALO_LAYER,
-        stationLayers: [UNCLUSTERED_LAYER, SELECTED_HALO_LAYER, SELECTED_CORE_LAYER],
-      });
       map.resize();
     });
 
@@ -1150,11 +1171,10 @@ export function MapView({
       const handleRiverLineClick = (e: maplibregl.MapLayerMouseEvent) => {
         if (!layerStateRef.current.mri_river_lines) return;
         const stationFeatures = map.queryRenderedFeatures(e.point, {
-          layers: [UNCLUSTERED_LAYER, SELECTED_HALO_LAYER, SELECTED_CORE_LAYER],
+          layers: [UNCLUSTERED_LAYER, SELECTED_HALO_LAYER, SELECTED_CORE_LAYER, ACCESS_LAYER],
         });
         if (stationFeatures.length > 0) return;
         const f = e.features?.[0];
-        console.log("river click props", f?.properties);
         const rid = extractRiverId((f?.properties as Record<string, unknown> | undefined) ?? null)
           ?? selectedRiverIdRef.current
           ?? undefined;
@@ -1205,6 +1225,25 @@ export function MapView({
           }
         }
         hoverIdRef.current = null;
+      });
+
+      map.on("mouseenter", ACCESS_LAYER, () => {
+        map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mouseleave", ACCESS_LAYER, () => {
+        map.getCanvas().style.cursor = "";
+      });
+      map.on("click", ACCESS_LAYER, (e: maplibregl.MapLayerMouseEvent) => {
+        const feature = e.features?.[0];
+        if (!feature || !feature.geometry || feature.geometry.type !== "Point") return;
+        const coords = [...feature.geometry.coordinates] as [number, number];
+        const props = (feature.properties ?? {}) as Record<string, unknown>;
+        const name =
+          String(props.NAME ?? props.Name ?? props.name ?? "Fishing Access Site");
+        new maplibregl.Popup({ closeButton: false, closeOnClick: true, offset: 10 })
+          .setLngLat(coords)
+          .setHTML(`<div style="font-size:12px;font-weight:600;color:#0f172a;">${name}</div>`)
+          .addTo(map);
       });
     }
   }, [onMapReady, syncRuntimeLayers]);
@@ -1269,8 +1308,6 @@ export function MapView({
     const map = mapRef.current;
     if (!map || !mapReady) return;
     if (typeof map.isStyleLoaded === "function" && !map.isStyleLoaded()) return;
-    console.log("SELECTED RIVER STYLE UPDATE", selectedRiverId);
-
     syncRiverPointPresentation(
       map,
       selectedRiverId,
@@ -1365,6 +1402,7 @@ export function MapView({
 
     syncStatewideHydrologyLayer(map, effectiveLayerState.statewide_hydrology);
     syncFederalLandsLayer(map, effectiveLayerState.public_federal);
+    syncStateLandsLayer(map, effectiveLayerState.public_state);
     syncFishingAccessLayer(map, effectiveLayerState.access_fishing_sites);
     syncHydrologyOverlays(
       map,
@@ -1377,6 +1415,7 @@ export function MapView({
     mapReady,
     effectiveLayerState.statewide_hydrology,
     effectiveLayerState.public_federal,
+    effectiveLayerState.public_state,
     effectiveLayerState.access_fishing_sites,
     effectiveLayerState.hydro_flow_magnitude,
     effectiveLayerState.hydro_change_indicator,
