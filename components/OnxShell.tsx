@@ -525,10 +525,7 @@ export default function OnxShell({
   );
 
   return (
-    <div
-      className="relative h-[100dvh] w-full overflow-hidden bg-black"
-      style={{ position: "relative", height: "100dvh", width: "100%", overflow: "hidden", background: "#000" }}
-    >
+    <div className="relative h-[100dvh] w-full overflow-hidden">
       <div className="absolute inset-0 z-0">
         <MapView
           rivers={filtered}
@@ -550,55 +547,71 @@ export default function OnxShell({
         />
       </div>
 
-      <div className="absolute left-3 top-3 z-20 hidden sm:block">
-        <div className="onx-glass w-[84px] overflow-hidden rounded-2xl">
+      <aside className="absolute left-4 top-4 z-20 hidden w-[86px] sm:block">
+        <div className="onx-glass overflow-hidden rounded-2xl">
           <div className="border-b border-white/10 px-3 py-3">
             <div className="text-sm font-semibold leading-tight text-white">MRI</div>
             <div className="text-[10px] leading-tight text-white/70">Montana</div>
           </div>
-
           <div className="flex flex-col gap-2 p-2">
-            <button className="onx-iconbtn" title="Map">
-              🗺️
+            <button className="onx-iconbtn" title="Layers" onClick={() => toggleTopPanel("layers")}>
+              <Layers size={18} strokeWidth={2.5} />
             </button>
-            <button className="onx-iconbtn" title="Rivers">
-              🎣
+            <button className="onx-iconbtn" title="Zoom in" onClick={zoomIn}>
+              <Plus size={18} strokeWidth={2.5} />
             </button>
-            <button className="onx-iconbtn" title="Reports">
-              📄
+            <button className="onx-iconbtn" title="Zoom out" onClick={zoomOut}>
+              <Minus size={18} strokeWidth={2.5} />
+            </button>
+            <button className="onx-iconbtn" title="Fit to rivers" onClick={fitToRivers}>
+              <Maximize2 size={18} strokeWidth={2.5} />
+            </button>
+            <button className="onx-iconbtn" title="Recenter Montana" onClick={recenter}>
+              <Crosshair size={18} strokeWidth={2.5} />
+            </button>
+            <button
+              className="onx-iconbtn"
+              title="Toggle list"
+              onClick={() => {
+                const next = drawerSnap === "collapsed" ? "mid" : "collapsed";
+                setDrawerSnap(next);
+                setSheetY(DRAWER_SNAP_Y[next]);
+              }}
+            >
+              <List size={18} strokeWidth={2.5} />
             </button>
           </div>
         </div>
-      </div>
+      </aside>
 
-      <div className="absolute left-3 right-3 top-3 z-20 sm:left-[108px] sm:right-[240px]">
-        <div className="onx-glass flex items-center gap-2 rounded-2xl px-3 py-2">
-          <div className="hidden text-xs font-semibold text-white/80 sm:block">
-            {dateLabel} • {filtered.length} rivers
+      <header className="absolute left-4 right-4 top-4 z-20 sm:left-[108px] sm:right-[340px]">
+        <div className="onx-glass rounded-2xl px-4 py-2.5">
+          <div className="flex items-center gap-3">
+            <div className="hidden shrink-0 text-xs font-semibold text-white/85 sm:block">
+              {dateLabel} • {filtered.length} rivers
+            </div>
+            <div className="hidden shrink-0 text-[11px] text-white/60 lg:block">
+              Last pull {formatPullTime(latestPullAt)} MT
+            </div>
+            <div className="flex-1">
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search rivers..."
+                className="mri-topbar-input"
+              />
+            </div>
+            <button
+              className="rounded-md px-2 py-1 text-xs text-white/75 hover:text-white"
+              onClick={() => {
+                setSearch("");
+                setTier("All");
+                selectRiver(null);
+              }}
+            >
+              Reset
+            </button>
           </div>
-          <div className="hidden text-[11px] text-white/70 sm:block">
-            Last pull {formatPullTime(latestPullAt)} MT
-          </div>
-
-          <div className="flex-1">
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search rivers..."
-              className="w-full bg-transparent text-sm text-white placeholder:text-white/60 outline-none"
-            />
-          </div>
-
-          <button
-            className="rounded-lg px-2 py-1 text-xs text-white/80 hover:text-white"
-            onClick={() => {
-              setSearch("");
-              setTier("All");
-              selectRiver(null);
-            }}
-          >
-            Reset
-          </button>
         </div>
 
         <div className="mt-2 flex flex-wrap gap-2">
@@ -606,197 +619,155 @@ export default function OnxShell({
             <button
               key={t}
               onClick={() => setTier(t)}
-              className={[
-                "h-9 rounded-full border px-3 text-sm font-medium backdrop-blur",
-                tier === t
-                  ? "border-slate-200 bg-white/90 text-slate-900"
-                  : "border-white/20 bg-slate-900/50 text-white hover:bg-slate-900/60",
-              ].join(" ")}
+              className={`mri-chip ${tier === t ? "mri-chip-active" : ""}`}
             >
               {t}
             </button>
           ))}
         </div>
-      </div>
+      </header>
 
-      <div className="absolute right-3 top-3 z-30 flex flex-col items-end gap-2">
-        <div className="hidden flex-col gap-2 sm:flex">
-          <button
-            className={`onx-iconbtn ${layersOpen ? "ring-2 ring-cyan-300/60" : ""}`}
-            title="Layers"
-            onClick={() => toggleTopPanel("layers")}
-          >
-            <Layers size={18} strokeWidth={2.5} />
-          </button>
-          <button className="onx-iconbtn" title="Zoom in" onClick={zoomIn}>
-            <Plus size={18} strokeWidth={2.5} />
-          </button>
-          <button className="onx-iconbtn" title="Zoom out" onClick={zoomOut}>
-            <Minus size={18} strokeWidth={2.5} />
-          </button>
-          <button className="onx-iconbtn" title="Fit to rivers" onClick={fitToRivers}>
-            <Maximize2 size={18} strokeWidth={2.5} />
-          </button>
-          <button className="onx-iconbtn" title="Recenter Montana" onClick={recenter}>
-            <Crosshair size={18} strokeWidth={2.5} />
-          </button>
-          <button
-            className="onx-iconbtn"
-            title="Toggle river list"
-            onClick={() => {
-              const next = drawerSnap === "collapsed" ? "mid" : "collapsed";
-              setDrawerSnap(next);
-              setSheetY(DRAWER_SNAP_Y[next]);
-            }}
-          >
-            <List size={18} strokeWidth={2.5} />
-          </button>
-        </div>
+      <div className="absolute right-4 top-4 z-30 flex items-start gap-2">
         <button
-          className={`onx-iconbtn sm:hidden ${layersOpen ? "ring-2 ring-cyan-300/60" : ""}`}
+          className={`onx-iconbtn sm:hidden ${layersOpen ? "ring-2 ring-sky-300/50" : ""}`}
           title="Layers"
           onClick={() => toggleTopPanel("layers")}
         >
           <Layers size={18} strokeWidth={2.5} />
         </button>
+
         <div
           className={[
-            "w-[calc(100vw-1.5rem)] max-w-[360px] transition-all duration-200",
-            layersOpen
-              ? "translate-y-0 opacity-100"
-              : "pointer-events-none -translate-y-1 opacity-0",
+            "mri-fade w-[min(360px,calc(100vw-1.5rem))]",
+            layersOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
           ].join(" ")}
         >
-          <div className="onx-card rounded-2xl border border-slate-200/70 p-4 shadow-xl">
-          <div className="max-h-[70vh] overflow-auto pr-1">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm font-semibold text-slate-900">Layers</div>
-              <div className="text-[11px] text-slate-500">Map display controls</div>
-            </div>
-            <div className="flex items-center gap-3">
-              <button
-                className="text-[11px] font-medium text-slate-500 hover:text-slate-700"
-                onClick={resetLayers}
-              >
-                Reset layers
-              </button>
-              <button
-                className="text-[11px] font-medium text-slate-500 hover:text-slate-700"
-                onClick={() => setOpenTopPanel("none")}
-              >
-                Close
-              </button>
-            </div>
-          </div>
-
-          <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-            Basemap
-          </div>
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            {BASEMAP_OPTIONS.map((option) => {
-              const selectedBasemap = basemap === option.id;
-              return (
-                <button
-                  key={option.id}
-                  disabled={!option.enabled}
-                  className={[
-                    "rounded-lg border px-2 py-1.5 text-xs font-medium",
-                    selectedBasemap
-                      ? "border-slate-900 bg-slate-900 text-white"
-                      : "border-slate-300 bg-white text-slate-700",
-                    !option.enabled ? "cursor-not-allowed opacity-55" : "hover:bg-slate-50",
-                  ].join(" ")}
-                  onClick={() => setBasemapStyle(option.id)}
-                >
-                  <div>{option.label}</div>
-                  {!option.enabled && option.comingSoon ? (
-                    <div className="text-[10px] text-slate-500">Coming soon</div>
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="mt-4">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-              Core Layers
-            </div>
-            <div className="mt-2 space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-2.5 text-xs text-slate-700">
-              {groupedLayers
-                .flatMap((g) => g.layers)
-                .filter((layer) => layer.id === "mri_river_lines" || layer.id === "mri_selected_highlight")
-                .map((layer) => (
-                  <label key={layer.id} className="flex items-start justify-between gap-3">
-                    <span className="leading-tight">
-                      <span className="block">{layer.label}</span>
-                    </span>
-                    <input
-                      type="checkbox"
-                      checked={layerState[layer.id]}
-                      onChange={(e) => setLayerEnabled(layer.id, e.target.checked)}
-                    />
-                  </label>
-                ))}
-            </div>
-          </div>
-
-          <div className="mt-4">
-            <button
-              className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50"
-              onClick={() => setAdvancedLayersOpen((v) => !v)}
-            >
-              {advancedLayersOpen ? "Hide Advanced Layers" : "Advanced Layers"}
-            </button>
-          </div>
-
-          {advancedLayersOpen ? groupedLayers.map(({ group, layers }) => (
-            <div key={group} className="mt-4">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                {group}
+          <div className="onx-card rounded-2xl p-4">
+            <div className="mri-scroll max-h-[70vh] overflow-auto pr-1">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">Layers</div>
+                  <div className="text-[11px] text-slate-500">Map display controls</div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    className="text-[11px] font-medium text-slate-500 hover:text-slate-700"
+                    onClick={resetLayers}
+                  >
+                    Reset
+                  </button>
+                  <button
+                    className="text-[11px] font-medium text-slate-500 hover:text-slate-700"
+                    onClick={() => setOpenTopPanel("none")}
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
-              <div className="mt-2 space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-2.5 text-xs text-slate-700">
-                {layers
-                  .filter(
-                    (layer) =>
-                      !layer.locked &&
-                      layer.id !== "mri_river_lines" &&
-                      layer.id !== "mri_selected_highlight"
-                  )
-                  .map((layer) => {
-                  const checked = layerState[layer.id];
-                  const disabled = Boolean(layer.comingSoon);
+
+              <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Basemap
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                {BASEMAP_OPTIONS.map((option) => {
+                  const selectedBasemap = basemap === option.id;
                   return (
-                    <label key={layer.id} className="flex items-start justify-between gap-3">
-                      <span className="leading-tight">
-                        <span className="block">{layer.label}</span>
-                        {layer.minZoomNote ? (
-                          <span className="text-[10px] text-slate-500">{layer.minZoomNote}</span>
-                        ) : null}
-                        {layer.comingSoon ? (
-                          <span className="text-[10px] text-slate-500">Coming soon</span>
-                        ) : null}
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        disabled={disabled}
-                        onChange={(e) => setLayerEnabled(layer.id, e.target.checked)}
-                      />
-                    </label>
+                    <button
+                      key={option.id}
+                      disabled={!option.enabled}
+                      className={[
+                        "rounded-lg border px-2 py-1.5 text-xs font-medium",
+                        selectedBasemap
+                          ? "border-slate-900 bg-slate-900 text-white"
+                          : "border-slate-300 bg-white text-slate-700",
+                        !option.enabled ? "cursor-not-allowed opacity-55" : "hover:bg-slate-50",
+                      ].join(" ")}
+                      onClick={() => setBasemapStyle(option.id)}
+                    >
+                      <div>{option.label}</div>
+                      {!option.enabled && option.comingSoon ? (
+                        <div className="text-[10px] text-slate-500">Coming soon</div>
+                      ) : null}
+                    </button>
                   );
                 })}
               </div>
+
+              <div className="mt-4">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Core Layers
+                </div>
+                <div className="mt-2 space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-2.5 text-xs text-slate-700">
+                  {groupedLayers
+                    .flatMap((g) => g.layers)
+                    .filter((layer) => layer.id === "mri_river_lines" || layer.id === "mri_selected_highlight")
+                    .map((layer) => (
+                      <label key={layer.id} className="flex items-start justify-between gap-3">
+                        <span>{layer.label}</span>
+                        <input
+                          type="checkbox"
+                          checked={layerState[layer.id]}
+                          onChange={(e) => setLayerEnabled(layer.id, e.target.checked)}
+                        />
+                      </label>
+                    ))}
+                </div>
+              </div>
+
+              <div className="mt-4">
+                <button
+                  className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  onClick={() => setAdvancedLayersOpen((v) => !v)}
+                >
+                  {advancedLayersOpen ? "Hide Advanced Layers" : "Advanced Layers"}
+                </button>
+              </div>
+
+              {advancedLayersOpen
+                ? groupedLayers.map(({ group, layers }) => (
+                    <div key={group} className="mt-4">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        {group}
+                      </div>
+                      <div className="mt-2 space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-2.5 text-xs text-slate-700">
+                        {layers
+                          .filter(
+                            (layer) =>
+                              !layer.locked &&
+                              layer.id !== "mri_river_lines" &&
+                              layer.id !== "mri_selected_highlight"
+                          )
+                          .map((layer) => (
+                            <label key={layer.id} className="flex items-start justify-between gap-3">
+                              <span className="leading-tight">
+                                <span className="block">{layer.label}</span>
+                                {layer.minZoomNote ? (
+                                  <span className="text-[10px] text-slate-500">{layer.minZoomNote}</span>
+                                ) : null}
+                                {layer.comingSoon ? (
+                                  <span className="text-[10px] text-slate-500">Coming soon</span>
+                                ) : null}
+                              </span>
+                              <input
+                                type="checkbox"
+                                checked={layerState[layer.id]}
+                                disabled={Boolean(layer.comingSoon)}
+                                onChange={(e) => setLayerEnabled(layer.id, e.target.checked)}
+                              />
+                            </label>
+                          ))}
+                      </div>
+                    </div>
+                  ))
+                : null}
             </div>
-          )) : null}
           </div>
         </div>
       </div>
-      </div>
 
-      <div className="absolute right-3 top-[120px] z-20 hidden w-[280px] sm:block">
+      <section className="absolute right-4 top-[118px] z-20 hidden w-[314px] sm:block">
         {detailsOpen ? (
-          <div className="onx-card rounded-3xl p-8 shadow-[0_12px_28px_rgba(15,23,42,0.20)] transition-opacity duration-150">
+          <div className="onx-card rounded-3xl p-7">
             <div className="flex items-center justify-between">
               <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                 River Detail
@@ -811,7 +782,7 @@ export default function OnxShell({
 
             {selected ? (
               <>
-                <div className="mt-2 text-[15px] font-semibold text-slate-900">
+                <div className="mt-2 text-[17px] font-semibold text-slate-900">
                   {selected.river_name}
                 </div>
                 <div className="text-xs text-slate-600">{selected.gauge_label ?? ""}</div>
@@ -855,7 +826,7 @@ export default function OnxShell({
                   </div>
                 ) : null}
 
-                <div className="my-4 h-px bg-slate-200/80" />
+                <div className="my-4 h-px bg-slate-300/65" />
 
                 <div className="mt-5 grid grid-cols-2 gap-x-5 gap-y-6 text-xs">
                   <div>
@@ -928,7 +899,7 @@ export default function OnxShell({
                   Wind AM {selected.wind_am_mph ?? "—"} • PM {selected.wind_pm_mph ?? "—"}
                 </div>
 
-                <div className="my-3 h-px bg-slate-200/80" />
+                <div className="my-3 h-px bg-slate-300/65" />
 
                 <div>
                   <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
@@ -972,7 +943,7 @@ export default function OnxShell({
                   )}
                 </div>
 
-                <div className="my-3 h-px bg-slate-200/80" />
+                <div className="my-3 h-px bg-slate-300/65" />
 
                 <div>
                   <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
@@ -1055,7 +1026,7 @@ export default function OnxShell({
             Details
           </button>
         )}
-      </div>
+      </section>
 
       <div
         className="absolute bottom-0 left-0 right-0 z-10"
@@ -1064,10 +1035,10 @@ export default function OnxShell({
           transition: isDragging ? "none" : "transform 220ms ease-out",
         }}
       >
-        <div className={`mx-auto max-w-6xl px-3 pb-3 ${detailsOpen ? "sm:pr-[300px]" : ""}`}>
+        <div className={`mx-auto max-w-6xl px-3 pb-3 ${detailsOpen ? "sm:pr-[340px]" : ""}`}>
           <div className="onx-glass overflow-hidden rounded-3xl shadow-2xl">
             <div
-              className={`mx-auto mt-2 h-1.5 w-12 flex-shrink-0 cursor-grab rounded-full bg-white/25 active:cursor-grabbing ${isDragging ? "select-none" : ""}`}
+              className={`mx-auto mt-2 h-1.5 w-14 flex-shrink-0 cursor-grab rounded-full bg-white/35 active:cursor-grabbing ${isDragging ? "select-none" : ""}`}
               onPointerDown={onSheetPointerDown}
               onTouchStart={onSheetPointerDown}
               title="Drag to expand/collapse"
@@ -1112,10 +1083,9 @@ export default function OnxShell({
 
             <div className="px-3 pb-3 pt-2">
               <div
-                className="overflow-auto pr-1 transition-[max-height] duration-200"
+                className="mri-scroll overflow-auto pr-1 transition-[max-height] duration-200"
                 style={{
-                  maxHeight:
-                    drawerSnap === "expanded" ? "58vh" : drawerSnap === "mid" ? "34vh" : "80px",
+                  maxHeight: drawerSnap === "expanded" ? "65vh" : drawerSnap === "mid" ? "40vh" : "80px",
                 }}
               >
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -1123,12 +1093,7 @@ export default function OnxShell({
                     <button
                       key={r.river_id}
                       onClick={() => selectRiver(r.river_id)}
-                      className={[
-                        "rounded-2xl border text-left transition",
-                        r.river_id === selectedId
-                          ? "border-white/45 bg-white/15"
-                          : "border-white/15 bg-white/5 hover:border-white/25",
-                      ].join(" ")}
+                      className={`mri-drawer-card text-left ${r.river_id === selectedId ? "mri-drawer-card-selected" : ""}`}
                     >
                       <div className="p-3">
                         <div className="flex items-start justify-between gap-3">
@@ -1143,7 +1108,7 @@ export default function OnxShell({
                                 />
                               ) : null}
                             </div>
-                            <div className="text-xs text-white/70">{r.gauge_label ?? ""}</div>
+                            <div className="text-xs text-white/60">{r.gauge_label ?? ""}</div>
                           </div>
                           <TierPill
                             tier={
@@ -1158,13 +1123,13 @@ export default function OnxShell({
                           />
                         </div>
 
-                        <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-white/85">
+                        <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-white/88">
                           <div>
-                            <div className="text-white/60">Score</div>
+                            <div className="mri-kv-label">Score</div>
                             <div className="font-semibold">{r.fishability_score_calc ?? "—"}</div>
                           </div>
                           <div>
-                            <div className="text-white/60">Flow</div>
+                            <div className="mri-kv-label">Flow</div>
                             <div className="font-semibold">
                               {r.flow_cfs ?? "—"}
                               <span className="ml-1 text-[11px] font-medium text-white/60">
@@ -1173,7 +1138,7 @@ export default function OnxShell({
                             </div>
                           </div>
                           <div>
-                            <div className="text-white/60">Temp</div>
+                            <div className="mri-kv-label">Temp</div>
                             <div className="font-semibold">
                               {r.water_temp_f != null ? `${Number(r.water_temp_f).toFixed(1)}°` : "—"}
                             </div>

@@ -259,4 +259,4 @@ export function createDefaultLayerState(): Record<LayerId, boolean> {
   }, {} as Record<LayerId, boolean>);
 }
 
-export const LAYER_GROUP_ORDER: LayerGroup[] = ["Public Lands", "Access", "MRI Overlays"];
+export const LAYER_GROUP_ORDER: LayerGroup[] = ["MRI Overlays", "Public Lands", "Access"];
