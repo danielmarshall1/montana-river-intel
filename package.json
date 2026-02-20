@@ -4,6 +4,7 @@
   "description": "Montana River Intel - map-first outdoor intelligence",
   "scripts": {
     "dev": "next dev",
+    "dev:reset": "rm -rf .next .next_* && next dev -p 3000",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
