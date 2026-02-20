@@ -33,6 +33,7 @@ interface MapViewProps {
   layerState?: Record<LayerId, boolean>;
   rightPanelOpen?: boolean;
   drawerState?: "collapsed" | "mid" | "expanded";
+  selectionSeq?: number;
   onSelectRiver: (river: FishabilityRow) => void;
   className?: string;
   initialStyleUrl?: string;
@@ -1099,6 +1100,7 @@ export function MapView({
   layerState,
   rightPanelOpen = false,
   drawerState = "mid",
+  selectionSeq = 0,
   onSelectRiver,
   className,
   onMapReady,
@@ -1357,7 +1359,7 @@ export function MapView({
       return;
     }
 
-    const fitSignature = `${selectedRiverId}|${rightPanelOpen ? 1 : 0}|${drawerState}`;
+    const fitSignature = `${selectedRiverId}|${selectionSeq}|${rightPanelOpen ? 1 : 0}|${drawerState}`;
     if (lastFitSignatureRef.current === fitSignature) return;
     lastFitSignatureRef.current = fitSignature;
     lastFlownRef.current = selectedRiverId;
@@ -1412,6 +1414,7 @@ export function MapView({
     effectiveLayerState.mri_score_coloring,
     rightPanelOpen,
     drawerState,
+    selectionSeq,
     mapReady,
   ]);
 

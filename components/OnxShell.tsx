@@ -108,6 +108,7 @@ export default function OnxShell({
   const [search, setSearch] = useState("");
   const [tier, setTier] = useState<"All" | "Good" | "Fair" | "Tough">("All");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectionSeq, setSelectionSeq] = useState(0);
   const [drawerSnap, setDrawerSnap] = useState<DrawerSnap>("mid");
   const [sheetY, setSheetY] = useState<number>(DRAWER_SNAP_Y.mid);
   const [isDragging, setIsDragging] = useState(false);
@@ -503,6 +504,14 @@ export default function OnxShell({
     setOpenTopPanel((prev) => (prev === panel ? "none" : panel));
   }
 
+  function selectRiver(riverId: string | null) {
+    setSelectedId(riverId);
+    if (riverId) {
+      setSelectionSeq((prev) => prev + 1);
+      setOpenTopPanel("detail");
+    }
+  }
+
   const layersOpen = openTopPanel === "layers";
   const detailsOpen = openTopPanel === "detail";
 
@@ -532,7 +541,8 @@ export default function OnxShell({
           layerState={layerState}
           rightPanelOpen={detailsOpen}
           drawerState={drawerSnap}
-          onSelectRiver={(r) => setSelectedId(r.river_id)}
+          selectionSeq={selectionSeq}
+          onSelectRiver={(r) => selectRiver(r.river_id)}
           className="absolute inset-0"
           onMapReady={(m) => {
             mapRef.current = m;
@@ -584,7 +594,7 @@ export default function OnxShell({
             onClick={() => {
               setSearch("");
               setTier("All");
-              setSelectedId(null);
+              selectRiver(null);
             }}
           >
             Reset
@@ -1085,7 +1095,7 @@ export default function OnxShell({
                   {topRivers.map((r) => (
                     <button
                       key={`top-${r.river_id}`}
-                      onClick={() => setSelectedId(r.river_id)}
+                      onClick={() => selectRiver(r.river_id)}
                       className={[
                         "whitespace-nowrap rounded-full border px-2.5 py-1 text-xs transition",
                         r.river_id === selectedId
@@ -1112,7 +1122,7 @@ export default function OnxShell({
                   {filtered.map((r) => (
                     <button
                       key={r.river_id}
-                      onClick={() => setSelectedId(r.river_id)}
+                      onClick={() => selectRiver(r.river_id)}
                       className={[
                         "rounded-2xl border text-left transition",
                         r.river_id === selectedId
