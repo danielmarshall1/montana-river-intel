@@ -34,6 +34,12 @@ type ParsedUSGS = {
   }>;
 };
 
+type ParsedDVParam = {
+  hasSeries: boolean;
+  value: number | null;
+  observedAt: string | null;
+};
+
 type ParsedDVTemp = {
   hasTempSeries: boolean;
   waterTempF: number | null;
@@ -167,28 +173,51 @@ function parseUSGSTimeSeries(payload: any): ParsedUSGS {
 }
 
 function parseUSGSDVTemp(payload: any): ParsedDVTemp {
+  const parsed = parseUSGSDVParam(payload, "00010");
+  if (!parsed.hasSeries || parsed.value == null) {
+    return {
+      hasTempSeries: parsed.hasSeries,
+      waterTempF: null,
+      observedAt: parsed.observedAt,
+    };
+  }
+  if (parsed.value < -5 || parsed.value > 35) {
+    return {
+      hasTempSeries: parsed.hasSeries,
+      waterTempF: null,
+      observedAt: parsed.observedAt,
+    };
+  }
+  return { hasTempSeries: true, waterTempF: cToF(parsed.value), observedAt: parsed.observedAt };
+}
+
+function parseUSGSDVParam(payload: any, parameterCd: string): ParsedDVParam {
   const series = payload?.value?.timeSeries ?? [];
   if (!Array.isArray(series) || series.length === 0) {
-    return { hasTempSeries: false, waterTempF: null, observedAt: null };
+    return { hasSeries: false, value: null, observedAt: null };
   }
 
-  const ts = series.find((s: any) => s?.variable?.variableCode?.[0]?.value === "00010") ?? series[0];
+  const ts = series.find((s: any) => s?.variable?.variableCode?.[0]?.value === parameterCd) ?? series[0];
   const values = ts?.values?.[0]?.value ?? [];
   if (!Array.isArray(values) || values.length === 0) {
-    return { hasTempSeries: true, waterTempF: null, observedAt: null };
+    return { hasSeries: true, value: null, observedAt: null };
   }
 
-  const latest = values[values.length - 1] ?? {};
-  const rawValue = Number(latest?.value);
-  const observedAt = typeof latest?.dateTime === "string" ? latest.dateTime : null;
-  if (!Number.isFinite(rawValue) || rawValue <= -9990 || rawValue < -5 || rawValue > 35) {
-    return { hasTempSeries: true, waterTempF: null, observedAt };
+  for (let i = values.length - 1; i >= 0; i--) {
+    const row = values[i] ?? {};
+    const rawValue = Number(row?.value);
+    const observedAt = typeof row?.dateTime === "string" ? row.dateTime : null;
+    if (!Number.isFinite(rawValue) || rawValue <= -9990) {
+      continue;
+    }
+    return { hasSeries: true, value: rawValue, observedAt };
   }
 
+  const last = values[values.length - 1] ?? {};
   return {
-    hasTempSeries: true,
-    waterTempF: cToF(rawValue),
-    observedAt,
+    hasSeries: true,
+    value: null,
+    observedAt: typeof last?.dateTime === "string" ? last.dateTime : null,
   };
 }
 
@@ -216,6 +245,18 @@ async function fetchUSGSDVTemp(siteNo: string): Promise<{ parsed: ParsedDVTemp; 
 
   const body = await resp.json();
   return { parsed: parseUSGSDVTemp(body), status };
+}
+
+async function fetchUSGSDVFlow(siteNo: string): Promise<{ parsed: ParsedDVParam; status: number }> {
+  const url =
+    `https://waterservices.usgs.gov/nwis/dv/?format=json&sites=${encodeURIComponent(siteNo)}` +
+    "&parameterCd=00060&siteStatus=all&period=P14D";
+
+  const resp = await fetch(url, { method: "GET" });
+  const status = resp.status;
+  if (!resp.ok) throw new Error(`USGS DV HTTP ${status}`);
+  const body = await resp.json();
+  return { parsed: parseUSGSDVParam(body, "00060"), status };
 }
 
 serve(async (req) => {
@@ -302,6 +343,9 @@ serve(async (req) => {
 
       const { parsed: mainIv, status } = await fetchUSGSIv(flowSiteNo, "00060,00010,00065");
 
+      let flowValue = mainIv.flowCfs;
+      let flowObservedAt = mainIv.flowObservedAt;
+      let flowSource = "IV";
       let tempValue = mainIv.waterTempF;
       let tempObservedAt = mainIv.tempObservedAt;
       let tempSource = "IV";
@@ -338,7 +382,24 @@ serve(async (req) => {
         }
       }
 
+      if (flowValue == null) {
+        try {
+          const dvFlow = await fetchUSGSDVFlow(flowSiteNo);
+          if (dvFlow.parsed.value != null) {
+            flowValue = Number(dvFlow.parsed.value.toFixed(2));
+            flowObservedAt = dvFlow.parsed.observedAt;
+            flowSource = "DV_FALLBACK";
+            if (!mainIv.parameterCodes.includes("00060(DV)")) {
+              mainIv.parameterCodes.push("00060(DV)");
+            }
+          }
+        } catch {
+          // keep null flow
+        }
+      }
+
       mainIv.rawSummary.temp_source = tempSource;
+      mainIv.rawSummary.flow_source = flowSource;
       mainIv.rawSummary.temp_site_no = tempSiteNo;
       mainIv.rawSummary.flow_site_no = flowSiteNo;
       if (tempValue == null && !hasTempIv && !hasTempDv) {
@@ -350,10 +411,10 @@ serve(async (req) => {
           river_id: river.id,
           obs_date: obsDate,
           source: "usgs_iv",
-          flow_cfs: mainIv.flowCfs,
+          flow_cfs: flowValue,
           water_temp_f: tempValue,
           gage_height_ft: mainIv.gageHeightFt,
-          source_flow_observed_at: mainIv.flowObservedAt,
+          source_flow_observed_at: flowObservedAt,
           source_temp_observed_at: tempObservedAt,
           source_gage_observed_at: mainIv.gageObservedAt,
           source_parameter_codes: mainIv.parameterCodes,
@@ -413,10 +474,10 @@ serve(async (req) => {
         obs_date: obsDate,
         status: "success",
         http_status: status,
-        flow_cfs: mainIv.flowCfs,
+        flow_cfs: flowValue,
         water_temp_f: tempValue,
         gage_height_ft: mainIv.gageHeightFt,
-        source_flow_observed_at: mainIv.flowObservedAt,
+        source_flow_observed_at: flowObservedAt,
         source_temp_observed_at: tempObservedAt,
         source_gage_observed_at: mainIv.gageObservedAt,
         parameter_codes: mainIv.parameterCodes,

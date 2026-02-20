@@ -970,7 +970,7 @@ export default function OnxShell({
                 </div>
                 <div className="mt-2 grid grid-cols-1 gap-0.5 text-[11px] text-slate-500">
                   <div>
-                    Flow source: {formatPullTime(selected.source_flow_observed_at)} MT
+                    Flow source: {selected.source_flow_observed_at ? `${formatPullTime(selected.source_flow_observed_at)} MT` : "Flow not available at this gauge"}
                   </div>
                   <div>
                     Temp source: {selected.source_temp_observed_at ? `${formatPullTime(selected.source_temp_observed_at)} MT` : "Temp not available at this gauge"}
@@ -1039,7 +1039,7 @@ export default function OnxShell({
                   <div>
                     <div className="text-[10px] text-slate-500">Flow</div>
                     <div className="font-medium text-slate-900">
-                      {selected.flow_cfs ?? "—"}
+                      {selected.flow_cfs ?? "Flow not available at this gauge"}
                       <span className="ml-1 text-[11px] font-medium text-slate-500">
                         {getFlowTrendArrow(selected.change_48h_pct_calc)}
                       </span>
