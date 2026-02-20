@@ -9,6 +9,13 @@ type RiverRow = {
   is_active: boolean | null;
 };
 
+type RiverParamMapRow = {
+  river_id: string;
+  flow_site_no: string | null;
+  temp_site_no: string | null;
+  stage_site_no: string | null;
+};
+
 type ParsedUSGS = {
   flowCfs: number | null;
   waterTempF: number | null;
@@ -18,12 +25,19 @@ type ParsedUSGS = {
   gageObservedAt: string | null;
   parameterCodes: string[];
   rawSummary: Record<string, unknown>;
+  hasTempSeries: boolean;
   hourlyRows: Array<{
     observedAt: string;
     flowCfs: number | null;
     waterTempF: number | null;
     gageHeightFt: number | null;
   }>;
+};
+
+type ParsedDVTemp = {
+  hasTempSeries: boolean;
+  waterTempF: number | null;
+  observedAt: string | null;
 };
 
 function toMountainObsDate(now = new Date()): string {
@@ -39,6 +53,10 @@ function toMountainObsDate(now = new Date()): string {
   const d = parts.find((p) => p.type === "day")?.value;
   if (!y || !m || !d) return now.toISOString().slice(0, 10);
   return `${y}-${m}-${d}`;
+}
+
+function cToF(c: number): number {
+  return Number(((c * 9) / 5 + 32).toFixed(2));
 }
 
 function parseUSGSTimeSeries(payload: any): ParsedUSGS {
@@ -61,6 +79,8 @@ function parseUSGSTimeSeries(payload: any): ParsedUSGS {
     gageHeightFt: number | null;
   }>();
 
+  let hasTempSeries = false;
+
   for (const ts of series) {
     const code: string | undefined = ts?.variable?.variableCode?.[0]?.value;
     if (!code) continue;
@@ -68,6 +88,10 @@ function parseUSGSTimeSeries(payload: any): ParsedUSGS {
 
     const values = ts?.values?.[0]?.value ?? [];
     if (!Array.isArray(values) || values.length === 0) continue;
+
+    if (code === "00010") {
+      hasTempSeries = true;
+    }
 
     const latest = values[values.length - 1] ?? {};
     const rawValue = Number(latest?.value);
@@ -82,8 +106,7 @@ function parseUSGSTimeSeries(payload: any): ParsedUSGS {
       flowCfs = rawValue;
       flowObservedAt = observedAt;
     } else if (code === "00010") {
-      const c = rawValue;
-      waterTempF = c < -5 || c > 35 ? null : Number(((c * 9) / 5 + 32).toFixed(2));
+      waterTempF = rawValue < -5 || rawValue > 35 ? null : cToF(rawValue);
       tempObservedAt = observedAt;
     } else if (code === "00065") {
       gageHeightFt = rawValue;
@@ -115,8 +138,7 @@ function parseUSGSTimeSeries(payload: any): ParsedUSGS {
         if (code === "00060") {
           row.flowCfs = n;
         } else if (code === "00010") {
-          const tempF = n < -5 || n > 35 ? null : Number(((n * 9) / 5 + 32).toFixed(2));
-          row.waterTempF = tempF;
+          row.waterTempF = n < -5 || n > 35 ? null : cToF(n);
         } else if (code === "00065") {
           row.gageHeightFt = n;
         }
@@ -139,21 +161,61 @@ function parseUSGSTimeSeries(payload: any): ParsedUSGS {
     gageObservedAt,
     parameterCodes: Array.from(parameterCodes),
     rawSummary,
+    hasTempSeries,
     hourlyRows,
   };
 }
 
-async function fetchUSGS(siteNo: string): Promise<{ parsed: ParsedUSGS; status: number }> {
+function parseUSGSDVTemp(payload: any): ParsedDVTemp {
+  const series = payload?.value?.timeSeries ?? [];
+  if (!Array.isArray(series) || series.length === 0) {
+    return { hasTempSeries: false, waterTempF: null, observedAt: null };
+  }
+
+  const ts = series.find((s: any) => s?.variable?.variableCode?.[0]?.value === "00010") ?? series[0];
+  const values = ts?.values?.[0]?.value ?? [];
+  if (!Array.isArray(values) || values.length === 0) {
+    return { hasTempSeries: true, waterTempF: null, observedAt: null };
+  }
+
+  const latest = values[values.length - 1] ?? {};
+  const rawValue = Number(latest?.value);
+  const observedAt = typeof latest?.dateTime === "string" ? latest.dateTime : null;
+  if (!Number.isFinite(rawValue) || rawValue <= -9990 || rawValue < -5 || rawValue > 35) {
+    return { hasTempSeries: true, waterTempF: null, observedAt };
+  }
+
+  return {
+    hasTempSeries: true,
+    waterTempF: cToF(rawValue),
+    observedAt,
+  };
+}
+
+async function fetchUSGSIv(siteNo: string, parameterCd: string): Promise<{ parsed: ParsedUSGS; status: number }> {
   const url =
     `https://waterservices.usgs.gov/nwis/iv/?format=json&sites=${encodeURIComponent(siteNo)}` +
-    "&parameterCd=00060,00010,00065&siteStatus=all";
+    `&parameterCd=${encodeURIComponent(parameterCd)}&siteStatus=all`;
 
   const resp = await fetch(url, { method: "GET" });
   const status = resp.status;
-  if (!resp.ok) throw new Error(`USGS HTTP ${status}`);
+  if (!resp.ok) throw new Error(`USGS IV HTTP ${status}`);
 
   const body = await resp.json();
   return { parsed: parseUSGSTimeSeries(body), status };
+}
+
+async function fetchUSGSDVTemp(siteNo: string): Promise<{ parsed: ParsedDVTemp; status: number }> {
+  const url =
+    `https://waterservices.usgs.gov/nwis/dv/?format=json&sites=${encodeURIComponent(siteNo)}` +
+    "&parameterCd=00010&siteStatus=all&period=P14D";
+
+  const resp = await fetch(url, { method: "GET" });
+  const status = resp.status;
+  if (!resp.ok) throw new Error(`USGS DV HTTP ${status}`);
+
+  const body = await resp.json();
+  return { parsed: parseUSGSDVTemp(body), status };
 }
 
 serve(async (req) => {
@@ -214,30 +276,88 @@ serve(async (req) => {
     });
   }
 
+  const riverMapResp = await sb
+    .from("river_usgs_map")
+    .select("river_id,flow_site_no,temp_site_no,stage_site_no");
+
+  const riverMap = new Map<string, RiverParamMapRow>();
+  if (!riverMapResp.error && riverMapResp.data) {
+    for (const row of riverMapResp.data as RiverParamMapRow[]) {
+      riverMap.set(String(row.river_id), row);
+    }
+  }
+
   const rivers = (riversResp.data ?? []) as RiverRow[];
   let okCount = 0;
   let failCount = 0;
 
   for (const river of rivers) {
-    const siteNo = river.usgs_site_no?.trim();
-    if (!siteNo) continue;
+    const defaultSiteNo = river.usgs_site_no?.trim();
+    if (!defaultSiteNo) continue;
 
     try {
-      const { parsed, status } = await fetchUSGS(siteNo);
+      const mapRow = riverMap.get(river.id);
+      const flowSiteNo = (mapRow?.flow_site_no ?? defaultSiteNo).trim();
+      const tempSiteNo = (mapRow?.temp_site_no ?? flowSiteNo).trim();
+
+      const { parsed: mainIv, status } = await fetchUSGSIv(flowSiteNo, "00060,00010,00065");
+
+      let tempValue = mainIv.waterTempF;
+      let tempObservedAt = mainIv.tempObservedAt;
+      let tempSource = "IV";
+      let hasTempIv = mainIv.hasTempSeries;
+      let hasTempDv = false;
+
+      if (tempSiteNo !== flowSiteNo && tempValue == null) {
+        const ivTempOnly = await fetchUSGSIv(tempSiteNo, "00010");
+        hasTempIv = hasTempIv || ivTempOnly.parsed.hasTempSeries;
+        if (ivTempOnly.parsed.waterTempF != null) {
+          tempValue = ivTempOnly.parsed.waterTempF;
+          tempObservedAt = ivTempOnly.parsed.tempObservedAt;
+          tempSource = "IV_TEMP_SITE";
+          if (!mainIv.parameterCodes.includes("00010")) {
+            mainIv.parameterCodes.push("00010(TEMP_SITE)");
+          }
+        }
+      }
+
+      if (tempValue == null) {
+        try {
+          const dvTemp = await fetchUSGSDVTemp(tempSiteNo);
+          hasTempDv = dvTemp.parsed.hasTempSeries;
+          if (dvTemp.parsed.waterTempF != null) {
+            tempValue = dvTemp.parsed.waterTempF;
+            tempObservedAt = dvTemp.parsed.observedAt;
+            tempSource = "DV_FALLBACK";
+            if (!mainIv.parameterCodes.includes("00010(DV)")) {
+              mainIv.parameterCodes.push("00010(DV)");
+            }
+          }
+        } catch {
+          hasTempDv = false;
+        }
+      }
+
+      mainIv.rawSummary.temp_source = tempSource;
+      mainIv.rawSummary.temp_site_no = tempSiteNo;
+      mainIv.rawSummary.flow_site_no = flowSiteNo;
+      if (tempValue == null && !hasTempIv && !hasTempDv) {
+        mainIv.rawSummary.temp_status = "not_available";
+      }
 
       const upsertResp = await sb.from("river_daily").upsert(
         {
           river_id: river.id,
           obs_date: obsDate,
           source: "usgs_iv",
-          flow_cfs: parsed.flowCfs,
-          water_temp_f: parsed.waterTempF,
-          gage_height_ft: parsed.gageHeightFt,
-          source_flow_observed_at: parsed.flowObservedAt,
-          source_temp_observed_at: parsed.tempObservedAt,
-          source_gage_observed_at: parsed.gageObservedAt,
-          source_parameter_codes: parsed.parameterCodes,
-          source_payload: parsed.rawSummary,
+          flow_cfs: mainIv.flowCfs,
+          water_temp_f: tempValue,
+          gage_height_ft: mainIv.gageHeightFt,
+          source_flow_observed_at: mainIv.flowObservedAt,
+          source_temp_observed_at: tempObservedAt,
+          source_gage_observed_at: mainIv.gageObservedAt,
+          source_parameter_codes: mainIv.parameterCodes,
+          source_payload: mainIv.rawSummary,
         },
         { onConflict: "river_id,obs_date" }
       );
@@ -246,14 +366,14 @@ serve(async (req) => {
         throw new Error(`river_daily upsert failed: ${upsertResp.error.message}`);
       }
 
-      if (parsed.hourlyRows.length > 0) {
-        const hourlyPayload = parsed.hourlyRows.map((row) => {
+      if (mainIv.hourlyRows.length > 0) {
+        const hourlyPayload = mainIv.hourlyRows.map((row) => {
           const obsTs = new Date(row.observedAt);
-          const obsDate = toMountainObsDate(obsTs);
+          const hourlyObsDate = toMountainObsDate(obsTs);
           return {
             river_id: river.id,
             observed_at: row.observedAt,
-            obs_date: obsDate,
+            obs_date: hourlyObsDate,
             flow_cfs: row.flowCfs,
             water_temp_f: row.waterTempF,
             gage_height_ft: row.gageHeightFt,
@@ -266,25 +386,41 @@ serve(async (req) => {
           .upsert(hourlyPayload, { onConflict: "river_id,observed_at" });
 
         if (hourlyUpsert.error) {
-          parsed.rawSummary.hourly_upsert_error = hourlyUpsert.error.message;
+          mainIv.rawSummary.hourly_upsert_error = hourlyUpsert.error.message;
         }
+      }
+
+      const paramUpsert = await sb
+        .from("usgs_site_parameters")
+        .upsert(
+          {
+            site_no: tempSiteNo,
+            has_temp_iv: hasTempIv,
+            has_temp_dv: hasTempDv,
+            checked_at: new Date().toISOString(),
+          },
+          { onConflict: "site_no" }
+        );
+
+      if (paramUpsert.error) {
+        mainIv.rawSummary.site_parameter_upsert_error = paramUpsert.error.message;
       }
 
       const siteLogResp = await sb.from("usgs_pull_sites").insert({
         run_id: runId,
         river_id: river.id,
-        usgs_site_no: siteNo,
+        usgs_site_no: flowSiteNo,
         obs_date: obsDate,
         status: "success",
         http_status: status,
-        flow_cfs: parsed.flowCfs,
-        water_temp_f: parsed.waterTempF,
-        gage_height_ft: parsed.gageHeightFt,
-        source_flow_observed_at: parsed.flowObservedAt,
-        source_temp_observed_at: parsed.tempObservedAt,
-        source_gage_observed_at: parsed.gageObservedAt,
-        parameter_codes: parsed.parameterCodes,
-        raw_summary: parsed.rawSummary,
+        flow_cfs: mainIv.flowCfs,
+        water_temp_f: tempValue,
+        gage_height_ft: mainIv.gageHeightFt,
+        source_flow_observed_at: mainIv.flowObservedAt,
+        source_temp_observed_at: tempObservedAt,
+        source_gage_observed_at: mainIv.gageObservedAt,
+        parameter_codes: mainIv.parameterCodes,
+        raw_summary: mainIv.rawSummary,
       });
 
       if (siteLogResp.error) {
@@ -298,7 +434,7 @@ serve(async (req) => {
       await sb.from("usgs_pull_sites").insert({
         run_id: runId,
         river_id: river.id,
-        usgs_site_no: siteNo,
+        usgs_site_no: defaultSiteNo,
         obs_date: obsDate,
         status: "failed",
         error_message: msg,

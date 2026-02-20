@@ -170,6 +170,19 @@ Intraday thermal + hatch verification SQL:
 -- supabase/sql/verify_hatch_thermal_intraday.sql
 ```
 
+USGS temperature availability audit:
+
+```bash
+npm run audit:temp
+```
+
+SQL report for temp source coverage:
+
+```sql
+-- file:
+-- supabase/sql/report_temp_availability.sql
+```
+
 ## Map Layers Configuration
 
 Layers are defined in one place:

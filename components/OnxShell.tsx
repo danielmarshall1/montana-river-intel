@@ -833,7 +833,7 @@ export default function OnxShell({
                     Flow source: {formatPullTime(selected.source_flow_observed_at)} MT
                   </div>
                   <div>
-                    Temp source: {formatPullTime(selected.source_temp_observed_at)} MT
+                    Temp source: {selected.source_temp_observed_at ? `${formatPullTime(selected.source_temp_observed_at)} MT` : "Temp not available at this gauge"}
                   </div>
                   <div>
                     Weather/score: {formatPullTime(selected.updated_at)} MT
@@ -908,7 +908,9 @@ export default function OnxShell({
                   <div>
                     <div className="text-[10px] text-slate-500">Temp</div>
                     <div className="font-medium text-slate-900">
-                      {selected.water_temp_f != null ? `${Number(selected.water_temp_f).toFixed(1)}°F` : "—"}
+                      {selected.water_temp_f != null
+                        ? `${Number(selected.water_temp_f).toFixed(1)}°F`
+                        : "Temp not available at this gauge"}
                     </div>
                   </div>
                   <div>
@@ -1082,7 +1084,11 @@ export default function OnxShell({
                         <div>48h change</div>
                         <div className="text-right">{formatNum(selected.change_48h_pct_calc, 1)}%</div>
                         <div>Temp</div>
-                        <div className="text-right">{formatNum(selected.water_temp_f, 1)}°F</div>
+                        <div className="text-right">
+                          {selected.water_temp_f != null
+                            ? `${formatNum(selected.water_temp_f, 1)}°F`
+                            : "Temp not available at this gauge"}
+                        </div>
                         <div>Wind AM / PM</div>
                         <div className="text-right">
                           {formatNum(selected.wind_am_mph)} / {formatNum(selected.wind_pm_mph)}
