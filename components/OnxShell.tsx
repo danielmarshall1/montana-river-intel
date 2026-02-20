@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
-import { Plus, Minus, Maximize2, Crosshair, Layers, List } from "lucide-react";
+import { Plus, Minus, Maximize2, Crosshair, Layers, List, X } from "lucide-react";
 import { MapView } from "@/components/MapView";
 import { fetchRiverGeom } from "@/lib/supabase";
 import { fetchRiverGeojsonBrowser } from "@/lib/supabaseBrowser";
@@ -101,10 +101,17 @@ export default function OnxShell({
 }) {
   type TopPanel = "none" | "layers" | "detail";
   type DrawerSnap = "collapsed" | "mid" | "expanded";
+  type MobileSurface = "map" | "listSheet" | "detailSheet" | "toolsSheet";
+  type MobileListSnap = "peek" | "mid" | "full";
   const DRAWER_SNAP_Y: Record<DrawerSnap, number> = {
     collapsed: 0.84,
     mid: 0.42,
     expanded: 0,
+  };
+  const MOBILE_LIST_SNAP_Y: Record<MobileListSnap, number> = {
+    peek: 0.78,
+    mid: 0.46,
+    full: 0.08,
   };
 
   const [search, setSearch] = useState("");
@@ -115,6 +122,13 @@ export default function OnxShell({
   const [sheetY, setSheetY] = useState<number>(DRAWER_SNAP_Y.mid);
   const [isDragging, setIsDragging] = useState(false);
   const dragRef = useRef<{ startY: number; startSheetY: number } | null>(null);
+  const [isMobile, setIsMobile] = useState(false);
+  const [mobileSurface, setMobileSurface] = useState<MobileSurface>("map");
+  const [mobileListSnap, setMobileListSnap] = useState<MobileListSnap>("peek");
+  const [mobileSheetY, setMobileSheetY] = useState<number>(MOBILE_LIST_SNAP_Y.peek);
+  const [isMobileDragging, setIsMobileDragging] = useState(false);
+  const mobileDragRef = useRef<{ startY: number; startSheetY: number } | null>(null);
+  const mobileDetailDragRef = useRef<{ startY: number } | null>(null);
 
   const [selectedGeojson, setSelectedGeojson] = useState<GeoJSON.GeoJSON | null>(null);
   const [riverLinesGeojson, setRiverLinesGeojson] = useState<GeoJSON.FeatureCollection | null>(null);
@@ -332,15 +346,31 @@ export default function OnxShell({
   }, [rivers]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const media = window.matchMedia("(max-width: 639px)");
+    const sync = () => setIsMobile(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
+
+  useEffect(() => {
     if (selected) {
+      if (isMobile) {
+        setMobileSurface("detailSheet");
+        return;
+      }
       setOpenTopPanel((prev) => (prev === "layers" ? prev : "detail"));
       return;
+    }
+    if (isMobile && mobileSurface === "detailSheet") {
+      setMobileSurface("map");
     }
     if (openTopPanel === "detail") {
       setOpenTopPanel("none");
     }
     setTransparencyOpen(false);
-  }, [selected, openTopPanel]);
+  }, [selected, openTopPanel, isMobile, mobileSurface]);
 
   useEffect(() => {
     let cancelled = false;
@@ -540,6 +570,10 @@ export default function OnxShell({
   }
 
   function toggleTopPanel(panel: TopPanel) {
+    if (isMobile) {
+      setMobileSurface(panel === "layers" ? "toolsSheet" : panel === "detail" ? "detailSheet" : "map");
+      return;
+    }
     setOpenTopPanel((prev) => (prev === panel ? "none" : panel));
   }
 
@@ -547,12 +581,96 @@ export default function OnxShell({
     setSelectedId(riverId);
     if (riverId) {
       setSelectionSeq((prev) => prev + 1);
-      setOpenTopPanel("detail");
+      if (isMobile) {
+        setMobileSurface("detailSheet");
+      } else {
+        setOpenTopPanel("detail");
+      }
     }
   }
 
-  const layersOpen = openTopPanel === "layers";
-  const detailsOpen = openTopPanel === "detail";
+  function onMobileListPointerDown(e: React.PointerEvent | React.TouchEvent) {
+    const y = "touches" in e ? e.touches[0]?.clientY : (e as React.PointerEvent).clientY;
+    if (y == null) return;
+    mobileDragRef.current = { startY: y, startSheetY: mobileSheetY };
+    setIsMobileDragging(true);
+    document.body.style.userSelect = "none";
+
+    const onMove = (e2: PointerEvent | TouchEvent) => {
+      const y2 =
+        "touches" in e2
+          ? (e2 as TouchEvent).touches[0]?.clientY
+          : (e2 as PointerEvent).clientY;
+      if (y2 == null || !mobileDragRef.current) return;
+      const dy = y2 - mobileDragRef.current.startY;
+      setMobileSheetY(clamp(mobileDragRef.current.startSheetY + dy / 420, 0, 1));
+    };
+
+    const onUp = () => {
+      mobileDragRef.current = null;
+      setIsMobileDragging(false);
+      document.body.style.userSelect = "";
+      setMobileSheetY((current) => {
+        const snaps: MobileListSnap[] = ["full", "mid", "peek"];
+        const nearest = snaps.reduce(
+          (best, next) =>
+            Math.abs(current - MOBILE_LIST_SNAP_Y[next]) < Math.abs(current - MOBILE_LIST_SNAP_Y[best])
+              ? next
+              : best,
+          "mid" as MobileListSnap
+        );
+        setMobileListSnap(nearest);
+        return MOBILE_LIST_SNAP_Y[nearest];
+      });
+
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("touchmove", onMove);
+      document.removeEventListener("touchend", onUp);
+    };
+
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("touchmove", onMove, { passive: true });
+    document.addEventListener("touchend", onUp);
+  }
+
+  function onMobileDetailPointerDown(e: React.PointerEvent | React.TouchEvent) {
+    const y = "touches" in e ? e.touches[0]?.clientY : (e as React.PointerEvent).clientY;
+    if (y == null) return;
+    mobileDetailDragRef.current = { startY: y };
+    document.body.style.userSelect = "none";
+
+    const onMove = (_: PointerEvent | TouchEvent) => {
+      // no-op; we only need swipe distance on release
+    };
+
+    const onUp = (e2: PointerEvent | TouchEvent) => {
+      const y2 =
+        "changedTouches" in e2
+          ? (e2 as TouchEvent).changedTouches[0]?.clientY
+          : (e2 as PointerEvent).clientY;
+      const start = mobileDetailDragRef.current?.startY ?? 0;
+      const dy = (y2 ?? start) - start;
+      mobileDetailDragRef.current = null;
+      document.body.style.userSelect = "";
+      if (dy > 90) {
+        setMobileSurface("map");
+      }
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("touchmove", onMove);
+      document.removeEventListener("touchend", onUp);
+    };
+
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("touchmove", onMove, { passive: true });
+    document.addEventListener("touchend", onUp);
+  }
+
+  const layersOpen = !isMobile && openTopPanel === "layers";
+  const detailsOpen = !isMobile && openTopPanel === "detail";
 
   const groupedLayers = useMemo(
     () =>
@@ -576,7 +694,7 @@ export default function OnxShell({
           basemap={basemap}
           layerState={layerState}
           rightPanelOpen={detailsOpen}
-          drawerState={drawerSnap}
+          drawerState={isMobile ? "collapsed" : drawerSnap}
           selectionSeq={selectionSeq}
           onSelectRiver={(r) => selectRiver(r.river_id)}
           className="absolute inset-0"
@@ -623,7 +741,14 @@ export default function OnxShell({
         </div>
       </aside>
 
-      <header className="absolute left-4 right-4 top-4 z-20 sm:left-[108px] sm:right-[340px]">
+      <header className="absolute left-4 right-4 top-4 z-20 sm:hidden">
+        <div className="onx-glass rounded-xl px-3 py-2">
+          <div className="text-[11px] font-semibold text-white/90">{dateLabel}</div>
+          <div className="text-[10px] text-white/60">Last pull {formatPullTime(latestPullAt)} MT</div>
+        </div>
+      </header>
+
+      <header className="absolute left-4 right-4 top-4 z-20 hidden sm:block sm:left-[108px] sm:right-[340px]">
         <div className="onx-glass rounded-2xl px-4 py-2.5">
           <div className="flex items-center gap-3">
             <div className="hidden shrink-0 text-xs font-semibold text-white/85 sm:block">
@@ -666,9 +791,9 @@ export default function OnxShell({
         </div>
       </header>
 
-      <div className="absolute right-4 top-4 z-30 flex items-start gap-2">
+      <div className="absolute right-4 top-4 z-30 hidden items-start gap-2 sm:flex">
         <button
-          className={`onx-iconbtn sm:hidden ${layersOpen ? "ring-2 ring-sky-300/50" : ""}`}
+          className={`onx-iconbtn ${layersOpen ? "ring-2 ring-sky-300/50" : ""}`}
           title="Layers"
           onClick={() => toggleTopPanel("layers")}
         >
@@ -802,6 +927,21 @@ export default function OnxShell({
             </div>
           </div>
         </div>
+      </div>
+
+      <div className="absolute bottom-6 right-4 z-30 flex flex-col gap-2 sm:hidden">
+        <button
+          className="onx-glass min-h-11 rounded-xl px-3 text-xs font-semibold text-white"
+          onClick={() => setMobileSurface((s) => (s === "toolsSheet" ? "map" : "toolsSheet"))}
+        >
+          Map Tools
+        </button>
+        <button
+          className="onx-glass min-h-11 rounded-xl px-3 text-xs font-semibold text-white"
+          onClick={() => setMobileSurface((s) => (s === "listSheet" ? "map" : "listSheet"))}
+        >
+          Rivers
+        </button>
       </div>
 
       <section className="absolute right-4 top-[118px] z-20 hidden w-[314px] sm:block">
@@ -1120,8 +1260,255 @@ export default function OnxShell({
         )}
       </section>
 
+      {isMobile && mobileSurface === "toolsSheet" ? (
+        <section className="absolute inset-0 z-30 sm:hidden">
+          <button
+            className="absolute inset-0 bg-black/45"
+            aria-label="Close map tools"
+            onClick={() => setMobileSurface("map")}
+          />
+          <div className="absolute inset-x-0 bottom-0 rounded-t-3xl bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl">
+            <div className="mx-auto mb-3 h-1.5 w-14 rounded-full bg-slate-300" />
+            <div className="mb-3 flex items-center justify-between">
+              <div className="text-sm font-semibold text-slate-900">Map Tools</div>
+              <button className="rounded-md p-2 text-slate-500" onClick={() => setMobileSurface("map")}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Basemap</div>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {BASEMAP_OPTIONS.map((option) => (
+                <button
+                  key={`m-${option.id}`}
+                  disabled={!option.enabled}
+                  className={[
+                    "min-h-11 rounded-lg border px-2 py-1.5 text-xs font-medium",
+                    basemap === option.id
+                      ? "border-slate-900 bg-slate-900 text-white"
+                      : "border-slate-300 bg-white text-slate-700",
+                    !option.enabled ? "cursor-not-allowed opacity-55" : "",
+                  ].join(" ")}
+                  onClick={() => setBasemapStyle(option.id)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Core Layers</div>
+            <div className="mt-2 space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+              {groupedLayers
+                .flatMap((g) => g.layers)
+                .filter((layer) => layer.id === "mri_river_lines" || layer.id === "mri_selected_highlight")
+                .map((layer) => (
+                  <label key={`ml-${layer.id}`} className="flex items-center justify-between">
+                    <span>{layer.label}</span>
+                    <input
+                      type="checkbox"
+                      checked={layerState[layer.id]}
+                      onChange={(e) => setLayerEnabled(layer.id, e.target.checked)}
+                    />
+                  </label>
+                ))}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {isMobile && mobileSurface === "detailSheet" ? (
+        <section className="absolute inset-0 z-30 bg-black/45 sm:hidden">
+          <div className="absolute inset-x-0 bottom-0 max-h-[92vh] overflow-auto rounded-t-3xl bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+            <div
+              className="mx-auto mb-2 h-1.5 w-14 cursor-grab rounded-full bg-slate-300"
+              onPointerDown={onMobileDetailPointerDown}
+              onTouchStart={onMobileDetailPointerDown}
+            />
+            <div className="mb-3 flex items-center justify-between">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">River Detail</div>
+              <button
+                className="min-h-11 rounded-md px-3 text-xs font-semibold text-slate-600"
+                onClick={() => setMobileSurface("map")}
+              >
+                Close
+              </button>
+            </div>
+            {selected ? (
+              <>
+                <div className="text-xl font-semibold text-slate-900">{selected.river_name}</div>
+                <div className="text-sm text-slate-600">{selected.gauge_label ?? ""}</div>
+                <div className="mt-1 text-xs text-slate-500">
+                  {formatUpdatedAgo(selected.source_flow_observed_at ?? selected.source_temp_observed_at ?? selected.updated_at)}
+                </div>
+                <div className="mt-4 text-[56px] font-semibold leading-none tracking-[-0.02em] text-slate-900">
+                  {selected.fishability_score_calc ?? "—"}
+                </div>
+                <div className="mt-2">
+                  <TierPill
+                    tier={
+                      selected.bite_tier === "HOT" || selected.bite_tier === "GOOD"
+                        ? "Good"
+                        : selected.bite_tier === "FAIR"
+                        ? "Fair"
+                        : selected.bite_tier === "TOUGH"
+                        ? "Tough"
+                        : undefined
+                    }
+                  />
+                </div>
+                <div className="mt-2 text-xs text-slate-600">{todaysRead}</div>
+                {flags.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {flags.map((flag) => (
+                      <span key={`mf-${flag}`} className="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+                        {flag}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+
+                <div className="my-4 h-px bg-slate-200" />
+                <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
+                  <div>
+                    <div className="text-[10px] text-slate-500">Flow</div>
+                    <div className="font-medium text-slate-900">{selected.flow_cfs ?? "—"}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-slate-500">Temp</div>
+                    <div className="font-medium text-slate-900">
+                      {selected.water_temp_f != null ? `${Number(selected.water_temp_f).toFixed(1)}°F` : "Temp not available at this gauge"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-slate-500">Ratio</div>
+                    <div className="font-medium text-slate-900">
+                      {selected.flow_ratio_calc != null ? `${Number(selected.flow_ratio_calc).toFixed(2)}x` : "—"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-slate-500">Stability</div>
+                    <div className="font-medium text-slate-900">
+                      {selected.change_48h_pct_calc == null ? "—" : `${Number(selected.change_48h_pct_calc).toFixed(1)}%`}
+                    </div>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="text-sm text-slate-600">Select a river to view details.</div>
+            )}
+          </div>
+        </section>
+      ) : null}
+
+      {isMobile && mobileSurface === "listSheet" ? (
+        <section
+          className="absolute inset-x-0 bottom-0 z-20 sm:hidden"
+          style={{
+            transform: `translateY(${mobileSheetY * 92}%)`,
+            transition: isMobileDragging ? "none" : "transform 220ms ease-out",
+          }}
+        >
+          <div className="rounded-t-3xl border border-white/10 bg-[#0b1220]/94 backdrop-blur-md">
+            <div
+              className={`mx-auto mt-2 h-1.5 w-14 cursor-grab rounded-full bg-white/35 ${isMobileDragging ? "select-none" : ""}`}
+              onPointerDown={onMobileListPointerDown}
+              onTouchStart={onMobileListPointerDown}
+            />
+            <div className="flex items-center justify-between px-4 pt-3">
+              <div className="text-sm font-semibold text-white">Rivers ({filtered.length})</div>
+              <button
+                className="min-h-11 rounded-md px-3 text-xs font-semibold text-white/80"
+                onClick={() => {
+                  if (mobileListSnap === "peek") {
+                    setMobileListSnap("mid");
+                    setMobileSheetY(MOBILE_LIST_SNAP_Y.mid);
+                  } else {
+                    setMobileListSnap("peek");
+                    setMobileSheetY(MOBILE_LIST_SNAP_Y.peek);
+                  }
+                }}
+              >
+                {mobileListSnap === "peek" ? "Expand" : "Peek"}
+              </button>
+            </div>
+            <div className="px-4 pt-2">
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search rivers..."
+                className="mri-topbar-input"
+              />
+              <div className="mt-2 flex flex-wrap gap-2">
+                {(["All", "Good", "Fair", "Tough"] as const).map((t) => (
+                  <button key={`m-tier-${t}`} onClick={() => setTier(t)} className={`mri-chip ${tier === t ? "mri-chip-active" : ""}`}>
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="mri-scroll max-h-[65vh] overflow-auto px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3">
+              {topRivers.length > 0 ? (
+                <>
+                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/60">Top Rivers Today</div>
+                  <div className="mb-3 flex gap-2 overflow-auto">
+                    {topRivers.map((r) => (
+                      <button
+                        key={`m-top-${r.river_id}`}
+                        onClick={() => selectRiver(r.river_id)}
+                        className={[
+                          "whitespace-nowrap rounded-full border px-2.5 py-1 text-xs",
+                          r.river_id === selectedId
+                            ? "border-white/50 bg-white/20 text-white"
+                            : "border-white/20 bg-white/10 text-white/85",
+                        ].join(" ")}
+                      >
+                        #{r.fishability_rank ?? "—"} {r.river_name}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+              <div className="space-y-2">
+                {filtered.map((r) => (
+                  <button
+                    key={`m-r-${r.river_id}`}
+                    onClick={() => selectRiver(r.river_id)}
+                    className={`mri-drawer-card w-full text-left ${r.river_id === selectedId ? "mri-drawer-card-selected" : ""}`}
+                  >
+                    <div className="p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-semibold text-white">{r.river_name}</div>
+                          <div className="text-xs text-white/60">{r.gauge_label ?? ""}</div>
+                        </div>
+                        <TierPill
+                          tier={
+                            r.bite_tier === "HOT" || r.bite_tier === "GOOD"
+                              ? "Good"
+                              : r.bite_tier === "FAIR"
+                              ? "Fair"
+                              : r.bite_tier === "TOUGH"
+                              ? "Tough"
+                              : undefined
+                          }
+                        />
+                      </div>
+                      <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-white/88">
+                        <div><div className="mri-kv-label">Score</div><div className="font-semibold">{r.fishability_score_calc ?? "—"}</div></div>
+                        <div><div className="mri-kv-label">Flow</div><div className="font-semibold">{r.flow_cfs ?? "—"}</div></div>
+                        <div><div className="mri-kv-label">Temp</div><div className="font-semibold">{r.water_temp_f != null ? `${Number(r.water_temp_f).toFixed(1)}°` : "—"}</div></div>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
       <div
-        className="absolute bottom-0 left-0 right-0 z-10"
+        className="absolute bottom-0 left-0 right-0 z-10 hidden sm:block"
         style={{
           transform: `translateY(${sheetY * 78}%)`,
           transition: isDragging ? "none" : "transform 220ms ease-out",
