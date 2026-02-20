@@ -65,6 +65,14 @@ function cToF(c: number): number {
   return Number(((c * 9) / 5 + 32).toFixed(2));
 }
 
+function isObservationFresh(ts: string | null, maxAgeHours: number): boolean {
+  if (!ts) return false;
+  const ms = new Date(ts).getTime();
+  if (!Number.isFinite(ms)) return false;
+  const ageH = (Date.now() - ms) / (1000 * 60 * 60);
+  return ageH <= maxAgeHours;
+}
+
 function parseUSGSTimeSeries(payload: any): ParsedUSGS {
   const series = payload?.value?.timeSeries ?? [];
 
@@ -382,6 +390,17 @@ serve(async (req) => {
         }
       }
 
+      // Guard against stale telemetry being interpreted as "current".
+      // IV values should generally be fresh; DV fallback may be older.
+      if (tempValue != null) {
+        const maxAge = tempSource === "DV_FALLBACK" ? 240 : 72;
+        if (!isObservationFresh(tempObservedAt, maxAge)) {
+          tempValue = null;
+          tempObservedAt = null;
+          tempSource = `${tempSource}_STALE`;
+        }
+      }
+
       if (flowValue == null) {
         try {
           const dvFlow = await fetchUSGSDVFlow(flowSiteNo);
@@ -395,6 +414,15 @@ serve(async (req) => {
           }
         } catch {
           // keep null flow
+        }
+      }
+
+      if (flowValue != null) {
+        const maxAge = flowSource === "DV_FALLBACK" ? 240 : 72;
+        if (!isObservationFresh(flowObservedAt, maxAge)) {
+          flowValue = null;
+          flowObservedAt = null;
+          flowSource = `${flowSource}_STALE`;
         }
       }
 
