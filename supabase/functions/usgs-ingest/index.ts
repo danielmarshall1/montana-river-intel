@@ -18,6 +18,12 @@ type ParsedUSGS = {
   gageObservedAt: string | null;
   parameterCodes: string[];
   rawSummary: Record<string, unknown>;
+  hourlyRows: Array<{
+    observedAt: string;
+    flowCfs: number | null;
+    waterTempF: number | null;
+    gageHeightFt: number | null;
+  }>;
 };
 
 function toMountainObsDate(now = new Date()): string {
@@ -48,6 +54,12 @@ function parseUSGSTimeSeries(payload: any): ParsedUSGS {
 
   const parameterCodes = new Set<string>();
   const rawSummary: Record<string, unknown> = {};
+  const hourlyByTs = new Map<string, {
+    observedAt: string;
+    flowCfs: number | null;
+    waterTempF: number | null;
+    gageHeightFt: number | null;
+  }>();
 
   for (const ts of series) {
     const code: string | undefined = ts?.variable?.variableCode?.[0]?.value;
@@ -85,7 +97,38 @@ function parseUSGSTimeSeries(payload: any): ParsedUSGS {
       unit: ts?.variable?.unit?.unitCode ?? null,
       description: ts?.variable?.variableDescription ?? null,
     };
+
+    for (const point of values) {
+      const tsValue = typeof point?.dateTime === "string" ? point.dateTime : null;
+      if (!tsValue) continue;
+
+      const n = Number(point?.value);
+      const valid = Number.isFinite(n) && n > -9990;
+      const row = hourlyByTs.get(tsValue) ?? {
+        observedAt: tsValue,
+        flowCfs: null,
+        waterTempF: null,
+        gageHeightFt: null,
+      };
+
+      if (valid) {
+        if (code === "00060") {
+          row.flowCfs = n;
+        } else if (code === "00010") {
+          const tempF = n < -5 || n > 35 ? null : Number(((n * 9) / 5 + 32).toFixed(2));
+          row.waterTempF = tempF;
+        } else if (code === "00065") {
+          row.gageHeightFt = n;
+        }
+      }
+
+      hourlyByTs.set(tsValue, row);
+    }
   }
+
+  const hourlyRows = Array.from(hourlyByTs.values())
+    .sort((a, b) => new Date(a.observedAt).getTime() - new Date(b.observedAt).getTime())
+    .slice(-72);
 
   return {
     flowCfs,
@@ -96,6 +139,7 @@ function parseUSGSTimeSeries(payload: any): ParsedUSGS {
     gageObservedAt,
     parameterCodes: Array.from(parameterCodes),
     rawSummary,
+    hourlyRows,
   };
 }
 
@@ -200,6 +244,30 @@ serve(async (req) => {
 
       if (upsertResp.error) {
         throw new Error(`river_daily upsert failed: ${upsertResp.error.message}`);
+      }
+
+      if (parsed.hourlyRows.length > 0) {
+        const hourlyPayload = parsed.hourlyRows.map((row) => {
+          const obsTs = new Date(row.observedAt);
+          const obsDate = toMountainObsDate(obsTs);
+          return {
+            river_id: river.id,
+            observed_at: row.observedAt,
+            obs_date: obsDate,
+            flow_cfs: row.flowCfs,
+            water_temp_f: row.waterTempF,
+            gage_height_ft: row.gageHeightFt,
+            source: "usgs_iv",
+          };
+        });
+
+        const hourlyUpsert = await sb
+          .from("river_hourly")
+          .upsert(hourlyPayload, { onConflict: "river_id,observed_at" });
+
+        if (hourlyUpsert.error) {
+          parsed.rawSummary.hourly_upsert_error = hourlyUpsert.error.message;
+        }
       }
 
       const siteLogResp = await sb.from("usgs_pull_sites").insert({

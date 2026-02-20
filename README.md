@@ -163,6 +163,13 @@ If view replacement fails with `42P16` (column rename/order error), run:
 -- supabase/sql/apply_ranked_latest_hotfix.sql
 ```
 
+Intraday thermal + hatch verification SQL:
+
+```sql
+-- file:
+-- supabase/sql/verify_hatch_thermal_intraday.sql
+```
+
 ## Map Layers Configuration
 
 Layers are defined in one place:
@@ -186,7 +193,7 @@ Layer UI state is persisted in localStorage using `mri.layers.v2`.
 3. Implement sync behavior in `components/MapView.tsx` (add/remove layer without map re-init).
 4. The Layers panel in `components/OnxShell.tsx` renders it automatically from the registry.
 
-## Seasonal Intel Placeholder
+## Seasonal Intel / Hatch + Thermal
 
 The current Seasonal Intel panel is UI-first and uses lightweight month-based logic:
 
@@ -198,4 +205,4 @@ Output includes:
 - Likely bugs
 - Recommended approach
 
-This is intentionally simple and can be replaced later with hatch-probability modeling without changing panel structure.
+The detail panel now also includes a `Water Temp Window (24h)` block sourced from `river_hourly` via `river_intraday_24h(uuid)` and a hatch-intel block that combines seasonality with flow stability and thermal trend.

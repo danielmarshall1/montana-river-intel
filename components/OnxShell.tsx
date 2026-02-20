@@ -13,8 +13,10 @@ import { generateTodaysRead } from "@/lib/todaysRead";
 import { MRI_COLORS } from "@/lib/theme";
 import { getFlowTrendArrow } from "@/lib/trend";
 import { riskFlags } from "@/lib/riskFlags";
-import { fetchRiverHistory14d } from "@/lib/supabase";
+import { fetchRiverHistory14d, fetchRiverIntraday24h } from "@/lib/supabase";
 import { Sparkline } from "@/components/Sparkline";
+import { summarizeThermalWindow } from "@/lib/thermalWindow";
+import { generateHatchIntel } from "@/lib/hatchIntel";
 import {
   BASEMAP_OPTIONS,
   DEFAULT_BASEMAP,
@@ -125,6 +127,10 @@ export default function OnxShell({
     Array<{ obs_date: string; flow_cfs: number | null; water_temp_f: number | null; fishability_score: number | null }>
   >([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [intradayRows, setIntradayRows] = useState<
+    Array<{ observed_at: string; flow_cfs: number | null; water_temp_f: number | null; gage_height_ft: number | null }>
+  >([]);
+  const [intradayLoading, setIntradayLoading] = useState(false);
 
   const [basemap, setBasemap] = useState<BasemapId>("hybrid");
   const [layerState, setLayerState] = useState<Record<LayerId, boolean>>(
@@ -175,6 +181,14 @@ export default function OnxShell({
   const breakdown = useMemo(() => (selected ? deriveScoreBreakdown(selected) : null), [selected]);
   const todaysRead = useMemo(() => generateTodaysRead(selected), [selected]);
   const flags = useMemo(() => riskFlags(selected), [selected]);
+  const thermalSummary = useMemo(
+    () => summarizeThermalWindow(selected, intradayRows),
+    [selected, intradayRows]
+  );
+  const hatchIntel = useMemo(
+    () => generateHatchIntel(selected, thermalSummary),
+    [selected, thermalSummary]
+  );
   const topRivers = useMemo(
     () => filtered.filter((r) => (r.fishability_score_calc ?? null) != null).slice(0, 5),
     [filtered]
@@ -346,6 +360,31 @@ export default function OnxShell({
       if (!cancelled) {
         setHistoryRows([]);
         setHistoryLoading(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.river_id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadIntraday() {
+      if (!selected?.river_id) {
+        setIntradayRows([]);
+        return;
+      }
+      setIntradayLoading(true);
+      const data = await fetchRiverIntraday24h(selected.river_id);
+      if (!cancelled) {
+        setIntradayRows(data);
+        setIntradayLoading(false);
+      }
+    }
+    loadIntraday().catch(() => {
+      if (!cancelled) {
+        setIntradayRows([]);
+        setIntradayLoading(false);
       }
     });
     return () => {
@@ -903,6 +942,48 @@ export default function OnxShell({
 
                 <div>
                   <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    Water Temp Window (24h)
+                  </div>
+                  {intradayLoading ? (
+                    <div className="mt-2 text-xs text-slate-500">Loading intraday thermal...</div>
+                  ) : (
+                    <div className="mt-2 space-y-1.5">
+                      <div className="text-xs text-slate-700">{thermalSummary.windowLabel}</div>
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-slate-600">
+                        <div>Now</div>
+                        <div className="text-right font-medium text-slate-900">
+                          {thermalSummary.tempNowF != null ? `${thermalSummary.tempNowF.toFixed(1)}°F` : "—"}
+                        </div>
+                        <div>3h delta</div>
+                        <div className="text-right font-medium text-slate-900">
+                          {thermalSummary.delta3hF != null ? `${thermalSummary.delta3hF > 0 ? "+" : ""}${thermalSummary.delta3hF.toFixed(1)}°` : "—"}
+                        </div>
+                        <div>Since morning</div>
+                        <div className="text-right font-medium text-slate-900">
+                          {thermalSummary.deltaSinceMorningF != null
+                            ? `${thermalSummary.deltaSinceMorningF > 0 ? "+" : ""}${thermalSummary.deltaSinceMorningF.toFixed(1)}°`
+                            : "—"}
+                        </div>
+                        <div>24h range</div>
+                        <div className="text-right font-medium text-slate-900">
+                          {thermalSummary.min24hF != null && thermalSummary.max24hF != null
+                            ? `${thermalSummary.min24hF.toFixed(1)}°-${thermalSummary.max24hF.toFixed(1)}°`
+                            : "—"}
+                        </div>
+                      </div>
+                      <Sparkline
+                        className="h-12 w-full"
+                        stroke="#6b7280"
+                        values={intradayRows.map((x) => x.water_temp_f)}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="my-3 h-px bg-slate-300/65" />
+
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                     Trend (14D)
                   </div>
                   {historyLoading ? (
@@ -947,14 +1028,19 @@ export default function OnxShell({
 
                 <div>
                   <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                    Seasonal Intel ({seasonalIntel.season})
+                    Hatch Intel ({seasonalIntel.season})
                   </div>
                   <div className="mt-1 text-xs text-slate-700">
-                    <span className="font-semibold">Likely bugs:</span> {seasonalIntel.likelyBugs}
+                    <span className="font-semibold">Likely bugs:</span> {hatchIntel.likelyBugs}
                   </div>
                   <div className="mt-1 text-xs text-slate-700">
-                    <span className="font-semibold">Recommended approach:</span>{" "}
-                    {seasonalIntel.recommendedApproach}
+                    <span className="font-semibold">Confidence:</span> {hatchIntel.confidence}
+                  </div>
+                  <div className="mt-1 text-xs text-slate-700">
+                    <span className="font-semibold">Best window:</span> {hatchIntel.bestWindow}
+                  </div>
+                  <div className="mt-1 text-xs text-slate-700">
+                    <span className="font-semibold">Recommended approach:</span> {hatchIntel.approach}
                   </div>
                 </div>
 

@@ -357,3 +357,56 @@ export async function fetchRiverHistory14d(
     fishability_score: number | null;
   }>);
 }
+
+export async function fetchRiverIntraday24h(
+  riverDbId: string
+): Promise<
+  Array<{
+    observed_at: string;
+    flow_cfs: number | null;
+    water_temp_f: number | null;
+    gage_height_ft: number | null;
+  }>
+> {
+  const client = createSupabaseClient();
+  if (!client) return [];
+
+  const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  let resolvedRiverId = riverDbId;
+  if (!uuidLike.test(riverDbId)) {
+    const bySlug = await client
+      .from("rivers")
+      .select("id")
+      .eq("slug", riverDbId)
+      .maybeSingle();
+    if (bySlug.error || !bySlug.data?.id) return [];
+    resolvedRiverId = String(bySlug.data.id);
+  }
+
+  const rpc = await client.rpc("river_intraday_24h", {
+    p_river_id: resolvedRiverId,
+  });
+  if (!rpc.error && rpc.data) {
+    return rpc.data as Array<{
+      observed_at: string;
+      flow_cfs: number | null;
+      water_temp_f: number | null;
+      gage_height_ft: number | null;
+    }>;
+  }
+
+  const fallback = await client
+    .from("river_hourly")
+    .select("observed_at,flow_cfs,water_temp_f,gage_height_ft")
+    .eq("river_id", resolvedRiverId)
+    .gte("observed_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+    .order("observed_at", { ascending: true });
+
+  if (fallback.error || !fallback.data) return [];
+  return fallback.data as Array<{
+    observed_at: string;
+    flow_cfs: number | null;
+    water_temp_f: number | null;
+    gage_height_ft: number | null;
+  }>;
+}
