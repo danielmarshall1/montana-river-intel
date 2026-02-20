@@ -46,6 +46,14 @@ type ParsedDVTemp = {
   observedAt: string | null;
 };
 
+type TempProbeResult = {
+  hasIvSeries: boolean;
+  hasDvSeries: boolean;
+  tempF: number | null;
+  observedAt: string | null;
+  source: "IV" | "DV_FALLBACK" | "NONE";
+};
+
 function toMountainObsDate(now = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Denver",
@@ -267,6 +275,64 @@ async function fetchUSGSDVFlow(siteNo: string): Promise<{ parsed: ParsedDVParam;
   return { parsed: parseUSGSDVParam(body, "00060"), status };
 }
 
+async function probeTempFromSite(
+  siteNo: string,
+  cache: Map<string, TempProbeResult>
+): Promise<TempProbeResult> {
+  const key = siteNo.trim();
+  const cached = cache.get(key);
+  if (cached) return cached;
+
+  let hasIvSeries = false;
+  let hasDvSeries = false;
+
+  try {
+    const ivTempOnly = await fetchUSGSIv(key, "00010");
+    hasIvSeries = ivTempOnly.parsed.hasTempSeries;
+    if (ivTempOnly.parsed.waterTempF != null) {
+      const out: TempProbeResult = {
+        hasIvSeries,
+        hasDvSeries: false,
+        tempF: ivTempOnly.parsed.waterTempF,
+        observedAt: ivTempOnly.parsed.tempObservedAt,
+        source: "IV",
+      };
+      cache.set(key, out);
+      return out;
+    }
+  } catch {
+    // continue to DV fallback
+  }
+
+  try {
+    const dvTemp = await fetchUSGSDVTemp(key);
+    hasDvSeries = dvTemp.parsed.hasTempSeries;
+    if (dvTemp.parsed.waterTempF != null) {
+      const out: TempProbeResult = {
+        hasIvSeries,
+        hasDvSeries,
+        tempF: dvTemp.parsed.waterTempF,
+        observedAt: dvTemp.parsed.observedAt,
+        source: "DV_FALLBACK",
+      };
+      cache.set(key, out);
+      return out;
+    }
+  } catch {
+    // no temp
+  }
+
+  const out: TempProbeResult = {
+    hasIvSeries,
+    hasDvSeries,
+    tempF: null,
+    observedAt: null,
+    source: "NONE",
+  };
+  cache.set(key, out);
+  return out;
+}
+
 serve(async (req) => {
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "Method not allowed" }), {
@@ -337,6 +403,13 @@ serve(async (req) => {
   }
 
   const rivers = (riversResp.data ?? []) as RiverRow[];
+  const riversByName = new Map<string, RiverRow[]>();
+  for (const r of rivers) {
+    const k = (r.river_name ?? "").trim();
+    if (!k) continue;
+    riversByName.set(k, [...(riversByName.get(k) ?? []), r]);
+  }
+  const tempProbeCache = new Map<string, TempProbeResult>();
   let okCount = 0;
   let failCount = 0;
 
@@ -387,6 +460,52 @@ serve(async (req) => {
           }
         } catch {
           hasTempDv = false;
+        }
+      }
+
+      if (tempValue == null) {
+        const siblings = riversByName.get((river.river_name ?? "").trim()) ?? [];
+        for (const sib of siblings) {
+          if (sib.id === river.id) continue;
+          const sibMap = riverMap.get(sib.id);
+          const sibTempSite = (sibMap?.temp_site_no ?? sibMap?.flow_site_no ?? sib.usgs_site_no ?? "").trim();
+          if (!sibTempSite || sibTempSite === tempSiteNo) continue;
+
+          const probe = await probeTempFromSite(sibTempSite, tempProbeCache);
+          hasTempIv = hasTempIv || probe.hasIvSeries;
+          hasTempDv = hasTempDv || probe.hasDvSeries;
+          if (probe.tempF == null) continue;
+
+          const maxAge = probe.source === "DV_FALLBACK" ? 240 : 72;
+          if (!isObservationFresh(probe.observedAt, maxAge)) {
+            continue;
+          }
+
+          tempValue = probe.tempF;
+          tempObservedAt = probe.observedAt;
+          tempSource = probe.source === "IV" ? "IV_SIBLING_SITE" : "DV_SIBLING_FALLBACK";
+          if (!mainIv.parameterCodes.includes("00010(SIBLING)")) {
+            mainIv.parameterCodes.push("00010(SIBLING)");
+          }
+
+          const persistMap = await sb
+            .from("river_usgs_map")
+            .upsert(
+              {
+                river_id: river.id,
+                flow_site_no: flowSiteNo,
+                temp_site_no: sibTempSite,
+                stage_site_no: mapRow?.stage_site_no ?? flowSiteNo,
+                updated_at: new Date().toISOString(),
+              },
+              { onConflict: "river_id" }
+            );
+          if (persistMap.error) {
+            mainIv.rawSummary.sibling_temp_map_error = persistMap.error.message;
+          } else {
+            mainIv.rawSummary.temp_site_no = sibTempSite;
+          }
+          break;
         }
       }
 
