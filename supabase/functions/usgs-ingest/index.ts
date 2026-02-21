@@ -62,13 +62,6 @@ type ParsedDVTemp = {
   observedAt: string | null;
 };
 
-type TempProbeResult = {
-  hasIvSeries: boolean;
-  hasDvSeries: boolean;
-  tempF: number | null;
-  observedAt: string | null;
-  source: "IV" | "DV_FALLBACK" | "NONE";
-};
 
 function toMountainObsDate(now = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -291,64 +284,6 @@ async function fetchUSGSDVFlow(siteNo: string): Promise<{ parsed: ParsedDVParam;
   return { parsed: parseUSGSDVParam(body, "00060"), status };
 }
 
-async function probeTempFromSite(
-  siteNo: string,
-  cache: Map<string, TempProbeResult>
-): Promise<TempProbeResult> {
-  const key = siteNo.trim();
-  const cached = cache.get(key);
-  if (cached) return cached;
-
-  let hasIvSeries = false;
-  let hasDvSeries = false;
-
-  try {
-    const ivTempOnly = await fetchUSGSIv(key, "00010");
-    hasIvSeries = ivTempOnly.parsed.hasTempSeries;
-    if (ivTempOnly.parsed.waterTempF != null) {
-      const out: TempProbeResult = {
-        hasIvSeries,
-        hasDvSeries: false,
-        tempF: ivTempOnly.parsed.waterTempF,
-        observedAt: ivTempOnly.parsed.tempObservedAt,
-        source: "IV",
-      };
-      cache.set(key, out);
-      return out;
-    }
-  } catch {
-    // continue to DV fallback
-  }
-
-  try {
-    const dvTemp = await fetchUSGSDVTemp(key);
-    hasDvSeries = dvTemp.parsed.hasTempSeries;
-    if (dvTemp.parsed.waterTempF != null) {
-      const out: TempProbeResult = {
-        hasIvSeries,
-        hasDvSeries,
-        tempF: dvTemp.parsed.waterTempF,
-        observedAt: dvTemp.parsed.observedAt,
-        source: "DV_FALLBACK",
-      };
-      cache.set(key, out);
-      return out;
-    }
-  } catch {
-    // no temp
-  }
-
-  const out: TempProbeResult = {
-    hasIvSeries,
-    hasDvSeries,
-    tempF: null,
-    observedAt: null,
-    source: "NONE",
-  };
-  cache.set(key, out);
-  return out;
-}
-
 serve(async (req) => {
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "Method not allowed" }), {
@@ -466,7 +401,6 @@ serve(async (req) => {
   }
 
   const rivers = (riversResp.data ?? []) as RiverRow[];
-  const tempProbeCache = new Map<string, TempProbeResult>();
   let okCount = 0;
   let failCount = 0;
 
@@ -479,33 +413,34 @@ serve(async (req) => {
       const stationConfig = stationConfigByRiver.get(river.id);
       const stationRegistry = stationRegistryByRiver.get(river.id);
       const flowSiteNo = (stationConfig?.flowSiteNo ?? mapRow?.flow_site_no ?? defaultSiteNo).trim();
-      const tempSiteNo = (stationConfig?.tempSiteNo ?? mapRow?.temp_site_no ?? flowSiteNo).trim();
+      const tempSiteRaw = stationConfig?.tempSiteNo ?? mapRow?.temp_site_no ?? null;
+      const tempSiteNo = tempSiteRaw != null && String(tempSiteRaw).trim().length > 0
+        ? String(tempSiteRaw).trim()
+        : null;
 
-      const { parsed: mainIv, status } = await fetchUSGSIv(flowSiteNo, "00060,00010,00065");
+      const { parsed: mainIv, status } = await fetchUSGSIv(flowSiteNo, "00060,00065");
 
       let flowValue = mainIv.flowCfs;
       let flowObservedAt = mainIv.flowObservedAt;
       let flowSource = "IV";
-      let tempValue = mainIv.waterTempF;
-      let tempObservedAt = mainIv.tempObservedAt;
-      let tempSource = "IV";
-      let hasTempIv = mainIv.hasTempSeries;
+      let tempValue: number | null = null;
+      let tempObservedAt: string | null = null;
+      let tempSource = "NONE";
+      let hasTempIv = false;
       let hasTempDv = false;
 
-      if (tempSiteNo !== flowSiteNo && tempValue == null) {
+      if (tempSiteNo) {
         const ivTempOnly = await fetchUSGSIv(tempSiteNo, "00010");
-        hasTempIv = hasTempIv || ivTempOnly.parsed.hasTempSeries;
+        hasTempIv = ivTempOnly.parsed.hasTempSeries;
         if (ivTempOnly.parsed.waterTempF != null) {
           tempValue = ivTempOnly.parsed.waterTempF;
           tempObservedAt = ivTempOnly.parsed.tempObservedAt;
           tempSource = "IV_TEMP_SITE";
-          if (!mainIv.parameterCodes.includes("00010")) {
-            mainIv.parameterCodes.push("00010(TEMP_SITE)");
-          }
+          mainIv.parameterCodes.push("00010(TEMP_SITE)");
         }
       }
 
-      if (tempValue == null) {
+      if (tempSiteNo && tempValue == null) {
         try {
           const dvTemp = await fetchUSGSDVTemp(tempSiteNo);
           hasTempDv = dvTemp.parsed.hasTempSeries;
@@ -513,31 +448,10 @@ serve(async (req) => {
             tempValue = dvTemp.parsed.waterTempF;
             tempObservedAt = dvTemp.parsed.observedAt;
             tempSource = "DV_FALLBACK";
-            if (!mainIv.parameterCodes.includes("00010(DV)")) {
-              mainIv.parameterCodes.push("00010(DV)");
-            }
+            mainIv.parameterCodes.push("00010(DV)");
           }
         } catch {
           hasTempDv = false;
-        }
-      }
-
-      if (tempValue == null) {
-        const tempCandidates = (stationRegistry?.tempSites ?? []).filter((s) => s !== tempSiteNo);
-        for (const candidate of tempCandidates) {
-          const probe = await probeTempFromSite(candidate, tempProbeCache);
-          hasTempIv = hasTempIv || probe.hasIvSeries;
-          hasTempDv = hasTempDv || probe.hasDvSeries;
-          if (probe.tempF == null) continue;
-          const maxAge = probe.source === "DV_FALLBACK" ? 240 : 72;
-          if (!isObservationFresh(probe.observedAt, maxAge)) continue;
-          tempValue = probe.tempF;
-          tempObservedAt = probe.observedAt;
-          tempSource = probe.source === "IV" ? "IV_REGISTRY_SITE" : "DV_REGISTRY_FALLBACK";
-          if (!mainIv.parameterCodes.includes("00010(REGISTRY)")) {
-            mainIv.parameterCodes.push("00010(REGISTRY)");
-          }
-          break;
         }
       }
 
@@ -630,7 +544,9 @@ serve(async (req) => {
         };
       }
       mainIv.rawSummary.temp_policy = "strict_same_river";
-      if (tempValue == null && !hasTempIv && !hasTempDv) {
+      if (!tempSiteNo) {
+        mainIv.rawSummary.temp_status = "mapping_missing";
+      } else if (tempValue == null && !hasTempIv && !hasTempDv) {
         mainIv.rawSummary.temp_status = "not_available";
       }
 

@@ -385,7 +385,15 @@ async function main() {
     }
   }
 
-  await upsertRegistryRows(registryRows);
+  // Recompute best temp station mapping after registry refresh.
+  const refreshRankings = await sb.rpc("refresh_river_temp_site_rankings", { p_river_id: null });
+  if (refreshRankings.error) {
+    throw new Error(`refresh_river_temp_site_rankings failed: ${refreshRankings.error.message}`);
+  }
+  const applyMapping = await sb.rpc("apply_best_temp_site_map", { p_river_id: null });
+  if (applyMapping.error) {
+    throw new Error(`apply_best_temp_site_map failed: ${applyMapping.error.message}`);
+  }
 
   console.table(report);
   if (failedRivers.length > 0) {
@@ -410,6 +418,15 @@ async function main() {
       `flow_capable=${byCapability.flow}, temp_capable=${byCapability.temp}, wq_capable=${byCapability.wq}, ` +
       `river_errors=${failedRivers.length}`
   );
+
+  const selectedResp = await sb
+    .from("v_river_temp_station_selection")
+    .select("river_name,flow_site_no,selected_temp_site_no,distance_to_river_m,on_river_alignment")
+    .order("river_name", { ascending: true });
+  if (!selectedResp.error && selectedResp.data) {
+    console.log("\nSelected temp mapping by river:");
+    console.table(selectedResp.data);
+  }
 }
 
 main().catch((error) => {
