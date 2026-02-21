@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import maplibregl from "maplibre-gl";
-import "maplibre-gl/dist/maplibre-gl.css";
+import mapboxgl from "mapbox-gl";
+import "mapbox-gl/dist/mapbox-gl.css";
 import type { FishabilityRow, BiteTier } from "@/lib/types";
 import { RIVER_FOCUS_POINTS } from "@/lib/river-focus-points";
 import { MRI_COLORS } from "@/lib/theme";
@@ -38,7 +38,7 @@ interface MapViewProps {
   onSelectRiver: (river: FishabilityRow) => void;
   className?: string;
   initialStyleUrl?: string;
-  onMapReady?: (map: maplibregl.Map) => void;
+  onMapReady?: (map: mapboxgl.Map) => void;
 }
 
 const RIVERS_SOURCE = "rivers-source";
@@ -95,13 +95,11 @@ const BASEMAPS: Record<
   light: { rasterLayers: ["light"], labelLayers: [] },
   dark: { rasterLayers: ["dark"], labelLayers: [] },
 };
-const BASE_STYLE: maplibregl.StyleSpecification = {
-  version: 8,
-  name: "mri-base",
-  sources: {},
-  layers: [],
-  glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
-};
+const BASE_STYLE = "mapbox://styles/mapbox/satellite-streets-v12";
+const MAPBOX_DEM_SOURCE = "mapbox-dem";
+const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
+
+mapboxgl.accessToken = MAPBOX_TOKEN;
 
 function riverIdExpr() {
   return [
@@ -193,7 +191,7 @@ function withSelectedRiverMetadata(
   } as GeoJSON.Feature;
 }
 
-function toneRasterBasemap(map: maplibregl.Map) {
+function toneRasterBasemap(map: mapboxgl.Map) {
   const style = map.getStyle();
   const rasterLayers = (style.layers ?? []).filter((layer) => layer.type === "raster");
   let tonedCount = 0;
@@ -227,7 +225,7 @@ function toneRasterBasemap(map: maplibregl.Map) {
   }
 }
 
-function ensureBasemapLayers(map: maplibregl.Map) {
+function ensureBasemapLayers(map: mapboxgl.Map) {
   const addRaster = (id: string, tiles: string[], attribution: string, opacity = 1) => {
     if (!map.getSource(id)) {
       map.addSource(id, { type: "raster", tiles, tileSize: 256, attribution });
@@ -259,7 +257,7 @@ function ensureBasemapLayers(map: maplibregl.Map) {
   addRaster("topo", ["https://a.tile.opentopomap.org/{z}/{x}/{y}.png"], "OpenTopoMap");
 }
 
-function syncBasemapVisibility(map: maplibregl.Map, basemap: BasemapId) {
+function syncBasemapVisibility(map: mapboxgl.Map, basemap: BasemapId) {
   ensureBasemapLayers(map);
   for (const layerId of BASEMAP_LAYER_IDS) {
     if (!map.getLayer(layerId)) continue;
@@ -403,7 +401,7 @@ function riversToFeatureCollection(
   return { type: "FeatureCollection", features };
 }
 
-function ensureRiversSource(map: maplibregl.Map, rivers: FishabilityRow[]) {
+function ensureRiversSource(map: mapboxgl.Map, rivers: FishabilityRow[]) {
   const fc = riversToFeatureCollection(rivers);
   const src = map.getSource(RIVERS_SOURCE) as
     | { setData?: (d: GeoJSON.FeatureCollection) => void }
@@ -421,7 +419,7 @@ function ensureRiversSource(map: maplibregl.Map, rivers: FishabilityRow[]) {
   src.setData?.(fc);
 }
 
-function ensureRiverPointLayers(map: maplibregl.Map) {
+function ensureRiverPointLayers(map: mapboxgl.Map) {
   if (!map.getLayer(UNCLUSTERED_LAYER)) {
     map.addLayer({
       id: UNCLUSTERED_LAYER,
@@ -472,7 +470,7 @@ function ensureRiverPointLayers(map: maplibregl.Map) {
 }
 
 function syncRiverPointPresentation(
-  map: maplibregl.Map,
+  map: mapboxgl.Map,
   selectedRiverId: string | null,
   showMarkers: boolean,
   scoreColoring: boolean
@@ -513,7 +511,7 @@ function syncRiverPointPresentation(
   map.setPaintProperty(UNCLUSTERED_LAYER, "circle-opacity", circleOpacity as any);
 }
 
-function clearSelectedRiverLine(map: maplibregl.Map) {
+function clearSelectedRiverLine(map: mapboxgl.Map) {
   if (map.getLayer(RIVER_NAMES_LAYER)) map.removeLayer(RIVER_NAMES_LAYER);
   if (map.getLayer(SELECTED_RIVER_HIT_LAYER)) map.removeLayer(SELECTED_RIVER_HIT_LAYER);
   if (map.getLayer(SELECTED_RIVER_MAIN_LAYER)) map.removeLayer(SELECTED_RIVER_MAIN_LAYER);
@@ -569,7 +567,7 @@ function toLineLabelFeatures(
 }
 
 function syncSelectedRiverLine(
-  map: maplibregl.Map,
+  map: mapboxgl.Map,
   geojson: GeoJSON.GeoJSON | null,
   selectedRiverId: string | null | undefined,
   selectedRiverName: string | null | undefined,
@@ -820,7 +818,7 @@ function syncSelectedRiverLine(
   }
 }
 
-function syncStatewideHydrologyLayer(map: maplibregl.Map, enabled: boolean) {
+function syncStatewideHydrologyLayer(map: mapboxgl.Map, enabled: boolean) {
   if (enabled) {
     if (!map.getSource(STATEWIDE_HYDRO_SOURCE)) {
       map.addSource(STATEWIDE_HYDRO_SOURCE, {
@@ -854,7 +852,7 @@ function syncStatewideHydrologyLayer(map: maplibregl.Map, enabled: boolean) {
   if (map.getLayer(STATEWIDE_HYDRO_LAYER)) map.removeLayer(STATEWIDE_HYDRO_LAYER);
 }
 
-function syncFederalLandsLayer(map: maplibregl.Map, enabled: boolean) {
+function syncFederalLandsLayer(map: mapboxgl.Map, enabled: boolean) {
   if (enabled) {
     if (!map.getSource(FEDERAL_LANDS_SOURCE)) {
       map.addSource(FEDERAL_LANDS_SOURCE, {
@@ -896,7 +894,7 @@ function syncFederalLandsLayer(map: maplibregl.Map, enabled: boolean) {
   }
 }
 
-function syncStateLandsLayer(map: maplibregl.Map, enabled: boolean) {
+function syncStateLandsLayer(map: mapboxgl.Map, enabled: boolean) {
   if (enabled) {
     if (!map.getSource(STATE_LANDS_SOURCE)) {
       map.addSource(STATE_LANDS_SOURCE, {
@@ -933,7 +931,7 @@ function syncStateLandsLayer(map: maplibregl.Map, enabled: boolean) {
   }
 }
 
-function syncFishingAccessLayer(map: maplibregl.Map, enabled: boolean) {
+function syncFishingAccessLayer(map: mapboxgl.Map, enabled: boolean) {
   if (enabled) {
     if (!map.getSource(ACCESS_SOURCE)) {
       map.addSource(ACCESS_SOURCE, {
@@ -972,7 +970,7 @@ function syncFishingAccessLayer(map: maplibregl.Map, enabled: boolean) {
 }
 
 function syncActiveStationsLayer(
-  map: maplibregl.Map,
+  map: mapboxgl.Map,
   enabled: boolean,
   stationsGeojson: GeoJSON.FeatureCollection<GeoJSON.Point, Record<string, unknown>> | null | undefined
 ) {
@@ -1033,7 +1031,7 @@ function syncActiveStationsLayer(
 }
 
 function syncHydrologyOverlays(
-  map: maplibregl.Map,
+  map: mapboxgl.Map,
   showFlowMagnitude: boolean,
   showChangeIndicator: boolean,
   showTempStress: boolean
@@ -1137,7 +1135,7 @@ function syncHydrologyOverlays(
   }
 }
 
-function syncLabels(map: maplibregl.Map, visible: boolean) {
+function syncLabels(map: mapboxgl.Map, visible: boolean) {
   const style = map.getStyle();
   const visibility = visible ? "visible" : "none";
   for (const layer of style.layers ?? []) {
@@ -1168,11 +1166,12 @@ export function MapView({
   selectionSeq = 0,
   onSelectRiver,
   className,
+  initialStyleUrl,
   onMapReady,
 }: MapViewProps) {
   const effectiveLayerState = layerState ?? createDefaultLayerState();
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<maplibregl.Map | null>(null);
+  const mapRef = useRef<mapboxgl.Map | null>(null);
   const riversRef = useRef(rivers);
   const onSelectRiverRef = useRef(onSelectRiver);
   const selectedRiverNameRef = useRef(selectedRiverName);
@@ -1188,6 +1187,7 @@ export function MapView({
   const lastFlownRef = useRef<string | null>(null);
   const lastFitSignatureRef = useRef<string | null>(null);
   const [mapReady, setMapReady] = useState(false);
+  const [mapInitError, setMapInitError] = useState<string | null>(null);
 
   riversRef.current = rivers;
   onSelectRiverRef.current = onSelectRiver;
@@ -1199,7 +1199,7 @@ export function MapView({
   basemapRef.current = basemap;
   layerStateRef.current = effectiveLayerState;
 
-  const syncRuntimeLayers = useCallback((map: maplibregl.Map) => {
+  const syncRuntimeLayers = useCallback((map: mapboxgl.Map) => {
     syncBasemapVisibility(map, basemapRef.current);
     ensureRiversSource(map, riversRef.current);
     ensureRiverPointLayers(map);
@@ -1234,29 +1234,60 @@ export function MapView({
 
   const initMap = useCallback(() => {
     if (!mapContainerRef.current) return;
+    setMapInitError(null);
 
-    const map = new maplibregl.Map({
-      container: mapContainerRef.current,
-      style: BASE_STYLE,
-      center: MONTANA_CENTER,
-      zoom: DEFAULT_ZOOM,
-      pitch: 22,
-      bearing: -5,
-    });
+    if (!MAPBOX_TOKEN) {
+      setMapInitError("Missing NEXT_PUBLIC_MAPBOX_TOKEN.");
+      return;
+    }
+    let map: mapboxgl.Map;
+    try {
+      map = new mapboxgl.Map({
+        container: mapContainerRef.current,
+        style: initialStyleUrl ?? BASE_STYLE,
+        center: MONTANA_CENTER,
+        zoom: DEFAULT_ZOOM,
+        pitch: 22,
+        bearing: -5,
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Failed to initialize map";
+      setMapInitError(msg);
+      return;
+    }
 
-    map.addControl(new maplibregl.NavigationControl(), "top-right");
+    map.addControl(new mapboxgl.NavigationControl(), "top-right");
     mapRef.current = map;
 
     map.on("load", () => {
+      try {
+        if (!map.getSource(MAPBOX_DEM_SOURCE)) {
+          map.addSource(MAPBOX_DEM_SOURCE, {
+            type: "raster-dem",
+            url: "mapbox://mapbox.mapbox-terrain-dem-v1",
+            tileSize: 512,
+            maxzoom: 14,
+          } as any);
+        }
+        map.setTerrain({ source: MAPBOX_DEM_SOURCE, exaggeration: 1.1 });
+      } catch {
+        // Terrain is optional; keep the map usable even when DEM/WebGL2 is unavailable.
+      }
       setMapReady(true);
       onMapReady?.(map);
       syncRuntimeLayers(map);
       map.resize();
     });
+    map.on("error", (event) => {
+      const msg = (event as any)?.error?.message;
+      if (typeof msg === "string" && /Failed to initialize WebGL/i.test(msg)) {
+        setMapInitError(msg);
+      }
+    });
 
     if (!(map as any).__mriHandlers) {
       (map as any).__mriHandlers = true;
-      map.on("click", UNCLUSTERED_LAYER, (e: maplibregl.MapLayerMouseEvent) => {
+      map.on("click", UNCLUSTERED_LAYER, (e: mapboxgl.MapLayerMouseEvent) => {
         if (e.originalEvent && "cancelBubble" in e.originalEvent) {
           (e.originalEvent as MouseEvent).cancelBubble = true;
         }
@@ -1267,7 +1298,7 @@ export function MapView({
         if (river) onSelectRiverRef.current(river);
       });
 
-      const handleRiverLineClick = (e: maplibregl.MapLayerMouseEvent) => {
+      const handleRiverLineClick = (e: mapboxgl.MapLayerMouseEvent) => {
         if (!layerStateRef.current.mri_river_lines) return;
         const stationFeatures = map.queryRenderedFeatures(e.point, {
           layers: [...CLICK_PRIORITY_LAYERS],
@@ -1294,7 +1325,7 @@ export function MapView({
         map.getCanvas().style.cursor = "";
       });
 
-      map.on("mousemove", UNCLUSTERED_LAYER, (e: maplibregl.MapLayerMouseEvent) => {
+      map.on("mousemove", UNCLUSTERED_LAYER, (e: mapboxgl.MapLayerMouseEvent) => {
         map.getCanvas().style.cursor = "pointer";
         const f = e.features?.[0];
         const id = f?.id;
@@ -1332,14 +1363,14 @@ export function MapView({
       map.on("mouseleave", ACCESS_LAYER, () => {
         map.getCanvas().style.cursor = "";
       });
-      map.on("click", ACCESS_LAYER, (e: maplibregl.MapLayerMouseEvent) => {
+      map.on("click", ACCESS_LAYER, (e: mapboxgl.MapLayerMouseEvent) => {
         const feature = e.features?.[0];
         if (!feature || !feature.geometry || feature.geometry.type !== "Point") return;
         const coords = [...feature.geometry.coordinates] as [number, number];
         const props = (feature.properties ?? {}) as Record<string, unknown>;
         const name =
           String(props.NAME ?? props.Name ?? props.name ?? "Fishing Access Site");
-        new maplibregl.Popup({ closeButton: false, closeOnClick: true, offset: 10 })
+        new mapboxgl.Popup({ closeButton: false, closeOnClick: true, offset: 10 })
           .setLngLat(coords)
           .setHTML(`<div style="font-size:12px;font-weight:600;color:#0f172a;">${name}</div>`)
           .addTo(map);
@@ -1351,7 +1382,7 @@ export function MapView({
       map.on("mouseleave", ACTIVE_STATIONS_LAYER, () => {
         map.getCanvas().style.cursor = "";
       });
-      map.on("click", ACTIVE_STATIONS_LAYER, (e: maplibregl.MapLayerMouseEvent) => {
+      map.on("click", ACTIVE_STATIONS_LAYER, (e: mapboxgl.MapLayerMouseEvent) => {
         const feature = e.features?.[0];
         if (!feature || !feature.geometry || feature.geometry.type !== "Point") return;
         const coords = [...feature.geometry.coordinates] as [number, number];
@@ -1365,7 +1396,7 @@ export function MapView({
           props.has_wq ? "wq" : null,
         ].filter(Boolean);
 
-        new maplibregl.Popup({ closeButton: false, closeOnClick: true, offset: 10 })
+        new mapboxgl.Popup({ closeButton: false, closeOnClick: true, offset: 10 })
           .setLngLat(coords)
           .setHTML(
             `<div style="font-size:12px;color:#0f172a;line-height:1.35;">
@@ -1377,7 +1408,7 @@ export function MapView({
           .addTo(map);
       });
     }
-  }, [onMapReady, syncRuntimeLayers]);
+  }, [initialStyleUrl, onMapReady, syncRuntimeLayers]);
 
   useEffect(() => {
     initMap();
@@ -1392,10 +1423,21 @@ export function MapView({
     const map = mapRef.current;
     if (!map || !mapContainerRef.current) return;
 
-    const handleResize = () => map.resize();
+    const safeResize = () => {
+      if (mapRef.current !== map) return;
+      const container = map.getContainer?.();
+      if (!container || !container.isConnected) return;
+      try {
+        map.resize();
+      } catch {
+        // Ignore resize calls during map teardown.
+      }
+    };
+
+    const handleResize = () => safeResize();
     window.addEventListener("resize", handleResize);
 
-    const resizeObserver = new ResizeObserver(() => map.resize());
+    const resizeObserver = new ResizeObserver(() => safeResize());
     resizeObserver.observe(mapContainerRef.current);
 
     return () => {
@@ -1417,7 +1459,7 @@ export function MapView({
     if (!selectedRiverId) {
       const fc = riversToFeatureCollection(rivers);
       if (fc.features.length) {
-        const bounds = new maplibregl.LngLatBounds(
+        const bounds = new mapboxgl.LngLatBounds(
           fc.features[0].geometry.coordinates as [number, number],
           fc.features[0].geometry.coordinates as [number, number]
         );
@@ -1468,7 +1510,7 @@ export function MapView({
 
     const paddingBottom =
       drawerState === "expanded" ? 360 : drawerState === "mid" ? 220 : 120;
-    const padding: maplibregl.PaddingOptions = {
+    const padding: mapboxgl.PaddingOptions = {
       top: 80,
       left: 40,
       right: rightPanelOpen ? 420 : 40,
@@ -1577,10 +1619,18 @@ export function MapView({
     <div
       id="map"
       ref={mapContainerRef}
-      className={`absolute inset-0 h-full w-full min-h-0 [&_.maplibregl-marker]:cursor-pointer ${className ?? ""}`.trim()}
+      className={`absolute inset-0 h-full w-full min-h-0 [&_.mapboxgl-marker]:cursor-pointer ${className ?? ""}`.trim()}
       style={{ position: "absolute", inset: 0, height: "100%", width: "100%", minHeight: 320 }}
       aria-label="Montana river map"
     >
+      {mapInitError && (
+        <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center bg-slate-100/85">
+          <div className="pointer-events-auto rounded-xl bg-white px-6 py-5 text-center shadow-md">
+            <div className="text-xl font-bold text-slate-900">Map unavailable</div>
+            <div className="mt-1 text-sm text-slate-600">{mapInitError}</div>
+          </div>
+        </div>
+      )}
       {mapReady && mapRef.current && <MapControls map={mapRef.current} />}
     </div>
   );

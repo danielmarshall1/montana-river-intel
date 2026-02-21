@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import maplibregl from "maplibre-gl";
+import mapboxgl from "mapbox-gl";
 import { Plus, Minus, Maximize2, Crosshair, Layers, List, X } from "lucide-react";
 import { MapView } from "@/components/MapView";
 import { fetchRiverGeom } from "@/lib/supabase";
@@ -159,7 +159,7 @@ export default function OnxShell({
 
   const [selectedGeojson, setSelectedGeojson] = useState<GeoJSON.GeoJSON | null>(null);
   const [riverLinesGeojson, setRiverLinesGeojson] = useState<GeoJSON.FeatureCollection | null>(null);
-  const mapRef = useRef<maplibregl.Map | null>(null);
+  const mapRef = useRef<mapboxgl.Map | null>(null);
 
   const [openTopPanel, setOpenTopPanel] = useState<TopPanel>("none");
   const [transparencyOpen, setTransparencyOpen] = useState(false);
@@ -589,7 +589,7 @@ export default function OnxShell({
     const map = mapRef.current;
     if (!map || !filtered.length) return;
 
-    const bounds = new maplibregl.LngLatBounds();
+    const bounds = new mapboxgl.LngLatBounds();
     let hasAny = false;
 
     for (const r of filtered) {

@@ -1,8 +1,8 @@
 export const MRI_COLORS = {
-  riverBase: "#4a6270",
-  riverSelected: "#2f5d72",
-  riverCasing: "#1b2b34",
-  riverHalo: "rgba(203, 223, 235, 0.22)",
+  riverBase: "#6b8798",
+  riverSelected: "#8fb3c9",
+  riverCasing: "#11202a",
+  riverHalo: "rgba(214, 230, 241, 0.24)",
   good: "#466957",
   fair: "#8a6d3b",
   tough: "#6b7684",
