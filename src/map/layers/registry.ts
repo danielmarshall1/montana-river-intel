@@ -10,6 +10,7 @@ export type LayerId =
   | "mri_river_lines"
   | "mri_selected_highlight"
   | "mri_river_markers"
+  | "mri_active_stations"
   | "mri_score_coloring"
   | "mri_labels"
   | "hydro_flow_magnitude"
@@ -204,6 +205,14 @@ export const LAYER_REGISTRY: LayerDefinition[] = [
     source: { id: "rivers-source", type: "geojson" },
     layers: ["rivers-unclustered", "rivers-selected-halo", "rivers-selected-core"],
     locked: true,
+  },
+  {
+    id: "mri_active_stations",
+    label: "USGS active stations",
+    group: "MRI Overlays",
+    defaultOn: false,
+    source: { id: "active-usgs-stations-source", type: "geojson" },
+    layers: ["active-usgs-stations-layer"],
   },
   {
     id: "mri_score_coloring",

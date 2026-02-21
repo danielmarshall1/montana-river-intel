@@ -46,6 +46,11 @@ type RiverLatestRow = {
   longitude?: number | null;
   source_flow_observed_at?: string | null;
   source_temp_observed_at?: string | null;
+  temp_status?: "available_fresh" | "available_stale" | "unavailable_at_gauge" | null;
+  temp_stale?: boolean | null;
+  temp_age_minutes?: number | null;
+  temp_source_site_no?: string | null;
+  temp_source_kind?: "IV" | "DV" | "NONE" | null;
   updated_at?: string | null;
   is_stale?: boolean | null;
   stale_reason?: string | null;
@@ -61,6 +66,20 @@ type RiverHealthRow = {
   last_usgs_pull_at?: string | null;
   last_weather_pull_at?: string | null;
   last_river_daily_date?: string | null;
+};
+
+type StationRegistryRow = {
+  river_id?: string | number | null;
+  river_name?: string | null;
+  site_no?: string | null;
+  station_name?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  has_flow?: boolean | null;
+  has_temp?: boolean | null;
+  has_wq?: boolean | null;
+  parameter_codes?: string[] | null;
+  monitoring_location_id?: string | null;
 };
 
 export async function fetchRiverGeom(
@@ -106,7 +125,7 @@ export async function fetchLatestRiverScores(): Promise<RiverScoreRow[]> {
 
   const fromLatest = await supabase
     .from("v_river_latest")
-    .select("river_id,slug,river_name,gauge_label,usgs_site_no,date,fishability_score_calc,flow_cfs,change_48h_pct_calc,water_temp_f,wind_am_mph,wind_pm_mph,bite_tier,median_flow_cfs,flow_ratio_calc,source_flow_observed_at,source_temp_observed_at,updated_at");
+    .select("river_id,slug,river_name,gauge_label,usgs_site_no,date,fishability_score_calc,flow_cfs,change_48h_pct_calc,water_temp_f,wind_am_mph,wind_pm_mph,bite_tier,median_flow_cfs,flow_ratio_calc,source_flow_observed_at,source_temp_observed_at,temp_status,temp_stale,temp_age_minutes,temp_source_site_no,temp_source_kind,updated_at");
 
   if (!fromLatest.error && fromLatest.data && fromLatest.data.length > 0) {
     return (fromLatest.data as RiverLatestRow[]).map((r) => ({
@@ -126,6 +145,11 @@ export async function fetchLatestRiverScores(): Promise<RiverScoreRow[]> {
       flow_ratio_calc: r.flow_ratio_calc ?? null,
       source_flow_observed_at: r.source_flow_observed_at ?? null,
       source_temp_observed_at: r.source_temp_observed_at ?? null,
+      temp_status: r.temp_status ?? null,
+      temp_stale: r.temp_stale ?? null,
+      temp_age_minutes: r.temp_age_minutes ?? null,
+      temp_source_site_no: r.temp_source_site_no ?? null,
+      temp_source_kind: r.temp_source_kind ?? null,
       updated_at: r.updated_at ?? null,
     }));
   }
@@ -152,9 +176,9 @@ export async function fetchRiversWithLatest(): Promise<FishabilityRow[]> {
   if (!supabase) return [];
 
   const latestSelectEnriched =
-    "river_id,slug,river_name,gauge_label,usgs_site_no,latitude,longitude,date,flow_cfs,median_flow_cfs,flow_ratio_calc,change_48h_pct_calc,water_temp_f,wind_am_mph,wind_pm_mph,precip_mm,precip_probability_pct,fishability_score_calc,fishability_rank,fishability_percentile,bite_tier,source_flow_observed_at,source_temp_observed_at,updated_at,is_stale,stale_reason,last_usgs_pull_at,last_weather_pull_at,last_river_daily_date";
+    "river_id,slug,river_name,gauge_label,usgs_site_no,latitude,longitude,date,flow_cfs,median_flow_cfs,flow_ratio_calc,change_48h_pct_calc,water_temp_f,wind_am_mph,wind_pm_mph,precip_mm,precip_probability_pct,fishability_score_calc,fishability_rank,fishability_percentile,bite_tier,source_flow_observed_at,source_temp_observed_at,temp_status,temp_stale,temp_age_minutes,temp_source_site_no,temp_source_kind,updated_at,is_stale,stale_reason,last_usgs_pull_at,last_weather_pull_at,last_river_daily_date";
   const latestSelectFallback =
-    "river_id,slug,river_name,gauge_label,usgs_site_no,latitude,longitude,date,flow_cfs,median_flow_cfs,flow_ratio_calc,change_48h_pct_calc,water_temp_f,wind_am_mph,wind_pm_mph,fishability_score_calc,bite_tier,source_flow_observed_at,source_temp_observed_at,updated_at";
+    "river_id,slug,river_name,gauge_label,usgs_site_no,latitude,longitude,date,flow_cfs,median_flow_cfs,flow_ratio_calc,change_48h_pct_calc,water_temp_f,wind_am_mph,wind_pm_mph,fishability_score_calc,bite_tier,source_flow_observed_at,source_temp_observed_at,temp_status,temp_stale,temp_age_minutes,temp_source_site_no,temp_source_kind,updated_at";
 
   let latestRes: any = await supabase
     .from("v_river_latest")
@@ -194,6 +218,11 @@ export async function fetchRiversWithLatest(): Promise<FishabilityRow[]> {
       lng: r.longitude ?? null,
       source_flow_observed_at: r.source_flow_observed_at ?? null,
       source_temp_observed_at: r.source_temp_observed_at ?? null,
+      temp_status: r.temp_status ?? null,
+      temp_stale: r.temp_stale ?? null,
+      temp_age_minutes: r.temp_age_minutes ?? null,
+      temp_source_site_no: r.temp_source_site_no ?? null,
+      temp_source_kind: r.temp_source_kind ?? null,
       updated_at: r.updated_at ?? null,
       is_stale:
         r.is_stale ??
@@ -261,6 +290,56 @@ export async function fetchFishabilityData(useMock = false): Promise<Fishability
   return MOCK_RIVERS;
 }
 
+export async function fetchActiveStationGeojsonByRiverIds(
+  riverIds: string[]
+): Promise<GeoJSON.FeatureCollection<GeoJSON.Point, Record<string, unknown>>> {
+  const client = createSupabaseClient();
+  if (!client || riverIds.length === 0) {
+    return { type: "FeatureCollection", features: [] };
+  }
+
+  const uniqueIds = Array.from(new Set(riverIds.map((id) => String(id).trim()).filter(Boolean)));
+  if (uniqueIds.length === 0) {
+    return { type: "FeatureCollection", features: [] };
+  }
+
+  const { data, error } = await client
+    .from("usgs_station_registry")
+    .select(
+      "river_id,river_name,site_no,station_name,latitude,longitude,has_flow,has_temp,has_wq,parameter_codes,monitoring_location_id,is_active"
+    )
+    .eq("is_active", true)
+    .in("river_id", uniqueIds);
+
+  if (error || !data) {
+    return { type: "FeatureCollection", features: [] };
+  }
+
+  const features: GeoJSON.Feature<GeoJSON.Point, Record<string, unknown>>[] = [];
+  for (const row of data as StationRegistryRow[]) {
+    const lng = row.longitude ?? null;
+    const lat = row.latitude ?? null;
+    if (lng == null || lat == null || Number.isNaN(Number(lng)) || Number.isNaN(Number(lat))) continue;
+    features.push({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [Number(lng), Number(lat)] },
+      properties: {
+        river_id: row.river_id ? String(row.river_id) : null,
+        river_name: row.river_name ?? null,
+        site_no: row.site_no ?? null,
+        station_name: row.station_name ?? null,
+        has_flow: row.has_flow ?? false,
+        has_temp: row.has_temp ?? false,
+        has_wq: row.has_wq ?? false,
+        parameter_codes: row.parameter_codes ?? [],
+        monitoring_location_id: row.monitoring_location_id ?? null,
+      },
+    });
+  }
+
+  return { type: "FeatureCollection", features };
+}
+
 export async function fetchRiverDetailByIdOrSlug(
   riverIdOrSlug: string
 ): Promise<FishabilityRow | null> {
@@ -299,6 +378,11 @@ export async function fetchRiverDetailByIdOrSlug(
       lng: row.longitude ?? null,
       source_flow_observed_at: row.source_flow_observed_at ?? null,
       source_temp_observed_at: row.source_temp_observed_at ?? null,
+      temp_status: row.temp_status ?? null,
+      temp_stale: row.temp_stale ?? null,
+      temp_age_minutes: row.temp_age_minutes ?? null,
+      temp_source_site_no: row.temp_source_site_no ?? null,
+      temp_source_kind: row.temp_source_kind ?? null,
       updated_at: row.updated_at ?? null,
       is_stale: row.is_stale ?? null,
       stale_reason: row.stale_reason ?? null,

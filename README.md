@@ -176,11 +176,31 @@ USGS temperature availability audit:
 npm run audit:temp
 ```
 
+USGS OGC monitoring-location registry sync (bbox per river + parameter support):
+
+```bash
+npm run sync:usgs-registry
+```
+
 SQL report for temp source coverage:
 
 ```sql
 -- file:
 -- supabase/sql/report_temp_availability.sql
+```
+
+SQL report for station registry and active parameter overrides:
+
+```sql
+-- file:
+-- supabase/sql/report_usgs_station_registry.sql
+```
+
+Temperature diagnostics verification (fresh/stale/unavailable + source):
+
+```sql
+-- file:
+-- supabase/sql/verify_temperature_diagnostics.sql
 ```
 
 ## Map Layers Configuration

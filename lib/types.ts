@@ -25,6 +25,11 @@ export interface FishabilityRow {
   bite_tier: BiteTier | null;
   source_flow_observed_at?: string | null;
   source_temp_observed_at?: string | null;
+  temp_status?: "available_fresh" | "available_stale" | "unavailable_at_gauge" | null;
+  temp_stale?: boolean | null;
+  temp_age_minutes?: number | null;
+  temp_source_site_no?: string | null;
+  temp_source_kind?: "IV" | "DV" | "NONE" | null;
   updated_at?: string | null;
   is_stale?: boolean | null;
   stale_reason?: string | null;

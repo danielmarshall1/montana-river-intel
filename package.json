@@ -9,7 +9,8 @@
     "start": "next start",
     "lint": "next lint",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "audit:temp": "tsx scripts/auditTempAvailability.ts"
+    "audit:temp": "tsx scripts/auditTempAvailability.ts",
+    "sync:usgs-registry": "tsx scripts/syncUsgsMonitoringRegistry.ts"
   },
   "keywords": [],
   "author": "",

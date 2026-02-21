@@ -16,6 +16,22 @@ type RiverParamMapRow = {
   stage_site_no: string | null;
 };
 
+type RiverStationConfigRow = {
+  river_id: string;
+  parameter_code: "00060" | "00010" | "WQ";
+  site_no: string;
+  priority: number | null;
+  is_enabled: boolean | null;
+};
+
+type StationRegistryRow = {
+  river_id: string;
+  site_no: string | null;
+  has_flow: boolean | null;
+  has_temp: boolean | null;
+  is_active: boolean | null;
+};
+
 type ParsedUSGS = {
   flowCfs: number | null;
   waterTempF: number | null;
@@ -402,13 +418,54 @@ serve(async (req) => {
     }
   }
 
-  const rivers = (riversResp.data ?? []) as RiverRow[];
-  const riversByName = new Map<string, RiverRow[]>();
-  for (const r of rivers) {
-    const k = (r.river_name ?? "").trim();
-    if (!k) continue;
-    riversByName.set(k, [...(riversByName.get(k) ?? []), r]);
+  const stationConfigResp = await sb
+    .from("river_station_parameter_config")
+    .select("river_id,parameter_code,site_no,priority,is_enabled")
+    .eq("is_enabled", true)
+    .in("parameter_code", ["00060", "00010"]);
+
+  const stationConfigByRiver = new Map<string, { flowSiteNo?: string; tempSiteNo?: string }>();
+  if (!stationConfigResp.error && stationConfigResp.data) {
+    const sorted = (stationConfigResp.data as RiverStationConfigRow[])
+      .filter((row) => !!row.site_no)
+      .sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100));
+    for (const row of sorted) {
+      const rid = String(row.river_id ?? "");
+      if (!rid) continue;
+      const existing = stationConfigByRiver.get(rid) ?? {};
+      if (row.parameter_code === "00060" && !existing.flowSiteNo) {
+        existing.flowSiteNo = String(row.site_no).trim();
+      }
+      if (row.parameter_code === "00010" && !existing.tempSiteNo) {
+        existing.tempSiteNo = String(row.site_no).trim();
+      }
+      stationConfigByRiver.set(rid, existing);
+    }
   }
+
+  const stationRegistryResp = await sb
+    .from("usgs_station_registry")
+    .select("river_id,site_no,has_flow,has_temp,is_active")
+    .eq("is_active", true);
+
+  const stationRegistryByRiver = new Map<string, { flowSites: string[]; tempSites: string[] }>();
+  if (!stationRegistryResp.error && stationRegistryResp.data) {
+    for (const row of stationRegistryResp.data as StationRegistryRow[]) {
+      const rid = String(row.river_id ?? "");
+      const siteNo = String(row.site_no ?? "").trim();
+      if (!rid || !siteNo) continue;
+      const existing = stationRegistryByRiver.get(rid) ?? { flowSites: [], tempSites: [] };
+      if (row.has_flow && !existing.flowSites.includes(siteNo)) {
+        existing.flowSites.push(siteNo);
+      }
+      if (row.has_temp && !existing.tempSites.includes(siteNo)) {
+        existing.tempSites.push(siteNo);
+      }
+      stationRegistryByRiver.set(rid, existing);
+    }
+  }
+
+  const rivers = (riversResp.data ?? []) as RiverRow[];
   const tempProbeCache = new Map<string, TempProbeResult>();
   let okCount = 0;
   let failCount = 0;
@@ -419,8 +476,10 @@ serve(async (req) => {
 
     try {
       const mapRow = riverMap.get(river.id);
-      const flowSiteNo = (mapRow?.flow_site_no ?? defaultSiteNo).trim();
-      const tempSiteNo = (mapRow?.temp_site_no ?? flowSiteNo).trim();
+      const stationConfig = stationConfigByRiver.get(river.id);
+      const stationRegistry = stationRegistryByRiver.get(river.id);
+      const flowSiteNo = (stationConfig?.flowSiteNo ?? mapRow?.flow_site_no ?? defaultSiteNo).trim();
+      const tempSiteNo = (stationConfig?.tempSiteNo ?? mapRow?.temp_site_no ?? flowSiteNo).trim();
 
       const { parsed: mainIv, status } = await fetchUSGSIv(flowSiteNo, "00060,00010,00065");
 
@@ -464,46 +523,19 @@ serve(async (req) => {
       }
 
       if (tempValue == null) {
-        const siblings = riversByName.get((river.river_name ?? "").trim()) ?? [];
-        for (const sib of siblings) {
-          if (sib.id === river.id) continue;
-          const sibMap = riverMap.get(sib.id);
-          const sibTempSite = (sibMap?.temp_site_no ?? sibMap?.flow_site_no ?? sib.usgs_site_no ?? "").trim();
-          if (!sibTempSite || sibTempSite === tempSiteNo) continue;
-
-          const probe = await probeTempFromSite(sibTempSite, tempProbeCache);
+        const tempCandidates = (stationRegistry?.tempSites ?? []).filter((s) => s !== tempSiteNo);
+        for (const candidate of tempCandidates) {
+          const probe = await probeTempFromSite(candidate, tempProbeCache);
           hasTempIv = hasTempIv || probe.hasIvSeries;
           hasTempDv = hasTempDv || probe.hasDvSeries;
           if (probe.tempF == null) continue;
-
           const maxAge = probe.source === "DV_FALLBACK" ? 240 : 72;
-          if (!isObservationFresh(probe.observedAt, maxAge)) {
-            continue;
-          }
-
+          if (!isObservationFresh(probe.observedAt, maxAge)) continue;
           tempValue = probe.tempF;
           tempObservedAt = probe.observedAt;
-          tempSource = probe.source === "IV" ? "IV_SIBLING_SITE" : "DV_SIBLING_FALLBACK";
-          if (!mainIv.parameterCodes.includes("00010(SIBLING)")) {
-            mainIv.parameterCodes.push("00010(SIBLING)");
-          }
-
-          const persistMap = await sb
-            .from("river_usgs_map")
-            .upsert(
-              {
-                river_id: river.id,
-                flow_site_no: flowSiteNo,
-                temp_site_no: sibTempSite,
-                stage_site_no: mapRow?.stage_site_no ?? flowSiteNo,
-                updated_at: new Date().toISOString(),
-              },
-              { onConflict: "river_id" }
-            );
-          if (persistMap.error) {
-            mainIv.rawSummary.sibling_temp_map_error = persistMap.error.message;
-          } else {
-            mainIv.rawSummary.temp_site_no = sibTempSite;
+          tempSource = probe.source === "IV" ? "IV_REGISTRY_SITE" : "DV_REGISTRY_FALLBACK";
+          if (!mainIv.parameterCodes.includes("00010(REGISTRY)")) {
+            mainIv.parameterCodes.push("00010(REGISTRY)");
           }
           break;
         }
@@ -517,6 +549,27 @@ serve(async (req) => {
           tempValue = null;
           tempObservedAt = null;
           tempSource = `${tempSource}_STALE`;
+        }
+      }
+
+      if (flowValue == null) {
+        const flowCandidates = (stationRegistry?.flowSites ?? []).filter((s) => s !== flowSiteNo);
+        for (const candidate of flowCandidates) {
+          try {
+            const altIv = await fetchUSGSIv(candidate, "00060");
+            if (altIv.parsed.flowCfs == null) continue;
+            if (!isObservationFresh(altIv.parsed.flowObservedAt, 72)) continue;
+            flowValue = Number(altIv.parsed.flowCfs.toFixed(2));
+            flowObservedAt = altIv.parsed.flowObservedAt;
+            flowSource = "IV_REGISTRY_SITE";
+            if (!mainIv.parameterCodes.includes("00060(REGISTRY)")) {
+              mainIv.parameterCodes.push("00060(REGISTRY)");
+            }
+            mainIv.rawSummary.flow_site_no = candidate;
+            break;
+          } catch {
+            // try next registry candidate
+          }
         }
       }
 
@@ -536,6 +589,27 @@ serve(async (req) => {
         }
       }
 
+      if (flowValue == null) {
+        const flowCandidates = (stationRegistry?.flowSites ?? []).filter((s) => s !== flowSiteNo);
+        for (const candidate of flowCandidates) {
+          try {
+            const dvFlow = await fetchUSGSDVFlow(candidate);
+            if (dvFlow.parsed.value == null) continue;
+            if (!isObservationFresh(dvFlow.parsed.observedAt, 240)) continue;
+            flowValue = Number(dvFlow.parsed.value.toFixed(2));
+            flowObservedAt = dvFlow.parsed.observedAt;
+            flowSource = "DV_REGISTRY_FALLBACK";
+            if (!mainIv.parameterCodes.includes("00060(DV_REGISTRY)")) {
+              mainIv.parameterCodes.push("00060(DV_REGISTRY)");
+            }
+            mainIv.rawSummary.flow_site_no = candidate;
+            break;
+          } catch {
+            // keep searching
+          }
+        }
+      }
+
       if (flowValue != null) {
         const maxAge = flowSource === "DV_FALLBACK" ? 240 : 72;
         if (!isObservationFresh(flowObservedAt, maxAge)) {
@@ -549,6 +623,13 @@ serve(async (req) => {
       mainIv.rawSummary.flow_source = flowSource;
       mainIv.rawSummary.temp_site_no = tempSiteNo;
       mainIv.rawSummary.flow_site_no = flowSiteNo;
+      if (stationConfig?.flowSiteNo || stationConfig?.tempSiteNo) {
+        mainIv.rawSummary.station_config_override = {
+          flow_site_no: stationConfig?.flowSiteNo ?? null,
+          temp_site_no: stationConfig?.tempSiteNo ?? null,
+        };
+      }
+      mainIv.rawSummary.temp_policy = "strict_same_river";
       if (tempValue == null && !hasTempIv && !hasTempDv) {
         mainIv.rawSummary.temp_status = "not_available";
       }

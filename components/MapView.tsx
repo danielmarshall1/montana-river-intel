@@ -29,6 +29,7 @@ interface MapViewProps {
   selectedRiverId: string | null;
   selectedRiverGeojson: GeoJSON.GeoJSON | null;
   riverLinesGeojson?: GeoJSON.FeatureCollection | null;
+  activeStationsGeojson?: GeoJSON.FeatureCollection<GeoJSON.Point, Record<string, unknown>> | null;
   basemap?: BasemapId;
   layerState?: Record<LayerId, boolean>;
   rightPanelOpen?: boolean;
@@ -63,6 +64,8 @@ const STATE_LANDS_LAYER = "public-lands-state-layer";
 
 const ACCESS_SOURCE = "access-fishing-sites-source";
 const ACCESS_LAYER = "access-fishing-sites-layer";
+const ACTIVE_STATIONS_SOURCE = "active-usgs-stations-source";
+const ACTIVE_STATIONS_LAYER = "active-usgs-stations-layer";
 const HYDRO_FLOW_LAYER = "hydro-flow-magnitude-layer";
 const HYDRO_CHANGE_LAYER = "hydro-change-indicator-layer";
 const HYDRO_TEMP_LAYER = "hydro-temp-stress-layer";
@@ -81,7 +84,7 @@ const BASEMAP_LAYER_IDS = [
   "satellite",
   "satellite-labels",
 ] as const;
-const CLICK_PRIORITY_LAYERS = [UNCLUSTERED_LAYER, ACCESS_LAYER] as const;
+const CLICK_PRIORITY_LAYERS = [UNCLUSTERED_LAYER, ACCESS_LAYER, ACTIVE_STATIONS_LAYER] as const;
 const BASEMAPS: Record<
   BasemapId,
   { rasterLayers: (typeof BASEMAP_LAYER_IDS)[number][]; labelLayers: (typeof BASEMAP_LAYER_IDS)[number][] }
@@ -432,7 +435,7 @@ function ensureRiverPointLayers(map: maplibregl.Map) {
           ["==", ["get", "bite_tier"], "GOOD"], BITE_TIER_COLORS.GOOD,
           ["==", ["get", "bite_tier"], "FAIR"], BITE_TIER_COLORS.FAIR,
           ["==", ["get", "bite_tier"], "TOUGH"], BITE_TIER_COLORS.TOUGH,
-          "#94a3b8",
+          MRI_COLORS.tough,
         ],
         "circle-radius": ["case", ["boolean", ["feature-state", "hover"], false], 8, 6],
         "circle-stroke-color": "rgba(255,255,255,0.92)",
@@ -448,7 +451,7 @@ function ensureRiverPointLayers(map: maplibregl.Map) {
       type: "circle",
       source: RIVERS_SOURCE,
       filter: ["==", ["get", "river_id"], "__none__"],
-      paint: { "circle-color": "rgba(56, 189, 248, 0.30)", "circle-radius": 15 },
+      paint: { "circle-color": MRI_COLORS.riverHalo, "circle-radius": 15 },
     });
   }
 
@@ -459,9 +462,9 @@ function ensureRiverPointLayers(map: maplibregl.Map) {
       source: RIVERS_SOURCE,
       filter: ["==", ["get", "river_id"], "__none__"],
       paint: {
-        "circle-color": "rgba(255,255,255,0.98)",
+        "circle-color": "rgba(233,240,247,0.98)",
         "circle-radius": 6,
-        "circle-stroke-color": "rgba(56, 189, 248, 0.98)",
+        "circle-stroke-color": MRI_COLORS.riverSelected,
         "circle-stroke-width": 2,
       },
     });
@@ -499,9 +502,9 @@ function syncRiverPointPresentation(
         ["==", ["get", "bite_tier"], "GOOD"], BITE_TIER_COLORS.GOOD,
         ["==", ["get", "bite_tier"], "FAIR"], BITE_TIER_COLORS.FAIR,
         ["==", ["get", "bite_tier"], "TOUGH"], BITE_TIER_COLORS.TOUGH,
-        "#94a3b8",
+        MRI_COLORS.tough,
       ]
-    : "#94a3b8";
+    : MRI_COLORS.tough;
   map.setPaintProperty(UNCLUSTERED_LAYER, "circle-color", circleColor as any);
 
   const circleOpacity = selectedRiverId
@@ -606,7 +609,7 @@ function syncSelectedRiverLine(
       filter: selectedFilter,
       layout: { "line-join": "round", "line-cap": "round" },
       paint: {
-        "line-color": "rgba(255,255,255,0.25)",
+        "line-color": MRI_COLORS.riverHalo,
         "line-width": 7,
         "line-blur": 0.5,
         "line-opacity": 1,
@@ -624,7 +627,7 @@ function syncSelectedRiverLine(
       filter: selectedFilter,
       layout: { "line-join": "round", "line-cap": "round" },
       paint: {
-        "line-color": "rgba(0,0,0,0.35)",
+        "line-color": MRI_COLORS.riverCasing,
         "line-width": 5,
         "line-opacity": 1,
       },
@@ -766,9 +769,9 @@ function syncSelectedRiverLine(
         "text-letter-spacing": 0.02,
       },
       paint: {
-        "text-color": "rgba(203,213,225,0.88)",
+        "text-color": "rgba(188,204,219,0.9)",
         "text-opacity": ["interpolate", ["linear"], ["zoom"], 7, 0, 8, 0.6, 10, 0.82],
-        "text-halo-color": "rgba(255,255,255,0.7)",
+        "text-halo-color": "rgba(14,22,32,0.88)",
         "text-halo-width": 1,
         "text-halo-blur": 0.5,
       },
@@ -831,7 +834,7 @@ function syncStatewideHydrologyLayer(map: maplibregl.Map, enabled: boolean) {
         type: "line",
         source: STATEWIDE_HYDRO_SOURCE,
         paint: {
-          "line-color": "#2C3E44",
+          "line-color": MRI_COLORS.riverCasing,
           "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.35, 8, 0.55, 11, 0.9],
           "line-opacity": 0.7,
         },
@@ -968,6 +971,67 @@ function syncFishingAccessLayer(map: maplibregl.Map, enabled: boolean) {
   }
 }
 
+function syncActiveStationsLayer(
+  map: maplibregl.Map,
+  enabled: boolean,
+  stationsGeojson: GeoJSON.FeatureCollection<GeoJSON.Point, Record<string, unknown>> | null | undefined
+) {
+  const hasFeatures = Boolean(stationsGeojson?.features?.length);
+  if (!enabled || !hasFeatures) {
+    if (map.getLayer(ACTIVE_STATIONS_LAYER)) {
+      map.removeLayer(ACTIVE_STATIONS_LAYER);
+    }
+    if (map.getSource(ACTIVE_STATIONS_SOURCE)) {
+      map.removeSource(ACTIVE_STATIONS_SOURCE);
+    }
+    return;
+  }
+
+  const src = map.getSource(ACTIVE_STATIONS_SOURCE) as
+    | { setData?: (d: GeoJSON.FeatureCollection) => void }
+    | undefined;
+
+  if (!src) {
+    map.addSource(ACTIVE_STATIONS_SOURCE, {
+      type: "geojson",
+      data: stationsGeojson as GeoJSON.FeatureCollection,
+    });
+  } else {
+    src.setData?.(stationsGeojson as GeoJSON.FeatureCollection);
+  }
+
+  if (!map.getLayer(ACTIVE_STATIONS_LAYER)) {
+    map.addLayer({
+      id: ACTIVE_STATIONS_LAYER,
+      type: "circle",
+      source: ACTIVE_STATIONS_SOURCE,
+      minzoom: 5,
+      paint: {
+        "circle-color": [
+          "case",
+          ["all", ["==", ["get", "has_flow"], true], ["==", ["get", "has_temp"], true]],
+          "#6d8493",
+          ["==", ["get", "has_flow"], true],
+          "#6b7280",
+          "#7f8b93",
+        ],
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 2.4, 9, 3.8, 12, 5.5],
+        "circle-stroke-color": "rgba(226,232,240,0.85)",
+        "circle-stroke-width": 1.1,
+        "circle-opacity": 0.86,
+      },
+    });
+  }
+
+  try {
+    if (map.getLayer(UNCLUSTERED_LAYER)) {
+      map.moveLayer(ACTIVE_STATIONS_LAYER, UNCLUSTERED_LAYER);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 function syncHydrologyOverlays(
   map: maplibregl.Map,
   showFlowMagnitude: boolean,
@@ -1096,6 +1160,7 @@ export function MapView({
   selectedRiverId,
   selectedRiverGeojson,
   riverLinesGeojson,
+  activeStationsGeojson,
   basemap = "hybrid",
   layerState,
   rightPanelOpen = false,
@@ -1114,6 +1179,9 @@ export function MapView({
   const selectedRiverIdRef = useRef(selectedRiverId);
   const selectedRiverGeojsonRef = useRef(selectedRiverGeojson);
   const riverLinesGeojsonRef = useRef<GeoJSON.FeatureCollection | null>(riverLinesGeojson ?? null);
+  const activeStationsGeojsonRef = useRef<
+    GeoJSON.FeatureCollection<GeoJSON.Point, Record<string, unknown>> | null
+  >(activeStationsGeojson ?? null);
   const basemapRef = useRef<BasemapId>(basemap);
   const layerStateRef = useRef<Record<LayerId, boolean>>(effectiveLayerState);
   const hoverIdRef = useRef<number | string | null>(null);
@@ -1127,6 +1195,7 @@ export function MapView({
   selectedRiverIdRef.current = selectedRiverId;
   selectedRiverGeojsonRef.current = selectedRiverGeojson;
   riverLinesGeojsonRef.current = riverLinesGeojson ?? null;
+  activeStationsGeojsonRef.current = activeStationsGeojson ?? null;
   basemapRef.current = basemap;
   layerStateRef.current = effectiveLayerState;
 
@@ -1153,6 +1222,7 @@ export function MapView({
     syncFederalLandsLayer(map, layerStateRef.current.public_federal);
     syncStateLandsLayer(map, layerStateRef.current.public_state);
     syncFishingAccessLayer(map, layerStateRef.current.access_fishing_sites);
+    syncActiveStationsLayer(map, layerStateRef.current.mri_active_stations, activeStationsGeojsonRef.current);
     syncHydrologyOverlays(
       map,
       layerStateRef.current.hydro_flow_magnitude,
@@ -1272,6 +1342,38 @@ export function MapView({
         new maplibregl.Popup({ closeButton: false, closeOnClick: true, offset: 10 })
           .setLngLat(coords)
           .setHTML(`<div style="font-size:12px;font-weight:600;color:#0f172a;">${name}</div>`)
+          .addTo(map);
+      });
+
+      map.on("mouseenter", ACTIVE_STATIONS_LAYER, () => {
+        map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mouseleave", ACTIVE_STATIONS_LAYER, () => {
+        map.getCanvas().style.cursor = "";
+      });
+      map.on("click", ACTIVE_STATIONS_LAYER, (e: maplibregl.MapLayerMouseEvent) => {
+        const feature = e.features?.[0];
+        if (!feature || !feature.geometry || feature.geometry.type !== "Point") return;
+        const coords = [...feature.geometry.coordinates] as [number, number];
+        const props = (feature.properties ?? {}) as Record<string, unknown>;
+        const stationName =
+          String(props.station_name ?? props.site_no ?? "USGS Station");
+        const siteNo = String(props.site_no ?? "").trim();
+        const capabilities = [
+          props.has_flow ? "flow" : null,
+          props.has_temp ? "temp" : null,
+          props.has_wq ? "wq" : null,
+        ].filter(Boolean);
+
+        new maplibregl.Popup({ closeButton: false, closeOnClick: true, offset: 10 })
+          .setLngLat(coords)
+          .setHTML(
+            `<div style="font-size:12px;color:#0f172a;line-height:1.35;">
+              <div style="font-weight:700;">${stationName}</div>
+              <div style="font-size:11px;color:#334155;">${siteNo || "USGS station"}</div>
+              <div style="font-size:11px;color:#475569;">${capabilities.length ? capabilities.join(" • ") : "metadata pending"}</div>
+            </div>`
+          )
           .addTo(map);
       });
     }
@@ -1434,6 +1536,7 @@ export function MapView({
     syncFederalLandsLayer(map, effectiveLayerState.public_federal);
     syncStateLandsLayer(map, effectiveLayerState.public_state);
     syncFishingAccessLayer(map, effectiveLayerState.access_fishing_sites);
+    syncActiveStationsLayer(map, effectiveLayerState.mri_active_stations, activeStationsGeojson);
     syncHydrologyOverlays(
       map,
       effectiveLayerState.hydro_flow_magnitude,
@@ -1447,10 +1550,12 @@ export function MapView({
     effectiveLayerState.public_federal,
     effectiveLayerState.public_state,
     effectiveLayerState.access_fishing_sites,
+    effectiveLayerState.mri_active_stations,
     effectiveLayerState.hydro_flow_magnitude,
     effectiveLayerState.hydro_change_indicator,
     effectiveLayerState.hydro_temp_stress,
     effectiveLayerState.mri_labels,
+    activeStationsGeojson,
   ]);
 
   // Re-apply overlays after style switches.

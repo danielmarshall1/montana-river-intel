@@ -87,8 +87,33 @@ function formatUpdatedAgo(value: string | null | undefined): string {
   return `Updated ${d}d ago`;
 }
 
+function getTempStatusLabel(river: River | null | undefined): string {
+  if (!river) return "Temp status unavailable";
+  if (river.temp_status === "available_stale") {
+    const mins = river.temp_age_minutes;
+    if (mins != null && Number.isFinite(mins)) {
+      const h = Math.floor(mins / 60);
+      return h > 0 ? `Temp stale (${h}h old)` : `Temp stale (${mins}m old)`;
+    }
+    return "Temp stale";
+  }
+  if (river.temp_status === "unavailable_at_gauge") {
+    return "Temp not available at this gauge";
+  }
+  return "Temp fresh";
+}
+
+function getTempSourceLabel(river: River | null | undefined): string {
+  if (!river) return "—";
+  const kind = river.temp_source_kind ?? "NONE";
+  const site = river.temp_source_site_no ?? "—";
+  if (kind === "NONE") return "No temp source";
+  return `${kind} • Site ${site}`;
+}
+
 export default function OnxShell({
   rivers,
+  stationGeojson,
   dateLabel = new Date().toLocaleDateString("en-US", {
     weekday: "long",
     month: "long",
@@ -97,11 +122,12 @@ export default function OnxShell({
   }),
 }: {
   rivers: River[];
+  stationGeojson?: GeoJSON.FeatureCollection<GeoJSON.Point, Record<string, unknown>> | null;
   dateLabel?: string;
 }) {
   type TopPanel = "none" | "layers" | "detail";
   type DrawerSnap = "collapsed" | "mid" | "expanded";
-  type MobileSurface = "map" | "listSheet" | "detailSheet" | "toolsSheet";
+  type MobileSurface = "map" | "list" | "detail" | "tools";
   type MobileListSnap = "peek" | "mid" | "full";
   const DRAWER_SNAP_Y: Record<DrawerSnap, number> = {
     collapsed: 0.84,
@@ -113,6 +139,7 @@ export default function OnxShell({
     mid: 0.46,
     full: 0.08,
   };
+  const SNAP_TRANSITION = "transform 260ms ease-in-out";
 
   const [search, setSearch] = useState("");
   const [tier, setTier] = useState<"All" | "Good" | "Fair" | "Tough">("All");
@@ -136,6 +163,8 @@ export default function OnxShell({
 
   const [openTopPanel, setOpenTopPanel] = useState<TopPanel>("none");
   const [transparencyOpen, setTransparencyOpen] = useState(false);
+  const [detailMetricsOpen, setDetailMetricsOpen] = useState(false);
+  const [mobileDetailMetricsOpen, setMobileDetailMetricsOpen] = useState(false);
   const [advancedLayersOpen, setAdvancedLayersOpen] = useState(false);
   const [historyRows, setHistoryRows] = useState<
     Array<{ obs_date: string; flow_cfs: number | null; water_temp_f: number | null; fishability_score: number | null }>
@@ -345,10 +374,33 @@ export default function OnxShell({
     };
   }, [rivers]);
 
+  function setMobileSurfaceState(next: MobileSurface, opts?: { listSnap?: MobileListSnap }) {
+    setOpenTopPanel("none");
+    setTransparencyOpen(false);
+    if (next === "list" && opts?.listSnap) {
+      setMobileListSnap(opts.listSnap);
+      setMobileSheetY(MOBILE_LIST_SNAP_Y[opts.listSnap]);
+    }
+    setMobileSurface(next);
+  }
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const media = window.matchMedia("(max-width: 639px)");
-    const sync = () => setIsMobile(media.matches);
+    const sync = () => {
+      const mobile = media.matches;
+      setIsMobile(mobile);
+      if (mobile) {
+        setMobileSurface((prev) => {
+          if (prev === "map") {
+            setMobileListSnap("peek");
+            setMobileSheetY(MOBILE_LIST_SNAP_Y.peek);
+            return "list";
+          }
+          return prev;
+        });
+      }
+    };
     sync();
     media.addEventListener("change", sync);
     return () => media.removeEventListener("change", sync);
@@ -356,15 +408,17 @@ export default function OnxShell({
 
   useEffect(() => {
     if (selected) {
+      setDetailMetricsOpen(false);
+      setMobileDetailMetricsOpen(false);
       if (isMobile) {
-        setMobileSurface("detailSheet");
+        setMobileSurfaceState("detail");
         return;
       }
       setOpenTopPanel((prev) => (prev === "layers" ? prev : "detail"));
       return;
     }
-    if (isMobile && mobileSurface === "detailSheet") {
-      setMobileSurface("map");
+    if (isMobile && mobileSurface === "detail") {
+      setMobileSurfaceState("list", { listSnap: "peek" });
     }
     if (openTopPanel === "detail") {
       setOpenTopPanel("none");
@@ -571,7 +625,7 @@ export default function OnxShell({
 
   function toggleTopPanel(panel: TopPanel) {
     if (isMobile) {
-      setMobileSurface(panel === "layers" ? "toolsSheet" : panel === "detail" ? "detailSheet" : "map");
+      setMobileSurfaceState(panel === "layers" ? "tools" : panel === "detail" ? "detail" : "list");
       return;
     }
     setOpenTopPanel((prev) => (prev === panel ? "none" : panel));
@@ -582,7 +636,7 @@ export default function OnxShell({
     if (riverId) {
       setSelectionSeq((prev) => prev + 1);
       if (isMobile) {
-        setMobileSurface("detailSheet");
+        setMobileSurfaceState("detail");
       } else {
         setOpenTopPanel("detail");
       }
@@ -655,7 +709,7 @@ export default function OnxShell({
       mobileDetailDragRef.current = null;
       document.body.style.userSelect = "";
       if (dy > 90) {
-        setMobileSurface("map");
+        setMobileSurfaceState("list", { listSnap: "peek" });
       }
       document.removeEventListener("pointermove", onMove);
       document.removeEventListener("pointerup", onUp);
@@ -671,6 +725,13 @@ export default function OnxShell({
 
   const layersOpen = !isMobile && openTopPanel === "layers";
   const detailsOpen = !isMobile && openTopPanel === "detail";
+
+  useEffect(() => {
+    if (!isMobile && detailsOpen && drawerSnap !== "collapsed") {
+      setDrawerSnap("collapsed");
+      setSheetY(DRAWER_SNAP_Y.collapsed);
+    }
+  }, [detailsOpen, drawerSnap, isMobile]);
 
   const groupedLayers = useMemo(
     () =>
@@ -691,6 +752,7 @@ export default function OnxShell({
           selectedRiverId={selectedId}
           selectedRiverGeojson={selectedGeojson}
           riverLinesGeojson={riverLinesGeojson}
+          activeStationsGeojson={stationGeojson ?? null}
           basemap={basemap}
           layerState={layerState}
           rightPanelOpen={detailsOpen}
@@ -793,7 +855,7 @@ export default function OnxShell({
 
       <div className="absolute right-4 top-4 z-30 hidden items-start gap-2 sm:flex">
         <button
-          className={`onx-iconbtn ${layersOpen ? "ring-2 ring-sky-300/50" : ""}`}
+          className={`onx-iconbtn ${layersOpen ? "ring-2 ring-white/20" : ""}`}
           title="Layers"
           onClick={() => toggleTopPanel("layers")}
         >
@@ -929,16 +991,21 @@ export default function OnxShell({
         </div>
       </div>
 
-      <div className="absolute bottom-6 right-4 z-30 flex flex-col gap-2 sm:hidden">
+      <div
+        className={[
+          "absolute bottom-6 right-4 z-20 flex flex-col gap-2 sm:hidden",
+          mobileSurface === "detail" || mobileSurface === "tools" ? "pointer-events-none opacity-0" : "opacity-100",
+        ].join(" ")}
+      >
         <button
-          className="onx-glass min-h-11 rounded-xl px-3 text-xs font-semibold text-white"
-          onClick={() => setMobileSurface((s) => (s === "toolsSheet" ? "map" : "toolsSheet"))}
+          className="onx-glass min-h-11 rounded-xl px-3 text-xs font-semibold text-white active:translate-y-[1px]"
+          onClick={() => setMobileSurfaceState(mobileSurface === "tools" ? "list" : "tools")}
         >
           Map Tools
         </button>
         <button
-          className="onx-glass min-h-11 rounded-xl px-3 text-xs font-semibold text-white"
-          onClick={() => setMobileSurface((s) => (s === "listSheet" ? "map" : "listSheet"))}
+          className="onx-glass min-h-11 rounded-xl px-3 text-xs font-semibold text-white active:translate-y-[1px]"
+          onClick={() => setMobileSurfaceState(mobileSurface === "list" ? "map" : "list", { listSnap: "mid" })}
         >
           Rivers
         </button>
@@ -946,7 +1013,7 @@ export default function OnxShell({
 
       <section className="absolute right-4 top-[118px] z-20 hidden w-[314px] sm:block">
         {detailsOpen ? (
-          <div className="onx-card rounded-3xl p-7">
+          <div className="onx-card rounded-3xl p-7 transition-all duration-150 ease-in-out">
             <div className="flex items-center justify-between">
               <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                 River Detail
@@ -961,55 +1028,17 @@ export default function OnxShell({
 
             {selected ? (
               <>
-                <div className="mt-2 text-[17px] font-semibold text-slate-900">
-                  {selected.river_name}
-                </div>
-                <div className="text-xs text-slate-600">{selected.gauge_label ?? ""}</div>
-                <div className="mt-1 text-[11px] text-slate-500">
-                  {formatUpdatedAgo(selected.source_flow_observed_at ?? selected.source_temp_observed_at ?? selected.updated_at)}
-                </div>
-                <div className="mt-2 grid grid-cols-1 gap-0.5 text-[11px] text-slate-500">
+                <div className="mt-3 space-y-5">
                   <div>
-                    Flow source: {selected.source_flow_observed_at ? `${formatPullTime(selected.source_flow_observed_at)} MT` : "Flow not available at this gauge"}
+                    <div className="text-[18px] font-semibold text-slate-900">{selected.river_name}</div>
+                    <div className="mt-1 text-xs text-slate-600">{selected.gauge_label ?? ""}</div>
+                    <div className="mt-1 text-[11px] text-slate-500">
+                      {formatUpdatedAgo(selected.source_flow_observed_at ?? selected.source_temp_observed_at ?? selected.updated_at)}
+                    </div>
                   </div>
-                  <div>
-                    Temp source: {selected.source_temp_observed_at ? `${formatPullTime(selected.source_temp_observed_at)} MT` : "Temp not available at this gauge"}
-                  </div>
-                  <div>
-                    Weather/score: {formatPullTime(selected.updated_at)} MT
-                  </div>
-                </div>
 
-                <div
-                  className="mt-3 text-[11px] leading-4 text-slate-500"
-                  style={{
-                    display: "-webkit-box",
-                    WebkitLineClamp: 2,
-                    WebkitBoxOrient: "vertical",
-                    overflow: "hidden",
-                  }}
-                >
-                  <span className="text-slate-600">Today&apos;s Read: </span>
-                  {todaysRead}
-                </div>
-                {flags.length ? (
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {flags.map((flag) => (
-                      <span
-                        key={flag}
-                        className="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600"
-                      >
-                        {flag}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-
-                <div className="my-4 h-px bg-slate-300/65" />
-
-                <div className="mt-5 grid grid-cols-2 gap-x-5 gap-y-6 text-xs">
                   <div>
-                    <div className="font-semibold leading-none tracking-[-0.02em] text-slate-900 text-[56px]">
+                    <div className="text-[56px] font-semibold leading-none tracking-[-0.02em] text-slate-900">
                       {selected.fishability_score_calc ?? "—"}
                     </div>
                     <div className="mt-2">
@@ -1025,221 +1054,180 @@ export default function OnxShell({
                         }
                       />
                     </div>
-                    <div className="mt-2 text-[11px] text-slate-500">
-                      {selected.fishability_rank != null && filtered.length > 0
-                        ? `Rank ${selected.fishability_rank} / ${filtered.length}`
-                        : "Rank unavailable"}
-                    </div>
-                    <div className="text-[11px] text-slate-500">
-                      {selected.fishability_percentile != null
-                        ? `Top ${Math.max(1, Math.round(100 - Number(selected.fishability_percentile)))}%`
-                        : "Percentile unavailable"}
-                    </div>
                   </div>
-                  <div>
-                    <div className="text-[10px] text-slate-500">Flow</div>
-                    <div className="font-medium text-slate-900">
-                      {selected.flow_cfs ?? "Flow not available at this gauge"}
-                      <span className="ml-1 text-[11px] font-medium text-slate-500">
-                        {getFlowTrendArrow(selected.change_48h_pct_calc)}
-                      </span>
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] text-slate-500">Temp</div>
-                    <div className="font-medium text-slate-900">
-                      {selected.water_temp_f != null
-                        ? `${Number(selected.water_temp_f).toFixed(1)}°F`
-                        : "Temp not available at this gauge"}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] text-slate-500">Stability</div>
-                    <div className="font-medium text-slate-900">
-                      {selected.change_48h_pct_calc == null
-                        ? "—"
-                        : `${Number(selected.change_48h_pct_calc).toFixed(1)}% 48h`}
-                      <span className="ml-1 text-[11px] font-medium text-slate-500">
-                        {getFlowTrendArrow(selected.change_48h_pct_calc)}
-                      </span>
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] text-slate-500">Ratio</div>
-                    <div className="font-medium text-slate-900">
-                      {selected.flow_ratio_calc != null ? `${Number(selected.flow_ratio_calc).toFixed(2)}x` : "—"}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] text-slate-500">Hatch likelihood</div>
-                    <div className="font-medium text-slate-900">{hatchLikelihood}</div>
-                  </div>
-                </div>
 
-                <div className="mt-2 text-[11px] text-slate-600">
-                  Wind AM {selected.wind_am_mph ?? "—"} • PM {selected.wind_pm_mph ?? "—"}
-                </div>
-
-                <div className="my-3 h-px bg-slate-300/65" />
-
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                    Water Temp Window (24h)
+                  <div className="text-[12px] leading-5 text-slate-600">
+                    <span className="font-medium text-slate-700">Today&apos;s Read:</span> {todaysRead}
                   </div>
-                  {intradayLoading ? (
-                    <div className="mt-2 text-xs text-slate-500">Loading intraday thermal...</div>
-                  ) : (
-                    <div className="mt-2 space-y-1.5">
-                      <div className="text-xs text-slate-700">{thermalSummary.windowLabel}</div>
-                      <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-slate-600">
-                        <div>Now</div>
-                        <div className="text-right font-medium text-slate-900">
-                          {thermalSummary.tempNowF != null ? `${thermalSummary.tempNowF.toFixed(1)}°F` : "—"}
-                        </div>
-                        <div>3h delta</div>
-                        <div className="text-right font-medium text-slate-900">
-                          {thermalSummary.delta3hF != null ? `${thermalSummary.delta3hF > 0 ? "+" : ""}${thermalSummary.delta3hF.toFixed(1)}°` : "—"}
-                        </div>
-                        <div>Since morning</div>
-                        <div className="text-right font-medium text-slate-900">
-                          {thermalSummary.deltaSinceMorningF != null
-                            ? `${thermalSummary.deltaSinceMorningF > 0 ? "+" : ""}${thermalSummary.deltaSinceMorningF.toFixed(1)}°`
-                            : "—"}
-                        </div>
-                        <div>24h range</div>
-                        <div className="text-right font-medium text-slate-900">
-                          {thermalSummary.min24hF != null && thermalSummary.max24hF != null
-                            ? `${thermalSummary.min24hF.toFixed(1)}°-${thermalSummary.max24hF.toFixed(1)}°`
-                            : "—"}
-                        </div>
+
+                  <div className="space-y-3 border-t border-slate-200/75 pt-4">
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wide text-slate-500">Flow</div>
+                      <div className="mt-0.5 text-base font-medium text-slate-900">
+                        {selected.flow_cfs ?? "Flow not available at this gauge"}
+                        <span className="ml-1 text-xs text-slate-500">
+                          {getFlowTrendArrow(selected.change_48h_pct_calc)}
+                        </span>
                       </div>
-                      <Sparkline
-                        className="h-12 w-full"
-                        stroke="#6b7280"
-                        values={intradayRows.map((x) => x.water_temp_f)}
-                      />
                     </div>
-                  )}
-                </div>
-
-                <div className="my-3 h-px bg-slate-300/65" />
-
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                    Trend (14D)
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wide text-slate-500">Temp</div>
+                      <div className="mt-0.5 text-base font-medium text-slate-900">
+                        {selected.water_temp_f != null
+                          ? `${Number(selected.water_temp_f).toFixed(1)}°F`
+                          : "Temp not available at this gauge"}
+                      </div>
+                    </div>
                   </div>
-                  {historyLoading ? (
-                    <div className="mt-2 text-xs text-slate-500">Loading trend...</div>
-                  ) : (
-                    <div className="mt-2 space-y-2">
+
+                  <button
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50"
+                    onClick={() => setDetailMetricsOpen((v) => !v)}
+                  >
+                    {detailMetricsOpen ? "Hide Detailed Metrics" : "Detailed Metrics"}
+                  </button>
+
+                  {detailMetricsOpen ? (
+                    <div className="space-y-4 border-t border-slate-200/75 pt-4 text-xs text-slate-700">
+                      <div className="flex items-center gap-2 text-[11px]">
+                        <span
+                          className={[
+                            "rounded-full border px-2 py-0.5",
+                            selected.temp_status === "available_fresh"
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                              : selected.temp_status === "available_stale"
+                              ? "border-amber-200 bg-amber-50 text-amber-700"
+                              : "border-slate-300 bg-slate-100 text-slate-600",
+                          ].join(" ")}
+                        >
+                          {getTempStatusLabel(selected)}
+                        </span>
+                        <span className="text-slate-500">{getTempSourceLabel(selected)}</span>
+                      </div>
+
+                      {flags.length ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {flags.map((flag) => (
+                            <span
+                              key={flag}
+                              className="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600"
+                            >
+                              {flag}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      <div className="space-y-2 text-[11px] text-slate-600">
+                        <div>
+                          {selected.fishability_rank != null && filtered.length > 0
+                            ? `Rank ${selected.fishability_rank} / ${filtered.length}`
+                            : "Rank unavailable"}
+                        </div>
+                        <div>
+                          {selected.fishability_percentile != null
+                            ? `Top ${Math.max(1, Math.round(100 - Number(selected.fishability_percentile)))}%`
+                            : "Percentile unavailable"}
+                        </div>
+                        <div>
+                          Stability:{" "}
+                          {selected.change_48h_pct_calc == null
+                            ? "—"
+                            : `${Number(selected.change_48h_pct_calc).toFixed(1)}% 48h`}
+                        </div>
+                        <div>
+                          Ratio: {selected.flow_ratio_calc != null ? `${Number(selected.flow_ratio_calc).toFixed(2)}x` : "—"}
+                        </div>
+                        <div>Hatch likelihood: {hatchLikelihood}</div>
+                        <div>Wind AM {selected.wind_am_mph ?? "—"} • PM {selected.wind_pm_mph ?? "—"}</div>
+                      </div>
+
+                      <div className="text-[11px] text-slate-500">
+                        Flow source:{" "}
+                        {selected.source_flow_observed_at
+                          ? `${formatPullTime(selected.source_flow_observed_at)} MT`
+                          : "Flow not available at this gauge"}
+                      </div>
+                      <div className="text-[11px] text-slate-500">
+                        Temp source: {getTempSourceLabel(selected)}
+                        {selected.source_temp_observed_at ? ` • ${formatPullTime(selected.source_temp_observed_at)} MT` : ""}
+                      </div>
+
                       <div>
-                        <div className="mb-0.5 text-[10px] text-slate-500">
-                          Flow {historyRows[0]?.flow_cfs != null ? `(${historyRows[0]?.flow_cfs})` : ""}
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Water Temp Window (24h)
                         </div>
-                        <Sparkline
-                          className="h-12 w-full"
-                          stroke={MRI_COLORS.riverSelected}
-                          values={historyRows.slice().reverse().map((x) => x.flow_cfs)}
-                        />
+                        {intradayLoading ? (
+                          <div className="mt-2 text-xs text-slate-500">Loading intraday thermal...</div>
+                        ) : (
+                          <div className="mt-2 space-y-1.5">
+                            <div className="text-xs text-slate-700">{thermalSummary.windowLabel}</div>
+                            <Sparkline
+                              className="h-12 w-full"
+                              stroke="#6b7280"
+                              values={intradayRows.map((x) => x.water_temp_f)}
+                            />
+                          </div>
+                        )}
                       </div>
+
                       <div>
-                        <div className="mb-0.5 text-[10px] text-slate-500">
-                          Temp {historyRows[0]?.water_temp_f != null ? `(${Number(historyRows[0]?.water_temp_f).toFixed(1)}°F)` : ""}
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Trend (14D)
                         </div>
-                        <Sparkline
-                          className="h-12 w-full"
-                          stroke="#6b7280"
-                          values={historyRows.slice().reverse().map((x) => x.water_temp_f)}
-                        />
+                        {historyLoading ? (
+                          <div className="mt-2 text-xs text-slate-500">Loading trend...</div>
+                        ) : (
+                          <div className="mt-2 space-y-2">
+                            <Sparkline
+                              className="h-12 w-full"
+                              stroke={MRI_COLORS.riverSelected}
+                              values={historyRows.slice().reverse().map((x) => x.flow_cfs)}
+                            />
+                            <Sparkline
+                              className="h-12 w-full"
+                              stroke="#6b7280"
+                              values={historyRows.slice().reverse().map((x) => x.water_temp_f)}
+                            />
+                            <Sparkline
+                              className="h-12 w-full"
+                              stroke={MRI_COLORS.good}
+                              values={historyRows.slice().reverse().map((x) => x.fishability_score)}
+                            />
+                          </div>
+                        )}
                       </div>
-                      <div>
-                        <div className="mb-0.5 text-[10px] text-slate-500">
-                          Score {historyRows[0]?.fishability_score != null ? `(${historyRows[0]?.fishability_score})` : ""}
+
+                      <button
+                        className="w-full rounded-lg border border-slate-200/80 bg-white/70 px-2 py-1.5 text-left text-xs font-medium text-slate-700 hover:bg-slate-50"
+                        onClick={() => setTransparencyOpen((v) => !v)}
+                      >
+                        How this score is calculated
+                      </button>
+
+                      {transparencyOpen && breakdown ? (
+                        <div className="rounded-lg bg-slate-50/70 p-2 text-[11px] text-slate-700">
+                          <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                            <div>Flow Score</div>
+                            <div className="text-right font-semibold">{formatNum(breakdown.flowScore)}</div>
+                            <div>Stability Score</div>
+                            <div className="text-right font-semibold">{formatNum(breakdown.stabilityScore)}</div>
+                            <div>Thermal Score</div>
+                            <div className="text-right font-semibold">
+                              {breakdown.thermalScore == null ? "Unavailable" : formatNum(breakdown.thermalScore)}
+                            </div>
+                            <div>Wind Penalty</div>
+                            <div className="text-right font-semibold">{formatNum(breakdown.windPenalty)}</div>
+                            <div className="border-t border-slate-200 pt-1 font-semibold">Total Score</div>
+                            <div className="border-t border-slate-200 pt-1 text-right font-semibold">
+                              {formatNum(breakdown.totalScore)}
+                            </div>
+                          </div>
                         </div>
-                        <Sparkline
-                          className="h-12 w-full"
-                          stroke={MRI_COLORS.good}
-                          values={historyRows.slice().reverse().map((x) => x.fishability_score)}
-                        />
-                      </div>
+                      ) : null}
                     </div>
-                  )}
+                  ) : null}
                 </div>
-
-                <div className="my-3 h-px bg-slate-300/65" />
-
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                    Hatch Intel ({seasonalIntel.season})
-                  </div>
-                  <div className="mt-1 text-xs text-slate-700">
-                    <span className="font-semibold">Likely bugs:</span> {hatchIntel.likelyBugs}
-                  </div>
-                  <div className="mt-1 text-xs text-slate-700">
-                    <span className="font-semibold">Confidence:</span> {hatchIntel.confidence}
-                  </div>
-                  <div className="mt-1 text-xs text-slate-700">
-                    <span className="font-semibold">Best window:</span> {hatchIntel.bestWindow}
-                  </div>
-                  <div className="mt-1 text-xs text-slate-700">
-                    <span className="font-semibold">Recommended approach:</span> {hatchIntel.approach}
-                  </div>
-                </div>
-
-                <button
-                  className="mt-3 w-full rounded-lg border border-slate-200/80 bg-white/70 px-2 py-1.5 text-left text-xs font-medium text-slate-700 hover:bg-slate-50"
-                  onClick={() => setTransparencyOpen((v) => !v)}
-                >
-                  How this score is calculated
-                </button>
-
-                {transparencyOpen && breakdown ? (
-                  <div className="mt-2 rounded-lg bg-slate-50/70 p-2 text-[11px] text-slate-700">
-                    <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-                      <div>Flow Score</div>
-                      <div className="text-right font-semibold">{formatNum(breakdown.flowScore)}</div>
-                      <div>Stability Score</div>
-                      <div className="text-right font-semibold">{formatNum(breakdown.stabilityScore)}</div>
-                      <div>Thermal Score</div>
-                      <div className="text-right font-semibold">{formatNum(breakdown.thermalScore)}</div>
-                      <div>Wind Penalty</div>
-                      <div className="text-right font-semibold">{formatNum(breakdown.windPenalty)}</div>
-                      <div className="border-t border-slate-200 pt-1 font-semibold">Total Score</div>
-                      <div className="border-t border-slate-200 pt-1 text-right font-semibold">
-                        {formatNum(breakdown.totalScore)}
-                      </div>
-                    </div>
-
-                    <div className="mt-2 border-t border-slate-200 pt-2">
-                      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                        Raw inputs
-                      </div>
-                      <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-                        <div>Flow cfs</div>
-                        <div className="text-right">{formatNum(selected.flow_cfs)}</div>
-                        <div>Median flow</div>
-                        <div className="text-right">{formatNum(selected.median_flow_cfs)}</div>
-                        <div>Ratio</div>
-                        <div className="text-right">{formatNum(selected.flow_ratio_calc, 2)}x</div>
-                        <div>48h change</div>
-                        <div className="text-right">{formatNum(selected.change_48h_pct_calc, 1)}%</div>
-                        <div>Temp</div>
-                        <div className="text-right">
-                          {selected.water_temp_f != null
-                            ? `${formatNum(selected.water_temp_f, 1)}°F`
-                            : "Temp not available at this gauge"}
-                        </div>
-                        <div>Wind AM / PM</div>
-                        <div className="text-right">
-                          {formatNum(selected.wind_am_mph)} / {formatNum(selected.wind_pm_mph)}
-                        </div>
-                      </div>
-                      <div className="mt-2 text-[10px] text-slate-500">
-                        Components are estimated from current telemetry values; total score is the live MRI score.
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
               </>
             ) : (
               <>
@@ -1252,7 +1240,7 @@ export default function OnxShell({
           </div>
         ) : (
           <button
-            className="onx-glass rounded-xl px-3 py-2 text-xs font-medium text-white/90 hover:text-white"
+            className="onx-glass rounded-xl px-3 py-2 text-xs font-medium text-white/90 transition-colors duration-150 ease-in-out hover:text-white active:translate-y-[1px]"
             onClick={() => setOpenTopPanel("detail")}
           >
             Details
@@ -1260,18 +1248,18 @@ export default function OnxShell({
         )}
       </section>
 
-      {isMobile && mobileSurface === "toolsSheet" ? (
+      {isMobile && mobileSurface === "tools" ? (
         <section className="absolute inset-0 z-30 sm:hidden">
           <button
             className="absolute inset-0 bg-black/45"
             aria-label="Close map tools"
-            onClick={() => setMobileSurface("map")}
+            onClick={() => setMobileSurfaceState("list", { listSnap: "peek" })}
           />
-          <div className="absolute inset-x-0 bottom-0 rounded-t-3xl bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl">
-            <div className="mx-auto mb-3 h-1.5 w-14 rounded-full bg-slate-300" />
+          <div className="onx-card absolute inset-x-0 bottom-0 rounded-t-3xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] transition-all duration-150 ease-in-out">
+            <div className="mx-auto mb-3 h-1.5 w-14 cursor-grab rounded-full bg-white/45 ring-1 ring-white/35" style={{ touchAction: "none" }} />
             <div className="mb-3 flex items-center justify-between">
               <div className="text-sm font-semibold text-slate-900">Map Tools</div>
-              <button className="rounded-md p-2 text-slate-500" onClick={() => setMobileSurface("map")}>
+              <button className="rounded-md p-2 text-[var(--mri-text-muted)]" onClick={() => setMobileSurfaceState("list", { listSnap: "peek" })}>
                 <X size={18} />
               </button>
             </div>
@@ -1285,8 +1273,8 @@ export default function OnxShell({
                   className={[
                     "min-h-11 rounded-lg border px-2 py-1.5 text-xs font-medium",
                     basemap === option.id
-                      ? "border-slate-900 bg-slate-900 text-white"
-                      : "border-slate-300 bg-white text-slate-700",
+                      ? "border-white/40 bg-white/20 text-white"
+                      : "border-white/20 bg-white/5 text-white/80",
                     !option.enabled ? "cursor-not-allowed opacity-55" : "",
                   ].join(" ")}
                   onClick={() => setBasemapStyle(option.id)}
@@ -1297,7 +1285,7 @@ export default function OnxShell({
             </div>
 
             <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Core Layers</div>
-            <div className="mt-2 space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+            <div className="mt-2 space-y-2 rounded-xl border border-white/15 bg-white/5 p-3 text-xs text-white/85">
               {groupedLayers
                 .flatMap((g) => g.layers)
                 .filter((layer) => layer.id === "mri_river_lines" || layer.id === "mri_selected_highlight")
@@ -1316,19 +1304,20 @@ export default function OnxShell({
         </section>
       ) : null}
 
-      {isMobile && mobileSurface === "detailSheet" ? (
-        <section className="absolute inset-0 z-30 bg-black/45 sm:hidden">
-          <div className="absolute inset-x-0 bottom-0 max-h-[92vh] overflow-auto rounded-t-3xl bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+      {isMobile && mobileSurface === "detail" ? (
+        <section className="absolute inset-0 z-20 bg-black/45 sm:hidden">
+          <div className="onx-card absolute inset-x-0 bottom-0 max-h-[92vh] overflow-auto rounded-t-3xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] transition-all duration-150 ease-in-out">
             <div
-              className="mx-auto mb-2 h-1.5 w-14 cursor-grab rounded-full bg-slate-300"
+              className="mx-auto mb-2 h-1.5 w-14 cursor-grab rounded-full bg-white/45 ring-1 ring-white/35"
               onPointerDown={onMobileDetailPointerDown}
               onTouchStart={onMobileDetailPointerDown}
+              style={{ touchAction: "none" }}
             />
             <div className="mb-3 flex items-center justify-between">
               <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">River Detail</div>
               <button
                 className="min-h-11 rounded-md px-3 text-xs font-semibold text-slate-600"
-                onClick={() => setMobileSurface("map")}
+                onClick={() => setMobileSurfaceState("list", { listSnap: "peek" })}
               >
                 Close
               </button>
@@ -1339,6 +1328,20 @@ export default function OnxShell({
                 <div className="text-sm text-slate-600">{selected.gauge_label ?? ""}</div>
                 <div className="mt-1 text-xs text-slate-500">
                   {formatUpdatedAgo(selected.source_flow_observed_at ?? selected.source_temp_observed_at ?? selected.updated_at)}
+                </div>
+                <div className="mt-2">
+                  <span
+                    className={[
+                      "inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                      selected.temp_status === "available_fresh"
+                        ? "border-emerald-500/35 bg-emerald-500/12 text-emerald-100"
+                        : selected.temp_status === "available_stale"
+                        ? "border-amber-500/35 bg-amber-500/12 text-amber-100"
+                        : "border-white/20 bg-white/10 text-white/75",
+                    ].join(" ")}
+                  >
+                    {getTempStatusLabel(selected)}
+                  </span>
                 </div>
                 <div className="mt-4 text-[56px] font-semibold leading-none tracking-[-0.02em] text-slate-900">
                   {selected.fishability_score_calc ?? "—"}
@@ -1357,41 +1360,62 @@ export default function OnxShell({
                   />
                 </div>
                 <div className="mt-2 text-xs text-slate-600">{todaysRead}</div>
-                {flags.length > 0 ? (
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {flags.map((flag) => (
-                      <span key={`mf-${flag}`} className="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
-                        {flag}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
 
                 <div className="my-4 h-px bg-slate-200" />
-                <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
+                <div className="space-y-3 text-xs">
                   <div>
-                    <div className="text-[10px] text-slate-500">Flow</div>
-                    <div className="font-medium text-slate-900">{selected.flow_cfs ?? "—"}</div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] text-slate-500">Temp</div>
+                    <div className="text-[10px] uppercase tracking-wide text-slate-500">Flow</div>
                     <div className="font-medium text-slate-900">
-                      {selected.water_temp_f != null ? `${Number(selected.water_temp_f).toFixed(1)}°F` : "Temp not available at this gauge"}
+                      {selected.flow_cfs ?? "Flow not available at this gauge"}
                     </div>
                   </div>
                   <div>
-                    <div className="text-[10px] text-slate-500">Ratio</div>
+                    <div className="text-[10px] uppercase tracking-wide text-slate-500">Temp</div>
                     <div className="font-medium text-slate-900">
-                      {selected.flow_ratio_calc != null ? `${Number(selected.flow_ratio_calc).toFixed(2)}x` : "—"}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] text-slate-500">Stability</div>
-                    <div className="font-medium text-slate-900">
-                      {selected.change_48h_pct_calc == null ? "—" : `${Number(selected.change_48h_pct_calc).toFixed(1)}%`}
+                      {selected.water_temp_f != null
+                        ? `${Number(selected.water_temp_f).toFixed(1)}°F`
+                        : "Temp not available at this gauge"}
                     </div>
                   </div>
                 </div>
+
+                <button
+                  className="mt-4 w-full rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-left text-xs font-medium text-white/85"
+                  onClick={() => setMobileDetailMetricsOpen((v) => !v)}
+                >
+                  {mobileDetailMetricsOpen ? "Hide Detailed Metrics" : "Detailed Metrics"}
+                </button>
+
+                {mobileDetailMetricsOpen ? (
+                  <div className="mt-4 space-y-3 border-t border-slate-200 pt-4 text-xs text-slate-600">
+                    <div>{getTempStatusLabel(selected)}</div>
+                    <div>{getTempSourceLabel(selected)}</div>
+                    <div>
+                      Ratio: {selected.flow_ratio_calc != null ? `${Number(selected.flow_ratio_calc).toFixed(2)}x` : "—"}
+                    </div>
+                    <div>
+                      Stability: {selected.change_48h_pct_calc == null ? "—" : `${Number(selected.change_48h_pct_calc).toFixed(1)}%`}
+                    </div>
+                    <div>
+                      Rank:{" "}
+                      {selected.fishability_rank != null && filtered.length > 0
+                        ? `${selected.fishability_rank} / ${filtered.length}`
+                        : "Unavailable"}
+                    </div>
+                    {flags.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {flags.map((flag) => (
+                          <span
+                            key={`mf-${flag}`}
+                            className="rounded-full border border-white/20 bg-white/10 px-2 py-0.5 text-[10px] font-medium text-white/80"
+                          >
+                            {flag}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </>
             ) : (
               <div className="text-sm text-slate-600">Select a river to view details.</div>
@@ -1400,19 +1424,20 @@ export default function OnxShell({
         </section>
       ) : null}
 
-      {isMobile && mobileSurface === "listSheet" ? (
+      {isMobile && mobileSurface === "list" ? (
         <section
-          className="absolute inset-x-0 bottom-0 z-20 sm:hidden"
+          className="absolute inset-x-0 bottom-0 z-10 sm:hidden"
           style={{
             transform: `translateY(${mobileSheetY * 92}%)`,
-            transition: isMobileDragging ? "none" : "transform 220ms ease-out",
+            transition: isMobileDragging ? "none" : SNAP_TRANSITION,
           }}
         >
           <div className="rounded-t-3xl border border-white/10 bg-[#0b1220]/94 backdrop-blur-md">
             <div
-              className={`mx-auto mt-2 h-1.5 w-14 cursor-grab rounded-full bg-white/35 ${isMobileDragging ? "select-none" : ""}`}
+              className={`mx-auto mt-2 h-1.5 w-14 cursor-grab rounded-full bg-white/45 ring-1 ring-white/35 ${isMobileDragging ? "select-none" : ""}`}
               onPointerDown={onMobileListPointerDown}
               onTouchStart={onMobileListPointerDown}
+              style={{ touchAction: "none" }}
             />
             <div className="flex items-center justify-between px-4 pt-3">
               <div className="text-sm font-semibold text-white">Rivers ({filtered.length})</div>
@@ -1440,13 +1465,17 @@ export default function OnxShell({
               />
               <div className="mt-2 flex flex-wrap gap-2">
                 {(["All", "Good", "Fair", "Tough"] as const).map((t) => (
-                  <button key={`m-tier-${t}`} onClick={() => setTier(t)} className={`mri-chip ${tier === t ? "mri-chip-active" : ""}`}>
+                  <button key={`m-tier-${t}`} onClick={() => setTier(t)} className={`mri-chip min-h-11 ${tier === t ? "mri-chip-active" : ""}`}>
                     {t}
                   </button>
                 ))}
               </div>
             </div>
-            <div className="mri-scroll max-h-[65vh] overflow-auto px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3">
+            <div
+              className={`mri-scroll max-h-[65vh] px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 ${
+                mobileListSnap === "full" ? "overflow-auto" : "overflow-hidden"
+              }`}
+            >
               {topRivers.length > 0 ? (
                 <>
                   <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/60">Top Rivers Today</div>
@@ -1456,7 +1485,7 @@ export default function OnxShell({
                         key={`m-top-${r.river_id}`}
                         onClick={() => selectRiver(r.river_id)}
                         className={[
-                          "whitespace-nowrap rounded-full border px-2.5 py-1 text-xs",
+                          "min-h-11 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs active:translate-y-[1px]",
                           r.river_id === selectedId
                             ? "border-white/50 bg-white/20 text-white"
                             : "border-white/20 bg-white/10 text-white/85",
@@ -1473,7 +1502,7 @@ export default function OnxShell({
                   <button
                     key={`m-r-${r.river_id}`}
                     onClick={() => selectRiver(r.river_id)}
-                    className={`mri-drawer-card w-full text-left ${r.river_id === selectedId ? "mri-drawer-card-selected" : ""}`}
+                    className={`mri-drawer-card w-full text-left active:translate-y-[1px] ${r.river_id === selectedId ? "mri-drawer-card-selected" : ""}`}
                   >
                     <div className="p-3">
                       <div className="flex items-start justify-between gap-3">
@@ -1498,6 +1527,11 @@ export default function OnxShell({
                         <div><div className="mri-kv-label">Flow</div><div className="font-semibold">{r.flow_cfs ?? "—"}</div></div>
                         <div><div className="mri-kv-label">Temp</div><div className="font-semibold">{r.water_temp_f != null ? `${Number(r.water_temp_f).toFixed(1)}°` : "—"}</div></div>
                       </div>
+                      {r.temp_status === "available_stale" ? (
+                        <div className="mt-1 text-[10px] text-amber-300">Temp stale</div>
+                      ) : r.temp_status === "unavailable_at_gauge" ? (
+                        <div className="mt-1 text-[10px] text-white/60">No temp at this gauge</div>
+                      ) : null}
                     </div>
                   </button>
                 ))}
@@ -1511,16 +1545,17 @@ export default function OnxShell({
         className="absolute bottom-0 left-0 right-0 z-10 hidden sm:block"
         style={{
           transform: `translateY(${sheetY * 78}%)`,
-          transition: isDragging ? "none" : "transform 220ms ease-out",
+          transition: isDragging ? "none" : SNAP_TRANSITION,
         }}
       >
         <div className={`mx-auto max-w-6xl px-3 pb-3 ${detailsOpen ? "sm:pr-[340px]" : ""}`}>
           <div className="onx-glass overflow-hidden rounded-3xl shadow-2xl">
             <div
-              className={`mx-auto mt-2 h-1.5 w-14 flex-shrink-0 cursor-grab rounded-full bg-white/35 active:cursor-grabbing ${isDragging ? "select-none" : ""}`}
+              className={`mx-auto mt-2 h-1.5 w-14 flex-shrink-0 cursor-grab rounded-full bg-white/45 ring-1 ring-white/35 active:cursor-grabbing ${isDragging ? "select-none" : ""}`}
               onPointerDown={onSheetPointerDown}
               onTouchStart={onSheetPointerDown}
               title="Drag to expand/collapse"
+              style={{ touchAction: "none" }}
             />
             <div className="flex items-center justify-between px-4 pt-3">
               <div className="text-sm font-semibold text-white">Rivers ({filtered.length})</div>
@@ -1547,7 +1582,7 @@ export default function OnxShell({
                       key={`top-${r.river_id}`}
                       onClick={() => selectRiver(r.river_id)}
                       className={[
-                        "whitespace-nowrap rounded-full border px-2.5 py-1 text-xs transition",
+                        "min-h-11 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs transition active:translate-y-[1px]",
                         r.river_id === selectedId
                           ? "border-white/50 bg-white/20 text-white"
                           : "border-white/20 bg-white/10 text-white/85 hover:bg-white/15",
@@ -1562,7 +1597,9 @@ export default function OnxShell({
 
             <div className="px-3 pb-3 pt-2">
               <div
-                className="mri-scroll overflow-auto pr-1 transition-[max-height] duration-200"
+                className={`mri-scroll pr-1 transition-[max-height] duration-200 ease-in-out ${
+                  drawerSnap === "expanded" ? "overflow-auto" : "overflow-hidden"
+                }`}
                 style={{
                   maxHeight: drawerSnap === "expanded" ? "65vh" : drawerSnap === "mid" ? "40vh" : "80px",
                 }}
@@ -1572,7 +1609,7 @@ export default function OnxShell({
                     <button
                       key={r.river_id}
                       onClick={() => selectRiver(r.river_id)}
-                      className={`mri-drawer-card text-left ${r.river_id === selectedId ? "mri-drawer-card-selected" : ""}`}
+                      className={`mri-drawer-card text-left active:translate-y-[1px] ${r.river_id === selectedId ? "mri-drawer-card-selected" : ""}`}
                     >
                       <div className="p-3">
                         <div className="flex items-start justify-between gap-3">
@@ -1623,6 +1660,11 @@ export default function OnxShell({
                             </div>
                           </div>
                         </div>
+                        {r.temp_status === "available_stale" ? (
+                          <div className="mt-1 text-[10px] text-amber-300">Temp stale</div>
+                        ) : r.temp_status === "unavailable_at_gauge" ? (
+                          <div className="mt-1 text-[10px] text-white/60">No temp at this gauge</div>
+                        ) : null}
                       </div>
                     </button>
                   ))}
