@@ -46,11 +46,14 @@ type RiverLatestRow = {
   longitude?: number | null;
   source_flow_observed_at?: string | null;
   source_temp_observed_at?: string | null;
+  flow_source_site_no?: string | null;
   temp_status?: "available_fresh" | "available_stale" | "unavailable_at_gauge" | null;
   temp_stale?: boolean | null;
   temp_age_minutes?: number | null;
   temp_source_site_no?: string | null;
   temp_source_kind?: "IV" | "DV" | "NONE" | null;
+  temp_unavailable?: boolean | null;
+  temp_reason?: string | null;
   updated_at?: string | null;
   is_stale?: boolean | null;
   stale_reason?: string | null;
@@ -125,7 +128,7 @@ export async function fetchLatestRiverScores(): Promise<RiverScoreRow[]> {
 
   const fromLatest = await supabase
     .from("v_river_latest")
-    .select("river_id,slug,river_name,gauge_label,usgs_site_no,date,fishability_score_calc,flow_cfs,change_48h_pct_calc,water_temp_f,wind_am_mph,wind_pm_mph,bite_tier,median_flow_cfs,flow_ratio_calc,source_flow_observed_at,source_temp_observed_at,temp_status,temp_stale,temp_age_minutes,temp_source_site_no,temp_source_kind,updated_at");
+    .select("river_id,slug,river_name,gauge_label,usgs_site_no,date,fishability_score_calc,flow_cfs,change_48h_pct_calc,water_temp_f,wind_am_mph,wind_pm_mph,bite_tier,median_flow_cfs,flow_ratio_calc,source_flow_observed_at,source_temp_observed_at,flow_source_site_no,temp_status,temp_stale,temp_age_minutes,temp_source_site_no,temp_source_kind,temp_unavailable,temp_reason,updated_at");
 
   if (!fromLatest.error && fromLatest.data && fromLatest.data.length > 0) {
     return (fromLatest.data as RiverLatestRow[]).map((r) => ({
@@ -145,11 +148,14 @@ export async function fetchLatestRiverScores(): Promise<RiverScoreRow[]> {
       flow_ratio_calc: r.flow_ratio_calc ?? null,
       source_flow_observed_at: r.source_flow_observed_at ?? null,
       source_temp_observed_at: r.source_temp_observed_at ?? null,
+      flow_source_site_no: r.flow_source_site_no ?? null,
       temp_status: r.temp_status ?? null,
       temp_stale: r.temp_stale ?? null,
       temp_age_minutes: r.temp_age_minutes ?? null,
       temp_source_site_no: r.temp_source_site_no ?? null,
       temp_source_kind: r.temp_source_kind ?? null,
+      temp_unavailable: r.temp_unavailable ?? null,
+      temp_reason: r.temp_reason ?? null,
       updated_at: r.updated_at ?? null,
     }));
   }
@@ -176,9 +182,9 @@ export async function fetchRiversWithLatest(): Promise<FishabilityRow[]> {
   if (!supabase) return [];
 
   const latestSelectEnriched =
-    "river_id,slug,river_name,gauge_label,usgs_site_no,latitude,longitude,date,flow_cfs,median_flow_cfs,flow_ratio_calc,change_48h_pct_calc,water_temp_f,wind_am_mph,wind_pm_mph,precip_mm,precip_probability_pct,fishability_score_calc,fishability_rank,fishability_percentile,bite_tier,source_flow_observed_at,source_temp_observed_at,temp_status,temp_stale,temp_age_minutes,temp_source_site_no,temp_source_kind,updated_at,is_stale,stale_reason,last_usgs_pull_at,last_weather_pull_at,last_river_daily_date";
+    "river_id,slug,river_name,gauge_label,usgs_site_no,latitude,longitude,date,flow_cfs,median_flow_cfs,flow_ratio_calc,change_48h_pct_calc,water_temp_f,wind_am_mph,wind_pm_mph,precip_mm,precip_probability_pct,fishability_score_calc,fishability_rank,fishability_percentile,bite_tier,source_flow_observed_at,source_temp_observed_at,flow_source_site_no,temp_status,temp_stale,temp_age_minutes,temp_source_site_no,temp_source_kind,temp_unavailable,temp_reason,updated_at,is_stale,stale_reason,last_usgs_pull_at,last_weather_pull_at,last_river_daily_date";
   const latestSelectFallback =
-    "river_id,slug,river_name,gauge_label,usgs_site_no,latitude,longitude,date,flow_cfs,median_flow_cfs,flow_ratio_calc,change_48h_pct_calc,water_temp_f,wind_am_mph,wind_pm_mph,fishability_score_calc,bite_tier,source_flow_observed_at,source_temp_observed_at,temp_status,temp_stale,temp_age_minutes,temp_source_site_no,temp_source_kind,updated_at";
+    "river_id,slug,river_name,gauge_label,usgs_site_no,latitude,longitude,date,flow_cfs,median_flow_cfs,flow_ratio_calc,change_48h_pct_calc,water_temp_f,wind_am_mph,wind_pm_mph,fishability_score_calc,bite_tier,source_flow_observed_at,source_temp_observed_at,flow_source_site_no,temp_status,temp_stale,temp_age_minutes,temp_source_site_no,temp_source_kind,temp_unavailable,temp_reason,updated_at";
 
   let latestRes: any = await supabase
     .from("v_river_latest")
@@ -218,11 +224,14 @@ export async function fetchRiversWithLatest(): Promise<FishabilityRow[]> {
       lng: r.longitude ?? null,
       source_flow_observed_at: r.source_flow_observed_at ?? null,
       source_temp_observed_at: r.source_temp_observed_at ?? null,
+      flow_source_site_no: r.flow_source_site_no ?? null,
       temp_status: r.temp_status ?? null,
       temp_stale: r.temp_stale ?? null,
       temp_age_minutes: r.temp_age_minutes ?? null,
       temp_source_site_no: r.temp_source_site_no ?? null,
       temp_source_kind: r.temp_source_kind ?? null,
+      temp_unavailable: r.temp_unavailable ?? null,
+      temp_reason: r.temp_reason ?? null,
       updated_at: r.updated_at ?? null,
       is_stale:
         r.is_stale ??
@@ -378,11 +387,14 @@ export async function fetchRiverDetailByIdOrSlug(
       lng: row.longitude ?? null,
       source_flow_observed_at: row.source_flow_observed_at ?? null,
       source_temp_observed_at: row.source_temp_observed_at ?? null,
+      flow_source_site_no: row.flow_source_site_no ?? null,
       temp_status: row.temp_status ?? null,
       temp_stale: row.temp_stale ?? null,
       temp_age_minutes: row.temp_age_minutes ?? null,
       temp_source_site_no: row.temp_source_site_no ?? null,
       temp_source_kind: row.temp_source_kind ?? null,
+      temp_unavailable: row.temp_unavailable ?? null,
+      temp_reason: row.temp_reason ?? null,
       updated_at: row.updated_at ?? null,
       is_stale: row.is_stale ?? null,
       stale_reason: row.stale_reason ?? null,

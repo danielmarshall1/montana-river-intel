@@ -1,26 +1,26 @@
 export const MRI_COLORS = {
-  riverBase: "#6b8798",
-  riverSelected: "#8fb3c9",
-  riverCasing: "#11202a",
-  riverHalo: "rgba(214, 230, 241, 0.24)",
-  good: "#466957",
-  fair: "#8a6d3b",
-  tough: "#6b7684",
-  warning: "#9b6a3f",
-  stale: "#8f7652",
+  riverBase: "#5a7483",
+  riverSelected: "#4e7a92",
+  riverCasing: "#1c2b33",
+  riverHalo: "rgba(121, 153, 177, 0.2)",
+  good: "#4f6757",
+  fair: "#7f6a44",
+  tough: "#687381",
+  warning: "#b0703f",
+  stale: "#8f7a58",
 } as const;
 
 export const MRI_UI_THEME = {
-  background: "#0b1118",
-  backgroundElevated: "#101924",
-  panel: "rgba(16, 25, 36, 0.92)",
-  panelSoft: "rgba(20, 30, 43, 0.86)",
-  panelStrong: "rgba(12, 21, 31, 0.96)",
-  panelBorder: "rgba(150, 170, 191, 0.2)",
-  panelBorderStrong: "rgba(186, 205, 224, 0.34)",
-  text: "#e7edf4",
-  textMuted: "#aebdcd",
-  textDim: "#7f91a5",
+  background: "#10181a",
+  backgroundElevated: "#141e20",
+  panel: "rgba(20, 29, 32, 0.88)",
+  panelSoft: "rgba(23, 33, 36, 0.82)",
+  panelStrong: "rgba(17, 25, 28, 0.94)",
+  panelBorder: "rgba(154, 176, 191, 0.16)",
+  panelBorderStrong: "rgba(189, 208, 219, 0.24)",
+  text: "#e5ebef",
+  textMuted: "#b2c0cb",
+  textDim: "#7f909d",
 } as const;
 
 export const MRI_RADIUS = {
@@ -31,9 +31,9 @@ export const MRI_RADIUS = {
 } as const;
 
 export const MRI_SHADOWS = {
-  sm: "0 4px 14px rgba(4, 10, 16, 0.2)",
-  md: "0 10px 26px rgba(4, 10, 16, 0.34)",
-  lg: "0 20px 42px rgba(4, 10, 16, 0.45)",
+  sm: "0 2px 8px rgba(5, 10, 13, 0.16)",
+  md: "0 8px 20px rgba(5, 10, 13, 0.24)",
+  lg: "0 14px 30px rgba(5, 10, 13, 0.28)",
 } as const;
 
 export const MRI_SPACING = {

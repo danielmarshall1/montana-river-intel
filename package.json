@@ -4,12 +4,13 @@
   "description": "Montana River Intel - map-first outdoor intelligence",
   "scripts": {
     "dev": "next dev",
-    "dev:reset": "rm -rf .next .next_* && next dev -p 3000",
+    "dev:reset": "pkill -f \"next dev\" 2>/dev/null || true; rm -rf .next .next_*; next dev -H localhost -p 3000",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "test": "echo \"Error: no test specified\" && exit 1",
     "audit:temp": "tsx scripts/auditTempAvailability.ts",
+    "assign:temp-sites": "tsx scripts/assignBestTempStations.ts",
     "sync:usgs-registry": "tsx scripts/syncUsgsMonitoringRegistry.ts"
   },
   "keywords": [],

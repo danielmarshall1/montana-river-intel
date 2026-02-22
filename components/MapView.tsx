@@ -77,25 +77,15 @@ const STATE_LANDS_GEOJSON =
 const FWP_ACCESS_GEOJSON =
   "https://fwp-gis.mt.gov/arcgis/rest/services/fwplnd/fwpLands/MapServer/1/query?where=1%3D1&outFields=NAME&returnGeometry=true&f=geojson";
 const RIVER_ID_PROP = "river_id";
-const BASEMAP_LAYER_IDS = [
-  "dark",
-  "light",
-  "topo",
-  "satellite",
-  "satellite-labels",
-] as const;
 const CLICK_PRIORITY_LAYERS = [UNCLUSTERED_LAYER, ACCESS_LAYER, ACTIVE_STATIONS_LAYER] as const;
-const BASEMAPS: Record<
-  BasemapId,
-  { rasterLayers: (typeof BASEMAP_LAYER_IDS)[number][]; labelLayers: (typeof BASEMAP_LAYER_IDS)[number][] }
-> = {
-  hybrid: { rasterLayers: ["satellite"], labelLayers: ["satellite-labels"] },
-  satellite: { rasterLayers: ["satellite"], labelLayers: [] },
-  topo: { rasterLayers: ["topo"], labelLayers: [] },
-  light: { rasterLayers: ["light"], labelLayers: [] },
-  dark: { rasterLayers: ["dark"], labelLayers: [] },
+const MAPBOX_STYLES: Record<BasemapId, string> = {
+  hybrid: "mapbox://styles/mapbox/satellite-streets-v12",
+  satellite: "mapbox://styles/mapbox/satellite-v9",
+  topo: "mapbox://styles/mapbox/outdoors-v12",
+  light: "mapbox://styles/mapbox/light-v11",
+  dark: "mapbox://styles/mapbox/dark-v11",
 };
-const BASE_STYLE = "mapbox://styles/mapbox/satellite-streets-v12";
+const BASE_STYLE = MAPBOX_STYLES.hybrid;
 const MAPBOX_DEM_SOURCE = "mapbox-dem";
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
 
@@ -223,59 +213,6 @@ function toneRasterBasemap(map: mapboxgl.Map) {
       rasterLayers.map((layer) => ({ id: layer.id, type: layer.type }))
     );
   }
-}
-
-function ensureBasemapLayers(map: mapboxgl.Map) {
-  const addRaster = (id: string, tiles: string[], attribution: string, opacity = 1) => {
-    if (!map.getSource(id)) {
-      map.addSource(id, { type: "raster", tiles, tileSize: 256, attribution });
-    }
-    if (!map.getLayer(id)) {
-      map.addLayer({
-        id,
-        type: "raster",
-        source: id,
-        layout: { visibility: "none" },
-        paint: { "raster-opacity": opacity },
-      });
-    }
-  };
-
-  addRaster(
-    "satellite",
-    ["https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
-    "Esri, Maxar, Earthstar Geographics"
-  );
-  addRaster(
-    "satellite-labels",
-    ["https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"],
-    "Esri",
-    0.92
-  );
-  addRaster("dark", ["https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"], "CARTO");
-  addRaster("light", ["https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"], "CARTO");
-  addRaster("topo", ["https://a.tile.opentopomap.org/{z}/{x}/{y}.png"], "OpenTopoMap");
-}
-
-function syncBasemapVisibility(map: mapboxgl.Map, basemap: BasemapId) {
-  ensureBasemapLayers(map);
-  for (const layerId of BASEMAP_LAYER_IDS) {
-    if (!map.getLayer(layerId)) continue;
-    map.setLayoutProperty(layerId, "visibility", "none");
-  }
-  const cfg = BASEMAPS[basemap] ?? BASEMAPS.hybrid;
-  for (const layerId of [...cfg.rasterLayers, ...cfg.labelLayers]) {
-    if (!map.getLayer(layerId)) continue;
-    map.setLayoutProperty(layerId, "visibility", "visible");
-  }
-  try {
-    for (const layerId of BASEMAP_LAYER_IDS) {
-      if (map.getLayer(layerId)) map.moveLayer(layerId);
-    }
-  } catch {
-    /* ignore */
-  }
-  toneRasterBasemap(map);
 }
 
 function geojsonBbox(geojson: GeoJSON.GeoJSON): [number, number, number, number] | null {
@@ -1141,7 +1078,9 @@ function syncLabels(map: mapboxgl.Map, visible: boolean) {
   for (const layer of style.layers ?? []) {
     if (!layer.id) continue;
     const id = layer.id.toLowerCase();
-    if (id.includes("label") || id.includes("place") || id.includes("poi")) {
+    if (layer.id === RIVER_NAMES_LAYER || (layer as any).source === RIVER_LABELS_SOURCE) continue;
+    const hasTextField = layer.type === "symbol" && Boolean((layer as any).layout?.["text-field"]);
+    if (hasTextField || id.includes("road-label") || id.includes("place-label") || id.includes("poi-label")) {
       try {
         map.setLayoutProperty(layer.id, "visibility", visibility);
       } catch {
@@ -1181,8 +1120,9 @@ export function MapView({
   const activeStationsGeojsonRef = useRef<
     GeoJSON.FeatureCollection<GeoJSON.Point, Record<string, unknown>> | null
   >(activeStationsGeojson ?? null);
-  const basemapRef = useRef<BasemapId>(basemap);
+  const currentStyleRef = useRef<string>(MAPBOX_STYLES[basemap] ?? BASE_STYLE);
   const layerStateRef = useRef<Record<LayerId, boolean>>(effectiveLayerState);
+  const onMapReadyRef = useRef(onMapReady);
   const hoverIdRef = useRef<number | string | null>(null);
   const lastFlownRef = useRef<string | null>(null);
   const lastFitSignatureRef = useRef<string | null>(null);
@@ -1196,11 +1136,11 @@ export function MapView({
   selectedRiverGeojsonRef.current = selectedRiverGeojson;
   riverLinesGeojsonRef.current = riverLinesGeojson ?? null;
   activeStationsGeojsonRef.current = activeStationsGeojson ?? null;
-  basemapRef.current = basemap;
   layerStateRef.current = effectiveLayerState;
+  onMapReadyRef.current = onMapReady;
 
   const syncRuntimeLayers = useCallback((map: mapboxgl.Map) => {
-    syncBasemapVisibility(map, basemapRef.current);
+    toneRasterBasemap(map);
     ensureRiversSource(map, riversRef.current);
     ensureRiverPointLayers(map);
     syncRiverPointPresentation(
@@ -1232,19 +1172,22 @@ export function MapView({
     syncLabels(map, layerStateRef.current.mri_labels);
   }, []);
 
-  const initMap = useCallback(() => {
-    if (!mapContainerRef.current) return;
+  useEffect(() => {
+    if (!mapContainerRef.current || mapRef.current) return;
     setMapInitError(null);
 
     if (!MAPBOX_TOKEN) {
       setMapInitError("Missing NEXT_PUBLIC_MAPBOX_TOKEN.");
       return;
     }
+    const initialStyle = initialStyleUrl ?? MAPBOX_STYLES[basemap] ?? BASE_STYLE;
+    currentStyleRef.current = initialStyle;
+
     let map: mapboxgl.Map;
     try {
       map = new mapboxgl.Map({
         container: mapContainerRef.current,
-        style: initialStyleUrl ?? BASE_STYLE,
+        style: initialStyle,
         center: MONTANA_CENTER,
         zoom: DEFAULT_ZOOM,
         pitch: 22,
@@ -1274,10 +1217,11 @@ export function MapView({
         // Terrain is optional; keep the map usable even when DEM/WebGL2 is unavailable.
       }
       setMapReady(true);
-      onMapReady?.(map);
+      onMapReadyRef.current?.(map);
       syncRuntimeLayers(map);
       map.resize();
     });
+
     map.on("error", (event) => {
       const msg = (event as any)?.error?.message;
       if (typeof msg === "string" && /Failed to initialize WebGL/i.test(msg)) {
@@ -1408,16 +1352,14 @@ export function MapView({
           .addTo(map);
       });
     }
-  }, [initialStyleUrl, onMapReady, syncRuntimeLayers]);
 
-  useEffect(() => {
-    initMap();
     return () => {
       mapRef.current?.remove();
       mapRef.current = null;
+      setMapReady(false);
       lastFlownRef.current = null;
     };
-  }, [initMap]);
+  }, []);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1425,6 +1367,7 @@ export function MapView({
 
     const safeResize = () => {
       if (mapRef.current !== map) return;
+      if ((map as any)?._removed) return;
       const container = map.getContainer?.();
       if (!container || !container.isConnected) return;
       try {
@@ -1565,8 +1508,10 @@ export function MapView({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
-    if (typeof map.isStyleLoaded === "function" && !map.isStyleLoaded()) return;
-    syncBasemapVisibility(map, basemap);
+    const nextStyle = MAPBOX_STYLES[basemap] ?? MAPBOX_STYLES.hybrid;
+    if (currentStyleRef.current === nextStyle) return;
+    currentStyleRef.current = nextStyle;
+    map.setStyle(nextStyle);
   }, [basemap, mapReady]);
 
   useEffect(() => {

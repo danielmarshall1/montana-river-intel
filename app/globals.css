@@ -3,20 +3,20 @@
 @tailwind utilities;
 
 :root {
-  --mri-bg: #0b1118;
-  --mri-bg-elevated: #101924;
-  --mri-panel: rgba(16, 25, 36, 0.92);
-  --mri-panel-soft: rgba(20, 30, 43, 0.86);
-  --mri-panel-strong: rgba(12, 21, 31, 0.96);
-  --mri-card: rgba(18, 28, 41, 0.94);
-  --mri-border: rgba(150, 170, 191, 0.2);
-  --mri-border-strong: rgba(186, 205, 224, 0.34);
-  --mri-text: #e7edf4;
-  --mri-text-muted: #aebdcd;
-  --mri-text-dim: #7f91a5;
-  --mri-shadow-sm: 0 4px 14px rgba(4, 10, 16, 0.2);
-  --mri-shadow-md: 0 10px 26px rgba(4, 10, 16, 0.34);
-  --mri-shadow-lg: 0 20px 42px rgba(4, 10, 16, 0.45);
+  --mri-bg: #10181a;
+  --mri-bg-elevated: #141e20;
+  --mri-panel: rgba(20, 29, 32, 0.88);
+  --mri-panel-soft: rgba(23, 33, 36, 0.82);
+  --mri-panel-strong: rgba(17, 25, 28, 0.94);
+  --mri-card: rgba(21, 31, 35, 0.9);
+  --mri-border: rgba(154, 176, 191, 0.16);
+  --mri-border-strong: rgba(189, 208, 219, 0.24);
+  --mri-text: #e5ebef;
+  --mri-text-muted: #b2c0cb;
+  --mri-text-dim: #7f909d;
+  --mri-shadow-sm: 0 2px 8px rgba(5, 10, 13, 0.16);
+  --mri-shadow-md: 0 8px 20px rgba(5, 10, 13, 0.24);
+  --mri-shadow-lg: 0 14px 30px rgba(5, 10, 13, 0.28);
 }
 
 html,
@@ -50,18 +50,23 @@ select {
 .onx-glass {
   background: var(--mri-panel);
   border: 1px solid var(--mri-border);
-  backdrop-filter: blur(10px) saturate(112%);
-  -webkit-backdrop-filter: blur(10px) saturate(112%);
+  backdrop-filter: blur(8px) saturate(98%);
+  -webkit-backdrop-filter: blur(8px) saturate(98%);
   box-shadow: var(--mri-shadow-md);
 }
 
 .onx-card {
-  background: var(--mri-card);
+  background: linear-gradient(
+    140deg,
+    rgba(21, 31, 35, 0.95) 0%,
+    rgba(17, 25, 29, 0.94) 52%,
+    rgba(15, 22, 26, 0.96) 100%
+  );
   color: var(--mri-text);
   border: 1px solid var(--mri-border);
-  box-shadow: var(--mri-shadow-lg);
-  backdrop-filter: blur(8px) saturate(108%);
-  -webkit-backdrop-filter: blur(8px) saturate(108%);
+  box-shadow: var(--mri-shadow-md);
+  backdrop-filter: blur(8px) saturate(96%);
+  -webkit-backdrop-filter: blur(8px) saturate(96%);
 }
 
 .onx-card .text-slate-900,
@@ -88,24 +93,25 @@ select {
 .onx-card .bg-slate-50\/70,
 .onx-card .bg-slate-50\/80,
 .onx-card .bg-slate-100 {
-  background: rgba(23, 35, 50, 0.78) !important;
+  background: rgba(24, 35, 41, 0.72) !important;
 }
 
 .onx-iconbtn {
-  width: 42px;
-  height: 42px;
+  width: 44px;
+  height: 44px;
   display: grid;
   place-items: center;
-  border-radius: 13px;
+  border-radius: 12px;
   color: var(--mri-text);
   border: 1px solid var(--mri-border);
   background: var(--mri-panel-soft);
-  transition: background-color 140ms ease, border-color 140ms ease, transform 120ms ease;
+  transition: background-color 140ms ease, border-color 140ms ease, transform 120ms ease, color 120ms ease;
 }
 
 .onx-iconbtn:hover {
   background: var(--mri-panel-strong);
   border-color: var(--mri-border-strong);
+  color: #e9eff3;
 }
 
 .onx-iconbtn:active {
@@ -119,6 +125,7 @@ select {
   border: 0;
   outline: none;
   font-size: 14px;
+  font-weight: 500;
 }
 
 .mri-topbar-input::placeholder {
@@ -129,10 +136,10 @@ select {
   border-radius: 999px;
   border: 1px solid var(--mri-border);
   color: var(--mri-text-muted);
-  background: rgba(16, 25, 36, 0.7);
+  background: rgba(19, 28, 32, 0.66);
   font-size: 13px;
-  font-weight: 600;
-  padding: 0.5rem 0.85rem;
+  font-weight: 500;
+  padding: 0.5rem 0.875rem;
   transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 
@@ -146,7 +153,7 @@ select {
 }
 
 .mri-chip-active {
-  background: rgba(36, 53, 71, 0.95);
+  background: rgba(34, 48, 57, 0.82);
   color: var(--mri-text);
   border-color: var(--mri-border-strong);
 }
@@ -177,15 +184,15 @@ select {
 }
 
 .mri-drawer-card {
-  border-radius: 18px;
-  border: 1px solid rgba(168, 187, 207, 0.18);
-  background: rgba(16, 25, 36, 0.82);
+  border-radius: 16px;
+  border: 1px solid rgba(165, 186, 200, 0.14);
+  background: rgba(19, 28, 33, 0.86);
   transition: border-color 130ms ease, background-color 130ms ease, transform 120ms ease;
 }
 
 .mri-drawer-card:hover {
-  border-color: rgba(201, 218, 235, 0.42);
-  background: rgba(22, 33, 47, 0.95);
+  border-color: rgba(196, 213, 224, 0.28);
+  background: rgba(24, 35, 41, 0.92);
 }
 
 .mri-drawer-card:active {
@@ -193,24 +200,49 @@ select {
 }
 
 .mri-drawer-card-selected {
-  border-color: rgba(212, 227, 242, 0.54);
-  background: rgba(27, 40, 55, 0.96);
-  box-shadow: inset 0 0 0 1px rgba(217, 233, 246, 0.22);
+  border-color: rgba(114, 152, 177, 0.62);
+  background: rgba(25, 37, 44, 0.96);
+  box-shadow: inset 0 0 0 1px rgba(114, 152, 177, 0.2);
 }
 
 .mri-kv-label {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--mri-text-dim);
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
+  font-weight: 500;
 }
 
 .mri-kv-value {
   font-size: 14px;
   color: var(--mri-text);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .mri-fade {
   transition: opacity 150ms ease;
+}
+
+.mri-fish-scale-track {
+  position: relative;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(128, 150, 167, 0.2);
+}
+
+.mri-fish-scale-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 999px;
+  background: rgba(82, 124, 149, 0.62);
+}
+
+.mri-fish-scale-marker {
+  position: absolute;
+  top: 50%;
+  width: 2px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(206, 218, 227, 0.76);
+  transform: translate(-1px, -50%);
 }

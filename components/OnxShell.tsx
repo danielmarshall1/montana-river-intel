@@ -87,6 +87,22 @@ function formatUpdatedAgo(value: string | null | undefined): string {
   return `Updated ${d}d ago`;
 }
 
+function getFishabilityIndex(score: number | null | undefined) {
+  if (score == null || Number.isNaN(score)) {
+    return { value: "—", normalized: null as number | null, percent: 0, band: "Unavailable", optimal: false };
+  }
+  const normalized = Math.max(0, Math.min(10, Number(score) / 10));
+  const percent = Math.max(0, Math.min(100, normalized * 10));
+  const band = normalized >= 8.5 ? "Excellent" : normalized >= 6.5 ? "Good" : normalized >= 4 ? "Fair" : "Poor";
+  return {
+    value: normalized.toFixed(1),
+    normalized,
+    percent,
+    band,
+    optimal: normalized >= 7.5 && normalized <= 9.2,
+  };
+}
+
 function getTempStatusLabel(river: River | null | undefined): string {
   if (!river) return "Temp status unavailable";
   if (river.temp_status === "available_stale") {
@@ -222,6 +238,10 @@ export default function OnxShell({
 
   const seasonalIntel = useMemo(() => getSeasonalIntel(), []);
   const breakdown = useMemo(() => (selected ? deriveScoreBreakdown(selected) : null), [selected]);
+  const selectedFishIndex = useMemo(
+    () => getFishabilityIndex(selected?.fishability_score_calc ?? null),
+    [selected]
+  );
   const todaysRead = useMemo(() => generateTodaysRead(selected), [selected]);
   const flags = useMemo(() => riskFlags(selected), [selected]);
   const thermalSummary = useMemo(
@@ -805,18 +825,18 @@ export default function OnxShell({
 
       <header className="absolute left-4 right-4 top-4 z-20 sm:hidden">
         <div className="onx-glass rounded-xl px-3 py-2">
-          <div className="text-[11px] font-semibold text-white/90">{dateLabel}</div>
-          <div className="text-[10px] text-white/60">Last pull {formatPullTime(latestPullAt)} MT</div>
+          <div className="text-[11px] font-medium text-white/84">{dateLabel}</div>
+          <div className="text-[10px] text-white/52">Last pull {formatPullTime(latestPullAt)} MT</div>
         </div>
       </header>
 
       <header className="absolute left-4 right-4 top-4 z-20 hidden sm:block sm:left-[108px] sm:right-[340px]">
-        <div className="onx-glass rounded-2xl px-4 py-2.5">
+        <div className="onx-glass rounded-2xl px-4 py-2">
           <div className="flex items-center gap-3">
-            <div className="hidden shrink-0 text-xs font-semibold text-white/85 sm:block">
+            <div className="hidden shrink-0 text-xs font-medium text-white/84 sm:block">
               {dateLabel} • {filtered.length} rivers
             </div>
-            <div className="hidden shrink-0 text-[11px] text-white/60 lg:block">
+            <div className="hidden shrink-0 text-[11px] text-white/52 lg:block">
               Last pull {formatPullTime(latestPullAt)} MT
             </div>
             <div className="flex-1">
@@ -828,7 +848,7 @@ export default function OnxShell({
               />
             </div>
             <button
-              className="rounded-md px-2 py-1 text-xs text-white/75 hover:text-white"
+              className="rounded-md px-2 py-1 text-xs text-white/66 hover:text-white/92"
               onClick={() => {
                 setSearch("");
                 setTier("All");
@@ -877,13 +897,13 @@ export default function OnxShell({
                 </div>
                 <div className="flex items-center gap-3">
                   <button
-                    className="text-[11px] font-medium text-slate-500 hover:text-slate-700"
+                    className="text-[11px] font-medium text-[var(--mri-text-dim)] hover:text-[var(--mri-text-muted)]"
                     onClick={resetLayers}
                   >
                     Reset
                   </button>
                   <button
-                    className="text-[11px] font-medium text-slate-500 hover:text-slate-700"
+                    className="text-[11px] font-medium text-[var(--mri-text-dim)] hover:text-[var(--mri-text-muted)]"
                     onClick={() => setOpenTopPanel("none")}
                   >
                     Close
@@ -891,7 +911,7 @@ export default function OnxShell({
                 </div>
               </div>
 
-              <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)]">
                 Basemap
               </div>
               <div className="mt-2 grid grid-cols-2 gap-2">
@@ -904,15 +924,15 @@ export default function OnxShell({
                       className={[
                         "rounded-lg border px-2 py-1.5 text-xs font-medium",
                         selectedBasemap
-                          ? "border-slate-900 bg-slate-900 text-white"
-                          : "border-slate-300 bg-white text-slate-700",
-                        !option.enabled ? "cursor-not-allowed opacity-55" : "hover:bg-slate-50",
+                          ? "border-[var(--mri-border-strong)] bg-[rgba(78,122,146,0.3)] text-[var(--mri-text)]"
+                          : "border-[var(--mri-border)] bg-[rgba(20,29,32,0.74)] text-[var(--mri-text-muted)]",
+                        !option.enabled ? "cursor-not-allowed opacity-55" : "hover:bg-[rgba(26,37,43,0.82)]",
                       ].join(" ")}
                       onClick={() => setBasemapStyle(option.id)}
                     >
                       <div>{option.label}</div>
                       {!option.enabled && option.comingSoon ? (
-                        <div className="text-[10px] text-slate-500">Coming soon</div>
+                        <div className="text-[10px] text-[var(--mri-text-dim)]">Coming soon</div>
                       ) : null}
                     </button>
                   );
@@ -920,10 +940,10 @@ export default function OnxShell({
               </div>
 
               <div className="mt-4">
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)]">
                   Core Layers
                 </div>
-                <div className="mt-2 space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-2.5 text-xs text-slate-700">
+                <div className="mt-2 space-y-2 rounded-xl border border-[var(--mri-border)] bg-[rgba(20,29,32,0.74)] p-2.5 text-xs text-[var(--mri-text-muted)]">
                   {groupedLayers
                     .flatMap((g) => g.layers)
                     .filter((layer) => layer.id === "mri_river_lines" || layer.id === "mri_selected_highlight")
@@ -942,7 +962,7 @@ export default function OnxShell({
 
               <div className="mt-4">
                 <button
-                  className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  className="w-full rounded-lg border border-[var(--mri-border)] bg-[rgba(20,29,32,0.72)] px-2.5 py-2 text-left text-xs font-medium text-[var(--mri-text)] hover:bg-[rgba(26,37,43,0.82)]"
                   onClick={() => setAdvancedLayersOpen((v) => !v)}
                 >
                   {advancedLayersOpen ? "Hide Advanced Layers" : "Advanced Layers"}
@@ -952,10 +972,10 @@ export default function OnxShell({
               {advancedLayersOpen
                 ? groupedLayers.map(({ group, layers }) => (
                     <div key={group} className="mt-4">
-                      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)]">
                         {group}
                       </div>
-                      <div className="mt-2 space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-2.5 text-xs text-slate-700">
+                      <div className="mt-2 space-y-2 rounded-xl border border-[var(--mri-border)] bg-[rgba(20,29,32,0.74)] p-2.5 text-xs text-[var(--mri-text-muted)]">
                         {layers
                           .filter(
                             (layer) =>
@@ -968,10 +988,10 @@ export default function OnxShell({
                               <span className="leading-tight">
                                 <span className="block">{layer.label}</span>
                                 {layer.minZoomNote ? (
-                                  <span className="text-[10px] text-slate-500">{layer.minZoomNote}</span>
+                                  <span className="text-[10px] text-[var(--mri-text-dim)]">{layer.minZoomNote}</span>
                                 ) : null}
                                 {layer.comingSoon ? (
-                                  <span className="text-[10px] text-slate-500">Coming soon</span>
+                                  <span className="text-[10px] text-[var(--mri-text-dim)]">Coming soon</span>
                                 ) : null}
                               </span>
                               <input
@@ -1013,13 +1033,13 @@ export default function OnxShell({
 
       <section className="absolute right-4 top-[118px] z-20 hidden w-[314px] sm:block">
         {detailsOpen ? (
-          <div className="onx-card rounded-3xl p-7 transition-all duration-150 ease-in-out">
+          <div className="onx-card rounded-3xl p-6 transition-all duration-150 ease-in-out">
             <div className="flex items-center justify-between">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              <div className="text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--mri-text-dim)]">
                 River Detail
               </div>
               <button
-                className="text-[11px] text-slate-500 hover:text-slate-700"
+                className="text-[11px] text-[var(--mri-text-dim)] hover:text-[var(--mri-text-muted)]"
                 onClick={() => setOpenTopPanel("none")}
               >
                 Collapse
@@ -1030,15 +1050,15 @@ export default function OnxShell({
               <>
                 <div className="mt-3 space-y-5">
                   <div>
-                    <div className="text-[18px] font-semibold text-slate-900">{selected.river_name}</div>
-                    <div className="mt-1 text-xs text-slate-600">{selected.gauge_label ?? ""}</div>
-                    <div className="mt-1 text-[11px] text-slate-500">
+                    <div className="text-[18px] font-semibold text-[var(--mri-text)]">{selected.river_name}</div>
+                    <div className="mt-1 text-xs text-[var(--mri-text-muted)]">{selected.gauge_label ?? ""}</div>
+                    <div className="mt-1 text-[11px] text-[var(--mri-text-dim)]">
                       {formatUpdatedAgo(selected.source_flow_observed_at ?? selected.source_temp_observed_at ?? selected.updated_at)}
                     </div>
                   </div>
 
                   <div>
-                    <div className="text-[56px] font-semibold leading-none tracking-[-0.02em] text-slate-900">
+                    <div className="text-[56px] font-semibold leading-none tracking-[-0.02em] text-[var(--mri-text)]">
                       {selected.fishability_score_calc ?? "—"}
                     </div>
                     <div className="mt-2">
@@ -1056,23 +1076,51 @@ export default function OnxShell({
                     </div>
                   </div>
 
-                  <div className="text-[12px] leading-5 text-slate-600">
-                    <span className="font-medium text-slate-700">Today&apos;s Read:</span> {todaysRead}
+                  <div className="text-[12px] leading-5 text-[var(--mri-text-muted)]">
+                    <span className="font-medium text-[var(--mri-text)]">Today&apos;s Read:</span> {todaysRead}
                   </div>
 
-                  <div className="space-y-3 border-t border-slate-200/75 pt-4">
+                  <div className="rounded-xl border border-[var(--mri-border)] bg-[rgba(23,34,40,0.64)] p-3">
+                    <div className="flex items-end justify-between">
+                      <div className="text-[36px] font-semibold leading-none tracking-[-0.02em] text-[var(--mri-text)]">
+                        {selectedFishIndex.value}
+                        <span className="ml-1 text-[26px] font-medium text-[var(--mri-text-dim)]">/ 10.0</span>
+                      </div>
+                      {selectedFishIndex.optimal ? (
+                        <span className="rounded border border-[rgba(173,190,202,0.32)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--mri-text-muted)]">
+                          Optimal
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="mt-3">
+                      <div className="mri-fish-scale-track">
+                        <div className="mri-fish-scale-fill" style={{ width: `${selectedFishIndex.percent}%` }} />
+                        {selectedFishIndex.normalized != null ? (
+                          <div className="mri-fish-scale-marker" style={{ left: `${selectedFishIndex.percent}%` }} />
+                        ) : null}
+                      </div>
+                      <div className="mt-2 grid grid-cols-4 text-[10px] uppercase tracking-[0.1em] text-[var(--mri-text-dim)]">
+                        <span>Poor</span>
+                        <span className="text-center">Fair</span>
+                        <span className="text-center">Good</span>
+                        <span className="text-right">Excellent</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 border-t border-[var(--mri-border)] pt-4">
                     <div>
-                      <div className="text-[10px] uppercase tracking-wide text-slate-500">Flow</div>
-                      <div className="mt-0.5 text-base font-medium text-slate-900">
+                      <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--mri-text-dim)]">Flow</div>
+                      <div className="mt-0.5 text-base font-medium text-[var(--mri-text)]">
                         {selected.flow_cfs ?? "Flow not available at this gauge"}
-                        <span className="ml-1 text-xs text-slate-500">
+                        <span className="ml-1 text-xs text-[var(--mri-text-dim)]">
                           {getFlowTrendArrow(selected.change_48h_pct_calc)}
                         </span>
                       </div>
                     </div>
                     <div>
-                      <div className="text-[10px] uppercase tracking-wide text-slate-500">Temp</div>
-                      <div className="mt-0.5 text-base font-medium text-slate-900">
+                      <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--mri-text-dim)]">Temp</div>
+                      <div className="mt-0.5 text-base font-medium text-[var(--mri-text)]">
                         {selected.water_temp_f != null
                           ? `${Number(selected.water_temp_f).toFixed(1)}°F`
                           : "Temp not available at this gauge"}
@@ -1088,21 +1136,21 @@ export default function OnxShell({
                   </button>
 
                   {detailMetricsOpen ? (
-                    <div className="space-y-4 border-t border-slate-200/75 pt-4 text-xs text-slate-700">
+                    <div className="space-y-4 border-t border-[var(--mri-border)] pt-4 text-xs text-[var(--mri-text-muted)]">
                       <div className="flex items-center gap-2 text-[11px]">
                         <span
                           className={[
                             "rounded-full border px-2 py-0.5",
                             selected.temp_status === "available_fresh"
-                              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                              ? "border-[rgba(110,150,125,0.4)] bg-[rgba(79,103,87,0.2)] text-[#b4ccb9]"
                               : selected.temp_status === "available_stale"
-                              ? "border-amber-200 bg-amber-50 text-amber-700"
-                              : "border-slate-300 bg-slate-100 text-slate-600",
+                              ? "border-[rgba(176,112,63,0.42)] bg-[rgba(176,112,63,0.2)] text-[#d7b089]"
+                              : "border-[var(--mri-border)] bg-[rgba(21,31,35,0.7)] text-[var(--mri-text-dim)]",
                           ].join(" ")}
                         >
                           {getTempStatusLabel(selected)}
                         </span>
-                        <span className="text-slate-500">{getTempSourceLabel(selected)}</span>
+                        <span className="text-[var(--mri-text-dim)]">{getTempSourceLabel(selected)}</span>
                       </div>
 
                       {flags.length ? (
@@ -1110,7 +1158,7 @@ export default function OnxShell({
                           {flags.map((flag) => (
                             <span
                               key={flag}
-                              className="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600"
+                              className="rounded-full border border-[var(--mri-border)] bg-[rgba(21,31,35,0.7)] px-2 py-0.5 text-[10px] font-medium text-[var(--mri-text-dim)]"
                             >
                               {flag}
                             </span>
@@ -1118,7 +1166,7 @@ export default function OnxShell({
                         </div>
                       ) : null}
 
-                      <div className="space-y-2 text-[11px] text-slate-600">
+                      <div className="space-y-2 text-[11px] text-[var(--mri-text-dim)]">
                         <div>
                           {selected.fishability_rank != null && filtered.length > 0
                             ? `Rank ${selected.fishability_rank} / ${filtered.length}`
@@ -1142,26 +1190,26 @@ export default function OnxShell({
                         <div>Wind AM {selected.wind_am_mph ?? "—"} • PM {selected.wind_pm_mph ?? "—"}</div>
                       </div>
 
-                      <div className="text-[11px] text-slate-500">
+                      <div className="text-[11px] text-[var(--mri-text-dim)]">
                         Flow source:{" "}
                         {selected.source_flow_observed_at
                           ? `${formatPullTime(selected.source_flow_observed_at)} MT`
                           : "Flow not available at this gauge"}
                       </div>
-                      <div className="text-[11px] text-slate-500">
+                      <div className="text-[11px] text-[var(--mri-text-dim)]">
                         Temp source: {getTempSourceLabel(selected)}
                         {selected.source_temp_observed_at ? ` • ${formatPullTime(selected.source_temp_observed_at)} MT` : ""}
                       </div>
 
                       <div>
-                        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)]">
                           Water Temp Window (24h)
                         </div>
                         {intradayLoading ? (
-                          <div className="mt-2 text-xs text-slate-500">Loading intraday thermal...</div>
+                          <div className="mt-2 text-xs text-[var(--mri-text-dim)]">Loading intraday thermal...</div>
                         ) : (
                           <div className="mt-2 space-y-1.5">
-                            <div className="text-xs text-slate-700">{thermalSummary.windowLabel}</div>
+                            <div className="text-xs text-[var(--mri-text-muted)]">{thermalSummary.windowLabel}</div>
                             <Sparkline
                               className="h-12 w-full"
                               stroke="#6b7280"
@@ -1172,11 +1220,11 @@ export default function OnxShell({
                       </div>
 
                       <div>
-                        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)]">
                           Trend (14D)
                         </div>
                         {historyLoading ? (
-                          <div className="mt-2 text-xs text-slate-500">Loading trend...</div>
+                          <div className="mt-2 text-xs text-[var(--mri-text-dim)]">Loading trend...</div>
                         ) : (
                           <div className="mt-2 space-y-2">
                             <Sparkline
@@ -1199,14 +1247,14 @@ export default function OnxShell({
                       </div>
 
                       <button
-                        className="w-full rounded-lg border border-slate-200/80 bg-white/70 px-2 py-1.5 text-left text-xs font-medium text-slate-700 hover:bg-slate-50"
+                        className="w-full rounded-lg border border-[var(--mri-border)] bg-[rgba(21,31,35,0.74)] px-2 py-1.5 text-left text-xs font-medium text-[var(--mri-text)] hover:bg-[rgba(26,37,43,0.82)]"
                         onClick={() => setTransparencyOpen((v) => !v)}
                       >
                         How this score is calculated
                       </button>
 
                       {transparencyOpen && breakdown ? (
-                        <div className="rounded-lg bg-slate-50/70 p-2 text-[11px] text-slate-700">
+                        <div className="rounded-lg bg-[rgba(21,31,35,0.66)] p-2 text-[11px] text-[var(--mri-text-muted)]">
                           <div className="grid grid-cols-2 gap-x-3 gap-y-1">
                             <div>Flow Score</div>
                             <div className="text-right font-semibold">{formatNum(breakdown.flowScore)}</div>
@@ -1218,8 +1266,8 @@ export default function OnxShell({
                             </div>
                             <div>Wind Penalty</div>
                             <div className="text-right font-semibold">{formatNum(breakdown.windPenalty)}</div>
-                            <div className="border-t border-slate-200 pt-1 font-semibold">Total Score</div>
-                            <div className="border-t border-slate-200 pt-1 text-right font-semibold">
+                            <div className="border-t border-[var(--mri-border)] pt-1 font-semibold text-[var(--mri-text)]">Total Score</div>
+                            <div className="border-t border-[var(--mri-border)] pt-1 text-right font-semibold text-[var(--mri-text)]">
                               {formatNum(breakdown.totalScore)}
                             </div>
                           </div>
@@ -1231,8 +1279,8 @@ export default function OnxShell({
               </>
             ) : (
               <>
-                <div className="mt-2 text-sm font-semibold text-slate-900">Montana River Intel</div>
-                <div className="text-xs text-slate-600">
+                <div className="mt-2 text-sm font-semibold text-[var(--mri-text)]">Montana River Intel</div>
+                <div className="text-xs text-[var(--mri-text-muted)]">
                   Tap a river in the list to preview details here.
                 </div>
               </>
@@ -1258,13 +1306,13 @@ export default function OnxShell({
           <div className="onx-card absolute inset-x-0 bottom-0 rounded-t-3xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] transition-all duration-150 ease-in-out">
             <div className="mx-auto mb-3 h-1.5 w-14 cursor-grab rounded-full bg-white/45 ring-1 ring-white/35" style={{ touchAction: "none" }} />
             <div className="mb-3 flex items-center justify-between">
-              <div className="text-sm font-semibold text-slate-900">Map Tools</div>
+              <div className="text-sm font-semibold text-[var(--mri-text)]">Map Tools</div>
               <button className="rounded-md p-2 text-[var(--mri-text-muted)]" onClick={() => setMobileSurfaceState("list", { listSnap: "peek" })}>
                 <X size={18} />
               </button>
             </div>
 
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Basemap</div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)]">Basemap</div>
             <div className="mt-2 grid grid-cols-2 gap-2">
               {BASEMAP_OPTIONS.map((option) => (
                 <button
@@ -1273,8 +1321,8 @@ export default function OnxShell({
                   className={[
                     "min-h-11 rounded-lg border px-2 py-1.5 text-xs font-medium",
                     basemap === option.id
-                      ? "border-white/40 bg-white/20 text-white"
-                      : "border-white/20 bg-white/5 text-white/80",
+                      ? "border-[var(--mri-border-strong)] bg-[rgba(78,122,146,0.3)] text-[var(--mri-text)]"
+                      : "border-[var(--mri-border)] bg-[rgba(20,29,32,0.72)] text-[var(--mri-text-muted)]",
                     !option.enabled ? "cursor-not-allowed opacity-55" : "",
                   ].join(" ")}
                   onClick={() => setBasemapStyle(option.id)}
@@ -1284,8 +1332,8 @@ export default function OnxShell({
               ))}
             </div>
 
-            <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Core Layers</div>
-            <div className="mt-2 space-y-2 rounded-xl border border-white/15 bg-white/5 p-3 text-xs text-white/85">
+            <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)]">Core Layers</div>
+            <div className="mt-2 space-y-2 rounded-xl border border-[var(--mri-border)] bg-[rgba(20,29,32,0.74)] p-3 text-xs text-[var(--mri-text-muted)]">
               {groupedLayers
                 .flatMap((g) => g.layers)
                 .filter((layer) => layer.id === "mri_river_lines" || layer.id === "mri_selected_highlight")
@@ -1314,7 +1362,7 @@ export default function OnxShell({
               style={{ touchAction: "none" }}
             />
             <div className="mb-3 flex items-center justify-between">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">River Detail</div>
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)]">River Detail</div>
               <button
                 className="min-h-11 rounded-md px-3 text-xs font-semibold text-slate-600"
                 onClick={() => setMobileSurfaceState("list", { listSnap: "peek" })}
@@ -1324,9 +1372,9 @@ export default function OnxShell({
             </div>
             {selected ? (
               <>
-                <div className="text-xl font-semibold text-slate-900">{selected.river_name}</div>
-                <div className="text-sm text-slate-600">{selected.gauge_label ?? ""}</div>
-                <div className="mt-1 text-xs text-slate-500">
+                <div className="text-xl font-semibold text-[var(--mri-text)]">{selected.river_name}</div>
+                <div className="text-sm text-[var(--mri-text-muted)]">{selected.gauge_label ?? ""}</div>
+                <div className="mt-1 text-xs text-[var(--mri-text-dim)]">
                   {formatUpdatedAgo(selected.source_flow_observed_at ?? selected.source_temp_observed_at ?? selected.updated_at)}
                 </div>
                 <div className="mt-2">
@@ -1334,16 +1382,16 @@ export default function OnxShell({
                     className={[
                       "inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium",
                       selected.temp_status === "available_fresh"
-                        ? "border-emerald-500/35 bg-emerald-500/12 text-emerald-100"
+                        ? "border-[rgba(110,150,125,0.4)] bg-[rgba(79,103,87,0.2)] text-[#b4ccb9]"
                         : selected.temp_status === "available_stale"
-                        ? "border-amber-500/35 bg-amber-500/12 text-amber-100"
-                        : "border-white/20 bg-white/10 text-white/75",
+                        ? "border-[rgba(176,112,63,0.42)] bg-[rgba(176,112,63,0.2)] text-[#d7b089]"
+                        : "border-[var(--mri-border)] bg-[rgba(21,31,35,0.7)] text-[var(--mri-text-dim)]",
                     ].join(" ")}
                   >
                     {getTempStatusLabel(selected)}
                   </span>
                 </div>
-                <div className="mt-4 text-[56px] font-semibold leading-none tracking-[-0.02em] text-slate-900">
+                <div className="mt-4 text-[56px] font-semibold leading-none tracking-[-0.02em] text-[var(--mri-text)]">
                   {selected.fishability_score_calc ?? "—"}
                 </div>
                 <div className="mt-2">
@@ -1359,19 +1407,47 @@ export default function OnxShell({
                     }
                   />
                 </div>
-                <div className="mt-2 text-xs text-slate-600">{todaysRead}</div>
+                <div className="mt-2 text-xs text-[var(--mri-text-muted)]">{todaysRead}</div>
 
-                <div className="my-4 h-px bg-slate-200" />
+                <div className="mt-3 rounded-xl border border-[var(--mri-border)] bg-[rgba(23,34,40,0.64)] p-3">
+                  <div className="flex items-end justify-between">
+                    <div className="text-[34px] font-semibold leading-none tracking-[-0.02em] text-[var(--mri-text)]">
+                      {selectedFishIndex.value}
+                      <span className="ml-1 text-[22px] font-medium text-[var(--mri-text-dim)]">/ 10.0</span>
+                    </div>
+                    {selectedFishIndex.optimal ? (
+                      <span className="rounded border border-[rgba(173,190,202,0.32)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--mri-text-muted)]">
+                        Optimal
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="mt-3">
+                    <div className="mri-fish-scale-track">
+                      <div className="mri-fish-scale-fill" style={{ width: `${selectedFishIndex.percent}%` }} />
+                      {selectedFishIndex.normalized != null ? (
+                        <div className="mri-fish-scale-marker" style={{ left: `${selectedFishIndex.percent}%` }} />
+                      ) : null}
+                    </div>
+                    <div className="mt-2 grid grid-cols-4 text-[10px] uppercase tracking-[0.1em] text-[var(--mri-text-dim)]">
+                      <span>Poor</span>
+                      <span className="text-center">Fair</span>
+                      <span className="text-center">Good</span>
+                      <span className="text-right">Excellent</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="my-4 h-px bg-[var(--mri-border)]" />
                 <div className="space-y-3 text-xs">
                   <div>
-                    <div className="text-[10px] uppercase tracking-wide text-slate-500">Flow</div>
-                    <div className="font-medium text-slate-900">
+                    <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--mri-text-dim)]">Flow</div>
+                    <div className="font-medium text-[var(--mri-text)]">
                       {selected.flow_cfs ?? "Flow not available at this gauge"}
                     </div>
                   </div>
                   <div>
-                    <div className="text-[10px] uppercase tracking-wide text-slate-500">Temp</div>
-                    <div className="font-medium text-slate-900">
+                    <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--mri-text-dim)]">Temp</div>
+                    <div className="font-medium text-[var(--mri-text)]">
                       {selected.water_temp_f != null
                         ? `${Number(selected.water_temp_f).toFixed(1)}°F`
                         : "Temp not available at this gauge"}
@@ -1387,7 +1463,7 @@ export default function OnxShell({
                 </button>
 
                 {mobileDetailMetricsOpen ? (
-                  <div className="mt-4 space-y-3 border-t border-slate-200 pt-4 text-xs text-slate-600">
+                  <div className="mt-4 space-y-3 border-t border-[var(--mri-border)] pt-4 text-xs text-[var(--mri-text-muted)]">
                     <div>{getTempStatusLabel(selected)}</div>
                     <div>{getTempSourceLabel(selected)}</div>
                     <div>
@@ -1407,7 +1483,7 @@ export default function OnxShell({
                         {flags.map((flag) => (
                           <span
                             key={`mf-${flag}`}
-                            className="rounded-full border border-white/20 bg-white/10 px-2 py-0.5 text-[10px] font-medium text-white/80"
+                            className="rounded-full border border-[var(--mri-border)] bg-[rgba(20,29,32,0.72)] px-2 py-0.5 text-[10px] font-medium text-[var(--mri-text-dim)]"
                           >
                             {flag}
                           </span>
@@ -1418,7 +1494,7 @@ export default function OnxShell({
                 ) : null}
               </>
             ) : (
-              <div className="text-sm text-slate-600">Select a river to view details.</div>
+              <div className="text-sm text-[var(--mri-text-muted)]">Select a river to view details.</div>
             )}
           </div>
         </section>
@@ -1549,7 +1625,7 @@ export default function OnxShell({
         }}
       >
         <div className={`mx-auto max-w-6xl px-3 pb-3 ${detailsOpen ? "sm:pr-[340px]" : ""}`}>
-          <div className="onx-glass overflow-hidden rounded-3xl shadow-2xl">
+          <div className="onx-glass overflow-hidden rounded-3xl">
             <div
               className={`mx-auto mt-2 h-1.5 w-14 flex-shrink-0 cursor-grab rounded-full bg-white/45 ring-1 ring-white/35 active:cursor-grabbing ${isDragging ? "select-none" : ""}`}
               onPointerDown={onSheetPointerDown}

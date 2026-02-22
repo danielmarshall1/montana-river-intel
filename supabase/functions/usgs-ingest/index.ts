@@ -16,6 +16,14 @@ type RiverParamMapRow = {
   stage_site_no: string | null;
 };
 
+type RiverRoleMapRow = {
+  river_id: string;
+  role: "flow" | "temp" | "stage" | "aux";
+  site_no: string;
+  priority: number | null;
+  is_active: boolean | null;
+};
+
 type RiverStationConfigRow = {
   river_id: string;
   parameter_code: "00060" | "00010" | "WQ";
@@ -125,13 +133,23 @@ function parseUSGSTimeSeries(payload: any): ParsedUSGS {
     }
 
     const latest = values[values.length - 1] ?? {};
-    const rawValue = Number(latest?.value);
-    const observedAt = typeof latest?.dateTime === "string" ? latest.dateTime : null;
+    const latestObservedAt = typeof latest?.dateTime === "string" ? latest.dateTime : null;
+    let latestValid: any | null = null;
+    for (let i = values.length - 1; i >= 0; i--) {
+      const row = values[i] ?? {};
+      const n = Number(row?.value);
+      if (!Number.isFinite(n) || n <= -9990) continue;
+      latestValid = row;
+      break;
+    }
 
-    if (!Number.isFinite(rawValue) || rawValue <= -9990) {
-      rawSummary[code] = { observed_at: observedAt, value: null, qualifiers: latest?.qualifiers ?? [] };
+    if (!latestValid) {
+      rawSummary[code] = { observed_at: latestObservedAt, value: null, qualifiers: latest?.qualifiers ?? [] };
       continue;
     }
+
+    const rawValue = Number(latestValid?.value);
+    const observedAt = typeof latestValid?.dateTime === "string" ? latestValid.dateTime : latestObservedAt;
 
     if (code === "00060") {
       flowCfs = rawValue;
@@ -147,7 +165,7 @@ function parseUSGSTimeSeries(payload: any): ParsedUSGS {
     rawSummary[code] = {
       observed_at: observedAt,
       value: rawValue,
-      qualifiers: latest?.qualifiers ?? [],
+      qualifiers: latestValid?.qualifiers ?? latest?.qualifiers ?? [],
       unit: ts?.variable?.unit?.unitCode ?? null,
       description: ts?.variable?.variableDescription ?? null,
     };
@@ -262,7 +280,7 @@ async function fetchUSGSIv(siteNo: string, parameterCd: string): Promise<{ parse
 async function fetchUSGSDVTemp(siteNo: string): Promise<{ parsed: ParsedDVTemp; status: number }> {
   const url =
     `https://waterservices.usgs.gov/nwis/dv/?format=json&sites=${encodeURIComponent(siteNo)}` +
-    "&parameterCd=00010&siteStatus=all&period=P14D";
+    "&parameterCd=00010&siteStatus=all&period=P60D";
 
   const resp = await fetch(url, { method: "GET" });
   const status = resp.status;
@@ -353,6 +371,34 @@ serve(async (req) => {
     }
   }
 
+  const roleMapResp = await sb
+    .from("river_usgs_map_roles")
+    .select("river_id,role,site_no,priority,is_active")
+    .eq("is_active", true);
+
+  const roleMapByRiver = new Map<string, { flowSites: string[]; tempSites: string[]; stageSites: string[] }>();
+  if (!roleMapResp.error && roleMapResp.data) {
+    const sorted = (roleMapResp.data as RiverRoleMapRow[])
+      .filter((row) => !!row.site_no)
+      .sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100));
+    for (const row of sorted) {
+      const rid = String(row.river_id ?? "");
+      const siteNo = String(row.site_no ?? "").trim();
+      if (!rid || !siteNo) continue;
+      const existing = roleMapByRiver.get(rid) ?? { flowSites: [], tempSites: [], stageSites: [] };
+      if (row.role === "flow" && !existing.flowSites.includes(siteNo)) {
+        existing.flowSites.push(siteNo);
+      }
+      if (row.role === "temp" && !existing.tempSites.includes(siteNo)) {
+        existing.tempSites.push(siteNo);
+      }
+      if (row.role === "stage" && !existing.stageSites.includes(siteNo)) {
+        existing.stageSites.push(siteNo);
+      }
+      roleMapByRiver.set(rid, existing);
+    }
+  }
+
   const stationConfigResp = await sb
     .from("river_station_parameter_config")
     .select("river_id,parameter_code,site_no,priority,is_enabled")
@@ -410,13 +456,23 @@ serve(async (req) => {
 
     try {
       const mapRow = riverMap.get(river.id);
+      const roleMap = roleMapByRiver.get(river.id);
       const stationConfig = stationConfigByRiver.get(river.id);
       const stationRegistry = stationRegistryByRiver.get(river.id);
-      const flowSiteNo = (stationConfig?.flowSiteNo ?? mapRow?.flow_site_no ?? defaultSiteNo).trim();
-      const tempSiteRaw = stationConfig?.tempSiteNo ?? mapRow?.temp_site_no ?? null;
-      const tempSiteNo = tempSiteRaw != null && String(tempSiteRaw).trim().length > 0
-        ? String(tempSiteRaw).trim()
-        : null;
+      const flowCandidates = [
+        ...(roleMap?.flowSites ?? []),
+        ...(stationConfig?.flowSiteNo ? [stationConfig.flowSiteNo] : []),
+        ...(mapRow?.flow_site_no ? [mapRow.flow_site_no] : []),
+        defaultSiteNo,
+      ].filter((v, i, arr) => !!v && arr.indexOf(v) === i) as string[];
+      const tempCandidates = [
+        ...(roleMap?.tempSites ?? []),
+        ...(stationConfig?.tempSiteNo ? [stationConfig.tempSiteNo] : []),
+        ...(mapRow?.temp_site_no ? [mapRow.temp_site_no] : []),
+      ].filter((v, i, arr) => !!v && arr.indexOf(v) === i) as string[];
+
+      const flowSiteNo = String(flowCandidates[0] ?? defaultSiteNo).trim();
+      const tempSiteNo = tempCandidates.length > 0 ? String(tempCandidates[0]).trim() : null;
 
       const { parsed: mainIv, status } = await fetchUSGSIv(flowSiteNo, "00060,00065");
 
@@ -425,50 +481,99 @@ serve(async (req) => {
       let flowSource = "IV";
       let tempValue: number | null = null;
       let tempObservedAt: string | null = null;
-      let tempSource = "NONE";
+      let tempSource: "IV" | "DV" | "NONE" = "NONE";
+      let tempReason: string | null = null;
+      let selectedTempSiteNo: string | null = null;
+      let tempIsFresh = false;
       let hasTempIv = false;
       let hasTempDv = false;
 
-      if (tempSiteNo) {
-        const ivTempOnly = await fetchUSGSIv(tempSiteNo, "00010");
-        hasTempIv = ivTempOnly.parsed.hasTempSeries;
-        if (ivTempOnly.parsed.waterTempF != null) {
-          tempValue = ivTempOnly.parsed.waterTempF;
-          tempObservedAt = ivTempOnly.parsed.tempObservedAt;
-          tempSource = "IV_TEMP_SITE";
-          mainIv.parameterCodes.push("00010(TEMP_SITE)");
-        }
-      }
-
-      if (tempSiteNo && tempValue == null) {
+      for (const candidate of tempCandidates) {
+        if (tempValue != null) break;
         try {
-          const dvTemp = await fetchUSGSDVTemp(tempSiteNo);
-          hasTempDv = dvTemp.parsed.hasTempSeries;
-          if (dvTemp.parsed.waterTempF != null) {
-            tempValue = dvTemp.parsed.waterTempF;
-            tempObservedAt = dvTemp.parsed.observedAt;
-            tempSource = "DV_FALLBACK";
-            mainIv.parameterCodes.push("00010(DV)");
+          const ivTempOnly = await fetchUSGSIv(candidate, "00010");
+          if (ivTempOnly.parsed.hasTempSeries) hasTempIv = true;
+          if (ivTempOnly.parsed.waterTempF != null) {
+            const isFresh = isObservationFresh(ivTempOnly.parsed.tempObservedAt, 72);
+            if (isFresh) {
+              tempValue = ivTempOnly.parsed.waterTempF;
+              tempObservedAt = ivTempOnly.parsed.tempObservedAt;
+              tempSource = "IV";
+              selectedTempSiteNo = candidate;
+              tempIsFresh = true;
+              tempReason = null;
+              if (!mainIv.parameterCodes.includes("00010(TEMP_SITE_IV)")) {
+                mainIv.parameterCodes.push("00010(TEMP_SITE_IV)");
+              }
+              break;
+            }
+            if (tempValue == null) {
+              tempValue = ivTempOnly.parsed.waterTempF;
+              tempObservedAt = ivTempOnly.parsed.tempObservedAt;
+              tempSource = "IV";
+              selectedTempSiteNo = candidate;
+              tempReason = "temp_observation_stale_or_missing";
+              if (!mainIv.parameterCodes.includes("00010(TEMP_SITE_IV)")) {
+                mainIv.parameterCodes.push("00010(TEMP_SITE_IV)");
+              }
+            }
           }
         } catch {
-          hasTempDv = false;
+          // keep trying next temp candidate
         }
       }
 
-      // Guard against stale telemetry being interpreted as "current".
-      // IV values should generally be fresh; DV fallback may be older.
-      if (tempValue != null) {
-        const maxAge = tempSource === "DV_FALLBACK" ? 240 : 72;
-        if (!isObservationFresh(tempObservedAt, maxAge)) {
-          tempValue = null;
-          tempObservedAt = null;
-          tempSource = `${tempSource}_STALE`;
+      if (!tempIsFresh) {
+        for (const candidate of tempCandidates) {
+          try {
+            const dvTemp = await fetchUSGSDVTemp(candidate);
+            if (dvTemp.parsed.hasTempSeries) hasTempDv = true;
+            if (dvTemp.parsed.waterTempF != null) {
+              const isFresh = isObservationFresh(dvTemp.parsed.observedAt, 240);
+              if (isFresh) {
+                tempValue = dvTemp.parsed.waterTempF;
+                tempObservedAt = dvTemp.parsed.observedAt;
+                tempSource = "DV";
+                selectedTempSiteNo = candidate;
+                tempIsFresh = true;
+                tempReason = null;
+                if (!mainIv.parameterCodes.includes("00010(TEMP_SITE_DV)")) {
+                  mainIv.parameterCodes.push("00010(TEMP_SITE_DV)");
+                }
+                break;
+              }
+              if (tempValue == null) {
+                tempValue = dvTemp.parsed.waterTempF;
+                tempObservedAt = dvTemp.parsed.observedAt;
+                tempSource = "DV";
+                selectedTempSiteNo = candidate;
+                tempReason = "temp_observation_stale_or_missing";
+                if (!mainIv.parameterCodes.includes("00010(TEMP_SITE_DV)")) {
+                  mainIv.parameterCodes.push("00010(TEMP_SITE_DV)");
+                }
+              }
+            }
+          } catch {
+            // keep trying next temp candidate
+          }
         }
+      }
+
+      if (tempValue == null) {
+        if (tempCandidates.length === 0) {
+          tempReason = "no_temp_site_mapping";
+        } else if (!hasTempIv && !hasTempDv) {
+          tempReason = "no_00010_sites";
+        } else {
+          tempReason = "temp_observation_stale_or_missing";
+        }
+      } else if (!tempIsFresh) {
+        tempReason = "temp_observation_stale_or_missing";
       }
 
       if (flowValue == null) {
-        const flowCandidates = (stationRegistry?.flowSites ?? []).filter((s) => s !== flowSiteNo);
-        for (const candidate of flowCandidates) {
+        const fallbackFlowCandidates = (stationRegistry?.flowSites ?? []).filter((s) => s !== flowSiteNo);
+        for (const candidate of fallbackFlowCandidates) {
           try {
             const altIv = await fetchUSGSIv(candidate, "00060");
             if (altIv.parsed.flowCfs == null) continue;
@@ -504,8 +609,8 @@ serve(async (req) => {
       }
 
       if (flowValue == null) {
-        const flowCandidates = (stationRegistry?.flowSites ?? []).filter((s) => s !== flowSiteNo);
-        for (const candidate of flowCandidates) {
+        const fallbackFlowCandidates = (stationRegistry?.flowSites ?? []).filter((s) => s !== flowSiteNo);
+        for (const candidate of fallbackFlowCandidates) {
           try {
             const dvFlow = await fetchUSGSDVFlow(candidate);
             if (dvFlow.parsed.value == null) continue;
@@ -535,19 +640,26 @@ serve(async (req) => {
 
       mainIv.rawSummary.temp_source = tempSource;
       mainIv.rawSummary.flow_source = flowSource;
-      mainIv.rawSummary.temp_site_no = tempSiteNo;
+      mainIv.rawSummary.temp_site_no = selectedTempSiteNo ?? tempSiteNo;
       mainIv.rawSummary.flow_site_no = flowSiteNo;
+      mainIv.rawSummary.temp_reason = tempReason;
       if (stationConfig?.flowSiteNo || stationConfig?.tempSiteNo) {
         mainIv.rawSummary.station_config_override = {
           flow_site_no: stationConfig?.flowSiteNo ?? null,
           temp_site_no: stationConfig?.tempSiteNo ?? null,
         };
       }
-      mainIv.rawSummary.temp_policy = "strict_same_river";
+      mainIv.rawSummary.temp_policy = "strict_mapped_temp_site_only";
       if (!tempSiteNo) {
         mainIv.rawSummary.temp_status = "mapping_missing";
       } else if (tempValue == null && !hasTempIv && !hasTempDv) {
         mainIv.rawSummary.temp_status = "not_available";
+      } else if (tempValue == null) {
+        mainIv.rawSummary.temp_status = "missing_or_stale";
+      } else if (!tempIsFresh) {
+        mainIv.rawSummary.temp_status = "available_stale";
+      } else {
+        mainIv.rawSummary.temp_status = "available_fresh";
       }
 
       const upsertResp = await sb.from("river_daily").upsert(
@@ -561,6 +673,11 @@ serve(async (req) => {
           source_flow_observed_at: flowObservedAt,
           source_temp_observed_at: tempObservedAt,
           source_gage_observed_at: mainIv.gageObservedAt,
+          flow_source_site_no: flowSiteNo,
+          temp_source_site_no: selectedTempSiteNo ?? tempSiteNo,
+          temp_source_kind: tempSource,
+          temp_unavailable: tempValue == null,
+          temp_reason: tempReason,
           source_parameter_codes: mainIv.parameterCodes,
           source_payload: mainIv.rawSummary,
         },
@@ -595,20 +712,32 @@ serve(async (req) => {
         }
       }
 
-      const paramUpsert = await sb
-        .from("usgs_site_parameters")
-        .upsert(
-          {
-            site_no: tempSiteNo,
-            has_temp_iv: hasTempIv,
-            has_temp_dv: hasTempDv,
-            checked_at: new Date().toISOString(),
-          },
-          { onConflict: "site_no" }
-        );
+      const parameterRows = new Map<string, { has_temp_iv: boolean; has_temp_dv: boolean }>();
+      for (const candidate of [flowSiteNo, ...(tempCandidates ?? [])]) {
+        if (!candidate) continue;
+        const prev = parameterRows.get(candidate) ?? { has_temp_iv: false, has_temp_dv: false };
+        if (candidate === selectedTempSiteNo || candidate === tempSiteNo) {
+          prev.has_temp_iv = prev.has_temp_iv || hasTempIv;
+          prev.has_temp_dv = prev.has_temp_dv || hasTempDv;
+        }
+        parameterRows.set(candidate, prev);
+      }
+      if (parameterRows.size > 0) {
+        const paramUpsert = await sb
+          .from("usgs_site_parameters")
+          .upsert(
+            Array.from(parameterRows.entries()).map(([site_no, flags]) => ({
+              site_no,
+              has_temp_iv: flags.has_temp_iv,
+              has_temp_dv: flags.has_temp_dv,
+              checked_at: new Date().toISOString(),
+            })),
+            { onConflict: "site_no" }
+          );
 
-      if (paramUpsert.error) {
-        mainIv.rawSummary.site_parameter_upsert_error = paramUpsert.error.message;
+        if (paramUpsert.error) {
+          mainIv.rawSummary.site_parameter_upsert_error = paramUpsert.error.message;
+        }
       }
 
       const siteLogResp = await sb.from("usgs_pull_sites").insert({

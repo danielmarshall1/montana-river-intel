@@ -23,7 +23,7 @@ export function Sparkline({
     .filter((p): p is { v: number; i: number } => p.v != null);
 
   if (indexed.length < 1) {
-    return <div className={`text-[11px] text-slate-400 ${className ?? ""}`}>Trend unavailable</div>;
+    return <div className={`text-[11px] text-[var(--mri-text-dim)] ${className ?? ""}`}>Trend unavailable</div>;
   }
 
   const min = Math.min(...indexed.map((p) => p.v));
@@ -40,11 +40,11 @@ export function Sparkline({
   return (
     <svg viewBox={`0 0 ${width} ${height}`} className={className} role="img" aria-label="Trend sparkline">
       {indexed.length > 1 ? (
-        <polyline fill="none" stroke={stroke} strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" points={points} />
+        <polyline fill="none" stroke={stroke} strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" points={points} />
       ) : (
-        <line x1="0" y1={lastY} x2={width} y2={lastY} stroke={stroke} strokeWidth="1.5" strokeOpacity="0.4" />
+        <line x1="0" y1={lastY} x2={width} y2={lastY} stroke={stroke} strokeWidth="1.1" strokeOpacity="0.38" />
       )}
-      <circle cx={lastX} cy={lastY} r="2.75" fill={stroke} />
+      <circle cx={lastX} cy={lastY} r="2.1" fill={stroke} />
     </svg>
   );
 }
