@@ -8,15 +8,17 @@ import { fetchRiverGeom } from "@/lib/supabase";
 import { fetchRiverGeojsonBrowser } from "@/lib/supabaseBrowser";
 import { RIVER_FOCUS_POINTS } from "@/lib/river-focus-points";
 import { deriveScoreBreakdown } from "@/lib/scoreBreakdown";
-import { getSeasonalIntel } from "@/lib/seasonalIntel";
 import { generateTodaysRead } from "@/lib/todaysRead";
 import { MRI_COLORS } from "@/lib/theme";
 import { getFlowTrendArrow } from "@/lib/trend";
-import { riskFlags } from "@/lib/riskFlags";
-import { fetchRiverHistory14d, fetchRiverIntraday24h } from "@/lib/supabase";
-import { Sparkline } from "@/components/Sparkline";
-import { summarizeThermalWindow } from "@/lib/thermalWindow";
-import { generateHatchIntel } from "@/lib/hatchIntel";
+import {
+  fetchRiverDetailAnalyticsByIdOrSlug,
+  fetchRiverHistory14d,
+  fetchRiverIntraday24h,
+  fetchRiverWeatherWindow,
+  fetchUsgsSiteSummaries,
+} from "@/lib/supabase";
+import { buildRiverDetailAnalytics } from "@/lib/riverAnalytics";
 import {
   BASEMAP_OPTIONS,
   DEFAULT_BASEMAP,
@@ -27,7 +29,13 @@ import {
   type BasemapId,
   type LayerId,
 } from "@/src/map/layers/registry";
-import type { FishabilityRow } from "@/lib/types";
+import type {
+  FishabilityRow,
+  RiverDetailAnalyticsBackendRow,
+  RiverDetailAnalytics,
+  RiverSourceSiteSummary,
+  RiverWeatherDay,
+} from "@/lib/types";
 
 type River = FishabilityRow;
 
@@ -127,9 +135,354 @@ function getTempSourceLabel(river: River | null | undefined): string {
   return `${kind} • Site ${site}`;
 }
 
+function getConfidenceBadgeLabel(river: River | null | undefined): string {
+  if (!river?.confidence_level) return "Confidence unavailable";
+  return `${river.confidence_level} confidence`;
+}
+
+function getConfidenceBadgeClass(level: River["confidence_level"]): string {
+  if (level === "High") {
+    return "border-[rgba(110,150,125,0.34)] bg-[rgba(79,103,87,0.18)] text-[#c2d5c6]";
+  }
+  if (level === "Moderate") {
+    return "border-[rgba(173,126,78,0.34)] bg-[rgba(134,97,57,0.18)] text-[#d8be97]";
+  }
+  return "border-[var(--mri-border)] bg-[rgba(21,31,35,0.7)] text-[var(--mri-text-dim)]";
+}
+
+function formatDetailedTime(value: string | null | undefined): string {
+  if (!value) return "Unavailable";
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return "Unavailable";
+  return dt.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: "America/Denver",
+  }) + " MT";
+}
+
+function formatMetricNumber(
+  value: number | null | undefined,
+  opts?: { digits?: number; suffix?: string; prefix?: string }
+): string {
+  if (value == null || Number.isNaN(value)) return "Unavailable";
+  const digits = opts?.digits ?? 0;
+  return `${opts?.prefix ?? ""}${Number(value).toFixed(digits)}${opts?.suffix ?? ""}`;
+}
+
+function formatSignedPercent(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) return "Unavailable";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${Number(value).toFixed(1)}%`;
+}
+
+function formatTempTrend(label: string | null, delta: number | null): string {
+  if (!label) return "Unavailable";
+  if (delta == null || Number.isNaN(delta)) return label;
+  const sign = delta > 0 ? "+" : "";
+  return `${label} (${sign}${delta.toFixed(1)}°F / 24h)`;
+}
+
+function metricNoteAboveMedian(flowRatio: number | null): string | null {
+  if (flowRatio == null || Number.isNaN(flowRatio)) return null;
+  if (flowRatio > 1.05) return "Above median";
+  if (flowRatio < 0.95) return "Below median";
+  return "Near median";
+}
+
+function metricNote48hChange(change48hPct: number | null): string | null {
+  if (change48hPct == null || Number.isNaN(change48hPct)) return null;
+  if (change48hPct > 5) return "Stable rise";
+  if (change48hPct < -5) return "Falling";
+  return "Relatively stable";
+}
+
+function getRiverTrustLine(river: River): string {
+  const change = river.change_48h_pct_calc;
+  if (change == null || Number.isNaN(change)) return "Trend unavailable";
+  if (change > 5) return `Rising flow (${formatSignedPercent(change)})`;
+  if (change < -5) return `Falling flow (${formatSignedPercent(change)})`;
+  return `Stable flow (${formatSignedPercent(change)})`;
+}
+
+function formatSourceSite(siteNo: string | null | undefined, siteName: string | null | undefined): string {
+  if (!siteNo && !siteName) return "Unavailable";
+  if (siteNo && siteName) return `${siteNo} • ${siteName}`;
+  return siteNo ?? siteName ?? "Unavailable";
+}
+
+function MetricRow({
+  label,
+  value,
+  note,
+}: {
+  label: string;
+  value: string;
+  note?: string | null;
+}) {
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1 border-b border-white/6 py-2 last:border-b-0">
+      <div className="min-w-0">
+        <div className="text-[11px] font-medium text-white/76">{label}</div>
+        {note ? <div className="mt-0.5 text-[10px] leading-4 text-white/40">{note}</div> : null}
+      </div>
+      <div className="max-w-[180px] text-right text-[11px] font-semibold text-white/92">{value}</div>
+    </div>
+  );
+}
+
+function MetricsSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-[18px] border border-[rgba(180,198,209,0.1)] bg-[rgba(16,24,27,0.58)] p-3.5">
+      <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-white/42">{title}</div>
+      <div className="mt-2">{children}</div>
+    </section>
+  );
+}
+
+function DetailedMetricsContent({
+  analytics,
+}: {
+  analytics: RiverDetailAnalytics | null;
+}) {
+  if (!analytics) {
+    return <div className="text-[11px] text-[var(--mri-text-dim)]">No metrics available.</div>;
+  }
+
+  return (
+    <div className="space-y-3">
+      <MetricsSection title="Hydrology">
+        <MetricRow label="Current Flow (cfs)" value={formatMetricNumber(analytics.hydrology.currentFlowCfs, { suffix: " CFS" })} />
+        <MetricRow label="Median Flow" value={formatMetricNumber(analytics.hydrology.medianFlowCfs, { suffix: " CFS" })} />
+        <MetricRow
+          label="Flow Ratio"
+          value={analytics.hydrology.flowRatio != null ? `${analytics.hydrology.flowRatio.toFixed(2)}x median` : "Unavailable"}
+          note={metricNoteAboveMedian(analytics.hydrology.flowRatio)}
+        />
+        <MetricRow
+          label="48h Flow Change"
+          value={formatSignedPercent(analytics.hydrology.change48hPct)}
+          note={metricNote48hChange(analytics.hydrology.change48hPct)}
+        />
+        <MetricRow
+          label="Flow Percentile for Date"
+          value={
+            analytics.hydrology.flowPercentile != null
+              ? `${Math.round(analytics.hydrology.flowPercentile)}th percentile`
+              : analytics.hydrology.flowPercentileStatus ?? "Insufficient history"
+          }
+        />
+        <MetricRow
+          label="Stability Index"
+          value={analytics.hydrology.stabilityLabel ?? "Unavailable"}
+          note={
+            analytics.hydrology.stabilityIndexRaw != null
+              ? `CV ${analytics.hydrology.stabilityIndexRaw.toFixed(3)}`
+              : "Insufficient recent flow history"
+          }
+        />
+        <MetricRow
+          label="Stage / Gauge Height"
+          value={formatMetricNumber(analytics.hydrology.gaugeHeightFt, { digits: 1, suffix: " ft" })}
+        />
+      </MetricsSection>
+
+      <MetricsSection title="Thermal">
+        <MetricRow
+          label="Current Water Temperature"
+          value={formatMetricNumber(analytics.thermal.currentWaterTempF, { digits: 1, suffix: "°F" })}
+        />
+        <MetricRow label="Temperature Source Type" value={analytics.thermal.tempSourceKind ?? "Unknown"} />
+        <MetricRow label="Temperature Observed At" value={formatDetailedTime(analytics.thermal.tempObservedAt)} />
+        <MetricRow label="Temperature Confidence" value={analytics.thermal.tempConfidence ?? "Unavailable"} />
+        <MetricRow
+          label="Thermal Trend"
+          value={formatTempTrend(analytics.thermal.thermalTrendLabel, analytics.thermal.thermalTrendDelta24hF)}
+        />
+        <MetricRow label="Thermal Status" value={analytics.thermal.thermalStatus ?? "Unavailable"} />
+        <MetricRow
+          label="3-Day Water Temp Direction"
+          value={analytics.thermal.direction3Day ?? "Forecast not yet enabled"}
+        />
+      </MetricsSection>
+
+      <MetricsSection title="Weather">
+        <MetricRow label="Current Air Temperature" value={formatMetricNumber(analytics.weather.airTempF, { digits: 0, suffix: "°F" })} />
+        <MetricRow
+          label="Wind Speed"
+          value={formatMetricNumber(analytics.weather.windSpeedMph, { digits: 1, suffix: " mph" })}
+          note={analytics.weather.windSpeedMph != null ? "Using current MRI weather signal" : null}
+        />
+        <MetricRow label="Wind Direction" value={analytics.weather.windDirection ?? "Unavailable"} />
+        <MetricRow label="Gusts" value={formatMetricNumber(analytics.weather.gustMph, { digits: 0, suffix: " mph" })} />
+        <MetricRow
+          label="Precipitation Probability"
+          value={formatMetricNumber(analytics.weather.precipChancePct, { digits: 0, suffix: "%" })}
+        />
+        <MetricRow
+          label="Cloud Cover"
+          value={formatMetricNumber(analytics.weather.cloudCoverPct, { digits: 0, suffix: "%" })}
+        />
+        <MetricRow
+          label="Daily High / Low"
+          value={
+            analytics.weather.highTempF != null || analytics.weather.lowTempF != null
+              ? `${analytics.weather.highTempF != null ? Math.round(analytics.weather.highTempF) : "—"}° / ${analytics.weather.lowTempF != null ? Math.round(analytics.weather.lowTempF) : "—"}°`
+              : "Unavailable"
+          }
+        />
+        <MetricRow label="Wind Fishing Impact" value={analytics.weather.windImpact ?? "Unavailable"} />
+        <MetricRow label="Dry Fly Wind Impact" value={analytics.weather.dryFlyWindImpact ?? "Unavailable"} />
+      </MetricsSection>
+
+      <MetricsSection title="Forecast">
+        <MetricRow
+          label="Tomorrow Air Temp"
+          value={analytics.forecast.day1.available ? formatMetricNumber(analytics.forecast.day1.airTempF, { digits: 0, suffix: "°F" }) : "Forecast not yet enabled"}
+        />
+        <MetricRow
+          label="Tomorrow Wind"
+          value={analytics.forecast.day1.available ? formatMetricNumber(analytics.forecast.day1.windMph, { digits: 0, suffix: " mph" }) : "Forecast not yet enabled"}
+        />
+        <MetricRow
+          label="Tomorrow Precip Chance"
+          value={analytics.forecast.day1.available ? formatMetricNumber(analytics.forecast.day1.precipChancePct, { digits: 0, suffix: "%" }) : "Forecast not yet enabled"}
+        />
+        <MetricRow
+          label="Day 2 Air Temp"
+          value={analytics.forecast.day2.available ? formatMetricNumber(analytics.forecast.day2.airTempF, { digits: 0, suffix: "°F" }) : "Forecast not yet enabled"}
+        />
+        <MetricRow
+          label="Day 2 Wind"
+          value={analytics.forecast.day2.available ? formatMetricNumber(analytics.forecast.day2.windMph, { digits: 0, suffix: " mph" }) : "Forecast not yet enabled"}
+        />
+        <MetricRow
+          label="Day 2 Precip Chance"
+          value={analytics.forecast.day2.available ? formatMetricNumber(analytics.forecast.day2.precipChancePct, { digits: 0, suffix: "%" }) : "Forecast not yet enabled"}
+        />
+        <MetricRow
+          label="Day 3 Air Temp"
+          value={analytics.forecast.day3.available ? formatMetricNumber(analytics.forecast.day3.airTempF, { digits: 0, suffix: "°F" }) : "Forecast not yet enabled"}
+        />
+        <MetricRow
+          label="Day 3 Wind"
+          value={analytics.forecast.day3.available ? formatMetricNumber(analytics.forecast.day3.windMph, { digits: 0, suffix: " mph" }) : "Forecast not yet enabled"}
+        />
+        <MetricRow
+          label="Day 3 Precip Chance"
+          value={analytics.forecast.day3.available ? formatMetricNumber(analytics.forecast.day3.precipChancePct, { digits: 0, suffix: "%" }) : "Forecast not yet enabled"}
+        />
+        <MetricRow label="3-Day Wind Outlook" value={analytics.forecast.windOutlook ?? "Forecast not yet enabled"} />
+        <MetricRow label="3-Day Fishing Outlook" value={analytics.forecast.fishingOutlook ?? "Forecast model not yet enabled"} />
+        <MetricRow label="3-Day Flow Outlook" value={analytics.forecast.flowOutlook ?? "Flow forecast not yet enabled"} />
+      </MetricsSection>
+
+      <MetricsSection title="Biology">
+        <MetricRow
+          label="Hatch Likelihood"
+          value={analytics.biology.hatchLikelihood ?? "Unavailable"}
+          note="Derived from season, temperature, and stability"
+        />
+        <MetricRow label="Dry Fly Viability" value={analytics.biology.dryFlyViability ?? "Unavailable"} />
+        <MetricRow label="Tactical Read" value={analytics.biology.tacticalRead ?? "Unavailable"} />
+      </MetricsSection>
+
+      <MetricsSection title="Data Quality / Source Trust">
+        <MetricRow
+          label="Flow Source Site"
+          value={formatSourceSite(analytics.sourceTrust.flowSourceSiteNo, analytics.sourceTrust.flowSourceSiteName)}
+        />
+        <MetricRow
+          label="Temperature Source Site"
+          value={formatSourceSite(analytics.sourceTrust.tempSourceSiteNo, analytics.sourceTrust.tempSourceSiteName)}
+        />
+        <MetricRow label="Temp Source Kind" value={analytics.sourceTrust.tempSourceKind ?? "Unknown"} />
+        <MetricRow
+          label="Observation Timestamp"
+          value={analytics.sourceTrust.observationTimestamp ? formatDetailedTime(analytics.sourceTrust.observationTimestamp) : "Unavailable"}
+        />
+        <MetricRow
+          label="Last Hydrology Pull"
+          value={analytics.sourceTrust.lastHydrologyPullAt ? formatDetailedTime(analytics.sourceTrust.lastHydrologyPullAt) : "Unavailable"}
+        />
+        <MetricRow label="Data Confidence" value={analytics.sourceTrust.overallConfidence ?? "Unavailable"} />
+        <MetricRow
+          label="Missing Inputs"
+          value={analytics.sourceTrust.missingInputs.length ? analytics.sourceTrust.missingInputs.join(", ") : "None"}
+        />
+      </MetricsSection>
+    </div>
+  );
+}
+
+function DesktopTrayCard({
+  river,
+  selected,
+  onSelect,
+}: {
+  river: River;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      onClick={onSelect}
+      className={`mri-drawer-card mri-tray-card shrink-0 text-left active:translate-y-[1px] ${
+        selected ? "mri-drawer-card-selected" : ""
+      }`}
+    >
+      <div className="p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="truncate text-[13px] font-semibold text-white">{river.river_name}</div>
+            <div className="mt-0.5 truncate text-[11px] text-white/50">{river.gauge_label ?? ""}</div>
+          </div>
+          <div className="text-right">
+            <div className="text-[24px] font-semibold leading-none tracking-[-0.02em] text-white">
+              {river.fishability_score_calc ?? "—"}
+            </div>
+            <div className="mt-1 text-[10px] uppercase tracking-[0.12em] text-white/40">Score</div>
+          </div>
+        </div>
+        <div className="mt-2.5 flex items-center justify-between gap-3">
+          <TierPill
+            tier={
+              river.bite_tier === "HOT" || river.bite_tier === "GOOD"
+                ? "Good"
+                : river.bite_tier === "FAIR"
+                ? "Fair"
+                : river.bite_tier === "TOUGH"
+                ? "Tough"
+                : undefined
+            }
+          />
+          <div className="flex items-center gap-3 text-[11px] text-white/72">
+            <span>
+              {river.flow_cfs ?? "—"}
+              <span className="ml-1 text-white/38">{getFlowTrendArrow(river.change_48h_pct_calc)}</span>
+            </span>
+            <span>{river.water_temp_f != null ? `${Number(river.water_temp_f).toFixed(1)}°` : "—"}</span>
+          </div>
+        </div>
+        <div className="mt-2 text-[10px] font-medium tracking-[0.01em] text-white/58">{getRiverTrustLine(river)}</div>
+      </div>
+    </button>
+  );
+}
+
 export default function OnxShell({
   rivers,
   stationGeojson,
+  riverLinesGeojson: initialRiverLinesGeojson,
   dateLabel = new Date().toLocaleDateString("en-US", {
     weekday: "long",
     month: "long",
@@ -139,6 +492,7 @@ export default function OnxShell({
 }: {
   rivers: River[];
   stationGeojson?: GeoJSON.FeatureCollection<GeoJSON.Point, Record<string, unknown>> | null;
+  riverLinesGeojson?: GeoJSON.FeatureCollection<GeoJSON.Geometry, Record<string, unknown>> | null;
   dateLabel?: string;
 }) {
   type TopPanel = "none" | "layers" | "detail";
@@ -146,9 +500,9 @@ export default function OnxShell({
   type MobileSurface = "map" | "list" | "detail" | "tools";
   type MobileListSnap = "peek" | "mid" | "full";
   const DRAWER_SNAP_Y: Record<DrawerSnap, number> = {
-    collapsed: 0.84,
-    mid: 0.42,
-    expanded: 0,
+    collapsed: 0.94,
+    mid: 0.76,
+    expanded: 0.46,
   };
   const MOBILE_LIST_SNAP_Y: Record<MobileListSnap, number> = {
     peek: 0.78,
@@ -161,8 +515,8 @@ export default function OnxShell({
   const [tier, setTier] = useState<"All" | "Good" | "Fair" | "Tough">("All");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectionSeq, setSelectionSeq] = useState(0);
-  const [drawerSnap, setDrawerSnap] = useState<DrawerSnap>("mid");
-  const [sheetY, setSheetY] = useState<number>(DRAWER_SNAP_Y.mid);
+  const [drawerSnap, setDrawerSnap] = useState<DrawerSnap>("collapsed");
+  const [sheetY, setSheetY] = useState<number>(DRAWER_SNAP_Y.collapsed);
   const [isDragging, setIsDragging] = useState(false);
   const dragRef = useRef<{ startY: number; startSheetY: number } | null>(null);
   const [isMobile, setIsMobile] = useState(false);
@@ -174,7 +528,6 @@ export default function OnxShell({
   const mobileDetailDragRef = useRef<{ startY: number } | null>(null);
 
   const [selectedGeojson, setSelectedGeojson] = useState<GeoJSON.GeoJSON | null>(null);
-  const [riverLinesGeojson, setRiverLinesGeojson] = useState<GeoJSON.FeatureCollection | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
 
   const [openTopPanel, setOpenTopPanel] = useState<TopPanel>("none");
@@ -185,11 +538,14 @@ export default function OnxShell({
   const [historyRows, setHistoryRows] = useState<
     Array<{ obs_date: string; flow_cfs: number | null; water_temp_f: number | null; fishability_score: number | null }>
   >([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
+  const [, setHistoryLoading] = useState(false);
   const [intradayRows, setIntradayRows] = useState<
     Array<{ observed_at: string; flow_cfs: number | null; water_temp_f: number | null; gage_height_ft: number | null }>
   >([]);
-  const [intradayLoading, setIntradayLoading] = useState(false);
+  const [, setIntradayLoading] = useState(false);
+  const [weatherRows, setWeatherRows] = useState<RiverWeatherDay[]>([]);
+  const [sourceSites, setSourceSites] = useState<Record<string, RiverSourceSiteSummary>>({});
+  const [backendAnalytics, setBackendAnalytics] = useState<RiverDetailAnalyticsBackendRow | null>(null);
 
   const [basemap, setBasemap] = useState<BasemapId>("hybrid");
   const [layerState, setLayerState] = useState<Record<LayerId, boolean>>(
@@ -236,32 +592,29 @@ export default function OnxShell({
     );
   }, [filtered, rivers, selectedId]);
 
-  const seasonalIntel = useMemo(() => getSeasonalIntel(), []);
   const breakdown = useMemo(() => (selected ? deriveScoreBreakdown(selected) : null), [selected]);
   const selectedFishIndex = useMemo(
     () => getFishabilityIndex(selected?.fishability_score_calc ?? null),
     [selected]
   );
   const todaysRead = useMemo(() => generateTodaysRead(selected), [selected]);
-  const flags = useMemo(() => riskFlags(selected), [selected]);
-  const thermalSummary = useMemo(
-    () => summarizeThermalWindow(selected, intradayRows),
-    [selected, intradayRows]
-  );
-  const hatchIntel = useMemo(
-    () => generateHatchIntel(selected, thermalSummary),
-    [selected, thermalSummary]
+  const detailedAnalytics = useMemo(
+    () =>
+      buildRiverDetailAnalytics({
+        river: selected,
+        historyRows,
+        intradayRows,
+        weatherRows,
+        flowSourceSite: selected?.flow_source_site_no ? sourceSites[selected.flow_source_site_no] ?? null : null,
+        tempSourceSite: selected?.temp_source_site_no ? sourceSites[selected.temp_source_site_no] ?? null : null,
+        backendAnalytics,
+      }),
+    [selected, historyRows, intradayRows, weatherRows, sourceSites, backendAnalytics]
   );
   const topRivers = useMemo(
     () => filtered.filter((r) => (r.fishability_score_calc ?? null) != null).slice(0, 5),
     [filtered]
   );
-  const hatchLikelihood = useMemo(() => {
-    if (seasonalIntel.season === "Summer") return "High";
-    if (seasonalIntel.season === "Spring" || seasonalIntel.season === "Fall") return "Moderate";
-    return "Low";
-  }, [seasonalIntel.season]);
-
   const latestPullAt = useMemo(() => {
     let latestMs = 0;
     for (const r of rivers) {
@@ -315,84 +668,6 @@ export default function OnxShell({
       cancelled = true;
     };
   }, [selectedId, filtered, rivers]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadRiverLines() {
-      const tasks = rivers.map(async (river) => {
-        const key = river.slug ?? river.river_id;
-        const gj = await fetchRiverGeojsonBrowser(key);
-        if (!gj) return null;
-        return { river, gj };
-      });
-
-      const results = await Promise.all(tasks);
-      if (cancelled) return;
-
-      const features: GeoJSON.Feature[] = [];
-      for (const item of results) {
-        if (!item?.gj) continue;
-        const rid = item.river.river_id;
-        const rname = item.river.river_name;
-
-        if (item.gj.type === "FeatureCollection") {
-          for (const f of item.gj.features ?? []) {
-            if (!f?.geometry) continue;
-            features.push({
-              type: "Feature",
-              geometry: f.geometry,
-              properties: {
-                ...(f.properties ?? {}),
-                river_id: rid,
-                river_name: rname,
-                name: rname,
-              },
-            });
-          }
-          continue;
-        }
-
-        if (item.gj.type === "Feature") {
-          if (item.gj.geometry) {
-            features.push({
-              type: "Feature",
-              geometry: item.gj.geometry,
-              properties: {
-                ...(item.gj.properties ?? {}),
-                river_id: rid,
-                river_name: rname,
-                name: rname,
-              },
-            });
-          }
-          continue;
-        }
-
-        if (item.gj.type === "LineString" || item.gj.type === "MultiLineString") {
-          features.push({
-            type: "Feature",
-            geometry: item.gj,
-            properties: {
-              river_id: rid,
-              river_name: rname,
-              name: rname,
-            },
-          });
-        }
-      }
-
-      setRiverLinesGeojson({ type: "FeatureCollection", features });
-    }
-
-    loadRiverLines().catch(() => {
-      if (!cancelled) setRiverLinesGeojson({ type: "FeatureCollection", features: [] });
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [rivers]);
 
   function setMobileSurfaceState(next: MobileSurface, opts?: { listSnap?: MobileListSnap }) {
     setOpenTopPanel("none");
@@ -448,6 +723,30 @@ export default function OnxShell({
 
   useEffect(() => {
     let cancelled = false;
+    async function loadBackendAnalytics() {
+      if (!selected?.river_id) {
+        setBackendAnalytics(null);
+        return;
+      }
+      const data =
+        (await fetchRiverDetailAnalyticsByIdOrSlug(selected.river_id)) ??
+        (selected.slug ? await fetchRiverDetailAnalyticsByIdOrSlug(selected.slug) : null);
+      if (!cancelled) {
+        setBackendAnalytics(data);
+      }
+    }
+    loadBackendAnalytics().catch(() => {
+      if (!cancelled) {
+        setBackendAnalytics(null);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.river_id, selected?.slug]);
+
+  useEffect(() => {
+    let cancelled = false;
     async function loadHistory() {
       if (!selected?.river_id) {
         setHistoryRows([]);
@@ -495,6 +794,42 @@ export default function OnxShell({
       cancelled = true;
     };
   }, [selected?.river_id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadWeatherAndSites() {
+      if (!selected?.river_id) {
+        setWeatherRows([]);
+        setSourceSites({});
+        return;
+      }
+
+      const [weather, sites] = await Promise.all([
+        fetchRiverWeatherWindow(selected.river_id),
+        fetchUsgsSiteSummaries(
+          [selected.flow_source_site_no, selected.temp_source_site_no].filter(
+            (value): value is string => Boolean(value)
+          )
+        ),
+      ]);
+
+      if (!cancelled) {
+        setWeatherRows(weather);
+        setSourceSites(sites);
+      }
+    }
+
+    loadWeatherAndSites().catch(() => {
+      if (!cancelled) {
+        setWeatherRows([]);
+        setSourceSites({});
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.river_id, selected?.flow_source_site_no, selected?.temp_source_site_no]);
 
   useEffect(() => {
     try {
@@ -598,9 +933,11 @@ export default function OnxShell({
 
   function recenter() {
     mapRef.current?.flyTo?.({
-      center: [-110.9, 46.9],
-      zoom: 5.2,
+      center: [-109.75, 47.05],
+      zoom: 6.15,
       duration: 450,
+      pitch: 14,
+      bearing: 0,
       essential: true,
     });
   }
@@ -771,7 +1108,7 @@ export default function OnxShell({
           selectedRiverName={selected?.river_name ?? null}
           selectedRiverId={selectedId}
           selectedRiverGeojson={selectedGeojson}
-          riverLinesGeojson={riverLinesGeojson}
+          riverLinesGeojson={initialRiverLinesGeojson ?? null}
           activeStationsGeojson={stationGeojson ?? null}
           basemap={basemap}
           layerState={layerState}
@@ -786,30 +1123,30 @@ export default function OnxShell({
         />
       </div>
 
-      <aside className="absolute left-4 top-4 z-20 hidden w-[86px] sm:block">
-        <div className="onx-glass overflow-hidden rounded-2xl">
-          <div className="border-b border-white/10 px-3 py-3">
-            <div className="text-sm font-semibold leading-tight text-white">MRI</div>
-            <div className="text-[10px] leading-tight text-white/70">Montana</div>
+      <aside className="absolute left-4 top-4 z-20 hidden w-[68px] sm:block">
+        <div className="mri-control-strip overflow-hidden rounded-[20px]">
+          <div className="border-b border-white/8 px-3 py-2.5">
+            <div className="text-[15px] font-semibold leading-tight text-white">MRI</div>
+            <div className="text-[9px] uppercase tracking-[0.18em] text-white/56">Montana</div>
           </div>
-          <div className="flex flex-col gap-2 p-2">
-            <button className="onx-iconbtn" title="Layers" onClick={() => toggleTopPanel("layers")}>
+          <div className="flex flex-col gap-1.5 p-2">
+            <button className="onx-iconbtn mri-railbtn" title="Layers" onClick={() => toggleTopPanel("layers")}>
               <Layers size={18} strokeWidth={2.5} />
             </button>
-            <button className="onx-iconbtn" title="Zoom in" onClick={zoomIn}>
-              <Plus size={18} strokeWidth={2.5} />
+            <button className="onx-iconbtn mri-railbtn" title="Zoom in" onClick={zoomIn}>
+              <Plus size={16} strokeWidth={2.5} />
             </button>
-            <button className="onx-iconbtn" title="Zoom out" onClick={zoomOut}>
-              <Minus size={18} strokeWidth={2.5} />
+            <button className="onx-iconbtn mri-railbtn" title="Zoom out" onClick={zoomOut}>
+              <Minus size={16} strokeWidth={2.5} />
             </button>
-            <button className="onx-iconbtn" title="Fit to rivers" onClick={fitToRivers}>
-              <Maximize2 size={18} strokeWidth={2.5} />
+            <button className="onx-iconbtn mri-railbtn" title="Fit to rivers" onClick={fitToRivers}>
+              <Maximize2 size={16} strokeWidth={2.5} />
             </button>
-            <button className="onx-iconbtn" title="Recenter Montana" onClick={recenter}>
-              <Crosshair size={18} strokeWidth={2.5} />
+            <button className="onx-iconbtn mri-railbtn" title="Recenter Montana" onClick={recenter}>
+              <Crosshair size={16} strokeWidth={2.5} />
             </button>
             <button
-              className="onx-iconbtn"
+              className="onx-iconbtn mri-railbtn"
               title="Toggle list"
               onClick={() => {
                 const next = drawerSnap === "collapsed" ? "mid" : "collapsed";
@@ -817,7 +1154,7 @@ export default function OnxShell({
                 setSheetY(DRAWER_SNAP_Y[next]);
               }}
             >
-              <List size={18} strokeWidth={2.5} />
+              <List size={16} strokeWidth={2.5} />
             </button>
           </div>
         </div>
@@ -830,37 +1167,42 @@ export default function OnxShell({
         </div>
       </header>
 
-      <header className="absolute left-4 right-4 top-4 z-20 hidden sm:block sm:left-[108px] sm:right-[340px]">
-        <div className="onx-glass rounded-2xl px-4 py-2">
+      <header className="absolute left-4 right-4 top-4 z-20 hidden sm:block sm:left-[96px] sm:right-[394px]">
+        <div className="mri-control-strip rounded-[22px] px-3 py-2.5">
           <div className="flex items-center gap-3">
-            <div className="hidden shrink-0 text-xs font-medium text-white/84 sm:block">
-              {dateLabel} • {filtered.length} rivers
+            <div className="hidden min-w-[184px] shrink-0 lg:block">
+              <div className="text-[9px] font-semibold uppercase tracking-[0.18em] text-white/42">Montana River Intelligence</div>
+              <div className="mt-0.5 text-[12px] text-white/72">{dateLabel} • {filtered.length} rivers • Last pull {formatPullTime(latestPullAt)} MT</div>
             </div>
-            <div className="hidden shrink-0 text-[11px] text-white/52 lg:block">
-              Last pull {formatPullTime(latestPullAt)} MT
-            </div>
-            <div className="flex-1">
+            <div className="flex-1 rounded-2xl border border-white/8 bg-black/12 px-3 py-2">
+              <div className="text-[9px] font-semibold uppercase tracking-[0.16em] text-white/34">River Search</div>
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search rivers..."
-                className="mri-topbar-input"
+                placeholder="Search Montana rivers..."
+                className="mt-0.5 mri-topbar-input"
               />
             </div>
-            <button
-              className="rounded-md px-2 py-1 text-xs text-white/66 hover:text-white/92"
-              onClick={() => {
-                setSearch("");
-                setTier("All");
-                selectRiver(null);
-              }}
-            >
-              Reset
-            </button>
+            <div className="hidden shrink-0 sm:block">
+              <div className="text-right text-[10px] leading-tight text-white/45">Status</div>
+              <div className="mt-0.5 text-right text-[11px] font-medium text-white/76">Focused on Montana</div>
+            </div>
+            <div className="shrink-0">
+              <button
+                className="rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-[11px] font-medium text-white/62 transition hover:border-white/18 hover:text-white/88"
+                onClick={() => {
+                  setSearch("");
+                  setTier("All");
+                  selectRiver(null);
+                }}
+              >
+                Reset
+              </button>
+            </div>
           </div>
         </div>
 
-        <div className="mt-2 flex flex-wrap gap-2">
+        <div className="mt-2 flex flex-wrap gap-1.5">
           {(["All", "Good", "Fair", "Tough"] as const).map((t) => (
             <button
               key={t}
@@ -875,11 +1217,11 @@ export default function OnxShell({
 
       <div className="absolute right-4 top-4 z-30 hidden items-start gap-2 sm:flex">
         <button
-          className={`onx-iconbtn ${layersOpen ? "ring-2 ring-white/20" : ""}`}
+          className={`onx-iconbtn mri-railbtn ${layersOpen ? "ring-2 ring-white/20" : ""}`}
           title="Layers"
           onClick={() => toggleTopPanel("layers")}
         >
-          <Layers size={18} strokeWidth={2.5} />
+          <Layers size={16} strokeWidth={2.5} />
         </button>
 
         <div
@@ -1031,12 +1373,13 @@ export default function OnxShell({
         </button>
       </div>
 
-      <section className="absolute right-4 top-[118px] z-20 hidden w-[314px] sm:block">
+      <section className="absolute right-4 top-[108px] z-20 hidden w-[360px] sm:block">
         {detailsOpen ? (
-          <div className="onx-card rounded-3xl p-6 transition-all duration-150 ease-in-out">
+          <div className="onx-card max-h-[calc(100vh-132px)] overflow-hidden rounded-[28px] p-5 transition-all duration-150 ease-in-out">
             <div className="flex items-center justify-between">
-              <div className="text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--mri-text-dim)]">
-                River Detail
+              <div>
+                <div className="mri-surface-label">Instrument Panel</div>
+                <div className="mt-1 text-[13px] font-medium text-white/76">Selected river intelligence</div>
               </div>
               <button
                 className="text-[11px] text-[var(--mri-text-dim)] hover:text-[var(--mri-text-muted)]"
@@ -1048,20 +1391,24 @@ export default function OnxShell({
 
             {selected ? (
               <>
-                <div className="mt-3 space-y-5">
+                <div className="mri-scroll mt-3 max-h-[calc(100vh-220px)] overflow-auto pr-1">
+                <div className="space-y-5">
                   <div>
-                    <div className="text-[18px] font-semibold text-[var(--mri-text)]">{selected.river_name}</div>
-                    <div className="mt-1 text-xs text-[var(--mri-text-muted)]">{selected.gauge_label ?? ""}</div>
-                    <div className="mt-1 text-[11px] text-[var(--mri-text-dim)]">
+                    <div className="text-[24px] font-semibold tracking-[-0.02em] text-[var(--mri-text)]">{selected.river_name}</div>
+                    <div className="mt-1 text-[12px] text-[var(--mri-text-muted)]">{selected.gauge_label ?? ""}</div>
+                    <div className="mt-2 text-[11px] text-[var(--mri-text-dim)]">
                       {formatUpdatedAgo(selected.source_flow_observed_at ?? selected.source_temp_observed_at ?? selected.updated_at)}
                     </div>
                   </div>
 
-                  <div>
-                    <div className="text-[56px] font-semibold leading-none tracking-[-0.02em] text-[var(--mri-text)]">
-                      {selected.fishability_score_calc ?? "—"}
-                    </div>
-                    <div className="mt-2">
+                  <div className="rounded-[22px] border border-[rgba(180,198,209,0.12)] bg-[rgba(18,27,31,0.72)] p-4">
+                    <div className="flex items-end justify-between gap-4">
+                      <div>
+                        <div className="mri-surface-label">Fishability Score</div>
+                        <div className="mt-2 text-[64px] font-semibold leading-none tracking-[-0.03em] text-[var(--mri-text)]">
+                          {selected.fishability_score_calc ?? "—"}
+                        </div>
+                      </div>
                       <TierPill
                         tier={
                           selected.bite_tier === "HOT" || selected.bite_tier === "GOOD"
@@ -1076,8 +1423,9 @@ export default function OnxShell({
                     </div>
                   </div>
 
-                  <div className="text-[12px] leading-5 text-[var(--mri-text-muted)]">
-                    <span className="font-medium text-[var(--mri-text)]">Today&apos;s Read:</span> {todaysRead}
+                  <div className="rounded-[20px] border border-[rgba(180,198,209,0.1)] bg-[rgba(17,25,28,0.62)] px-4 py-3 text-[12px] leading-5 text-[var(--mri-text-muted)]">
+                    <span className="font-medium text-[var(--mri-text)]">Today&apos;s Read</span>
+                    <div className="mt-1">{todaysRead}</div>
                   </div>
 
                   <div className="rounded-xl border border-[var(--mri-border)] bg-[rgba(23,34,40,0.64)] p-3">
@@ -1108,28 +1456,33 @@ export default function OnxShell({
                     </div>
                   </div>
 
-                  <div className="space-y-3 border-t border-[var(--mri-border)] pt-4">
-                    <div>
-                      <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--mri-text-dim)]">Flow</div>
-                      <div className="mt-0.5 text-base font-medium text-[var(--mri-text)]">
+                  <div className="grid grid-cols-2 gap-3 border-t border-[var(--mri-border)] pt-4">
+                    <div className="rounded-[18px] border border-[rgba(180,198,209,0.08)] bg-[rgba(16,24,27,0.56)] p-3">
+                      <div className="text-[10px] uppercase tracking-[0.1em] text-[var(--mri-text-dim)]">Flow</div>
+                      <div className="mt-1 text-[17px] font-medium text-[var(--mri-text)]">
                         {selected.flow_cfs ?? "Flow not available at this gauge"}
                         <span className="ml-1 text-xs text-[var(--mri-text-dim)]">
                           {getFlowTrendArrow(selected.change_48h_pct_calc)}
                         </span>
                       </div>
                     </div>
-                    <div>
-                      <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--mri-text-dim)]">Temp</div>
-                      <div className="mt-0.5 text-base font-medium text-[var(--mri-text)]">
+                    <div className="rounded-[18px] border border-[rgba(180,198,209,0.08)] bg-[rgba(16,24,27,0.56)] p-3">
+                      <div className="text-[10px] uppercase tracking-[0.1em] text-[var(--mri-text-dim)]">Temp</div>
+                      <div className="mt-1 text-[17px] font-medium text-[var(--mri-text)]">
                         {selected.water_temp_f != null
                           ? `${Number(selected.water_temp_f).toFixed(1)}°F`
                           : "Temp not available at this gauge"}
+                      </div>
+                      <div className="mt-1 text-[10px] leading-4 text-[var(--mri-text-dim)]">
+                        {selected.temp_observed_at
+                          ? `Observed ${formatPullTime(selected.temp_observed_at)} MT`
+                          : selected.temp_reason ?? "No observed water temperature"}
                       </div>
                     </div>
                   </div>
 
                   <button
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50"
+                    className="w-full rounded-xl border border-[var(--mri-border)] bg-[rgba(20,29,32,0.72)] px-3 py-2 text-left text-xs font-medium text-[var(--mri-text-muted)] hover:bg-[rgba(26,37,43,0.82)]"
                     onClick={() => setDetailMetricsOpen((v) => !v)}
                   >
                     {detailMetricsOpen ? "Hide Detailed Metrics" : "Detailed Metrics"}
@@ -1137,114 +1490,7 @@ export default function OnxShell({
 
                   {detailMetricsOpen ? (
                     <div className="space-y-4 border-t border-[var(--mri-border)] pt-4 text-xs text-[var(--mri-text-muted)]">
-                      <div className="flex items-center gap-2 text-[11px]">
-                        <span
-                          className={[
-                            "rounded-full border px-2 py-0.5",
-                            selected.temp_status === "available_fresh"
-                              ? "border-[rgba(110,150,125,0.4)] bg-[rgba(79,103,87,0.2)] text-[#b4ccb9]"
-                              : selected.temp_status === "available_stale"
-                              ? "border-[rgba(176,112,63,0.42)] bg-[rgba(176,112,63,0.2)] text-[#d7b089]"
-                              : "border-[var(--mri-border)] bg-[rgba(21,31,35,0.7)] text-[var(--mri-text-dim)]",
-                          ].join(" ")}
-                        >
-                          {getTempStatusLabel(selected)}
-                        </span>
-                        <span className="text-[var(--mri-text-dim)]">{getTempSourceLabel(selected)}</span>
-                      </div>
-
-                      {flags.length ? (
-                        <div className="flex flex-wrap gap-1.5">
-                          {flags.map((flag) => (
-                            <span
-                              key={flag}
-                              className="rounded-full border border-[var(--mri-border)] bg-[rgba(21,31,35,0.7)] px-2 py-0.5 text-[10px] font-medium text-[var(--mri-text-dim)]"
-                            >
-                              {flag}
-                            </span>
-                          ))}
-                        </div>
-                      ) : null}
-
-                      <div className="space-y-2 text-[11px] text-[var(--mri-text-dim)]">
-                        <div>
-                          {selected.fishability_rank != null && filtered.length > 0
-                            ? `Rank ${selected.fishability_rank} / ${filtered.length}`
-                            : "Rank unavailable"}
-                        </div>
-                        <div>
-                          {selected.fishability_percentile != null
-                            ? `Top ${Math.max(1, Math.round(100 - Number(selected.fishability_percentile)))}%`
-                            : "Percentile unavailable"}
-                        </div>
-                        <div>
-                          Stability:{" "}
-                          {selected.change_48h_pct_calc == null
-                            ? "—"
-                            : `${Number(selected.change_48h_pct_calc).toFixed(1)}% 48h`}
-                        </div>
-                        <div>
-                          Ratio: {selected.flow_ratio_calc != null ? `${Number(selected.flow_ratio_calc).toFixed(2)}x` : "—"}
-                        </div>
-                        <div>Hatch likelihood: {hatchLikelihood}</div>
-                        <div>Wind AM {selected.wind_am_mph ?? "—"} • PM {selected.wind_pm_mph ?? "—"}</div>
-                      </div>
-
-                      <div className="text-[11px] text-[var(--mri-text-dim)]">
-                        Flow source:{" "}
-                        {selected.source_flow_observed_at
-                          ? `${formatPullTime(selected.source_flow_observed_at)} MT`
-                          : "Flow not available at this gauge"}
-                      </div>
-                      <div className="text-[11px] text-[var(--mri-text-dim)]">
-                        Temp source: {getTempSourceLabel(selected)}
-                        {selected.source_temp_observed_at ? ` • ${formatPullTime(selected.source_temp_observed_at)} MT` : ""}
-                      </div>
-
-                      <div>
-                        <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)]">
-                          Water Temp Window (24h)
-                        </div>
-                        {intradayLoading ? (
-                          <div className="mt-2 text-xs text-[var(--mri-text-dim)]">Loading intraday thermal...</div>
-                        ) : (
-                          <div className="mt-2 space-y-1.5">
-                            <div className="text-xs text-[var(--mri-text-muted)]">{thermalSummary.windowLabel}</div>
-                            <Sparkline
-                              className="h-12 w-full"
-                              stroke="#6b7280"
-                              values={intradayRows.map((x) => x.water_temp_f)}
-                            />
-                          </div>
-                        )}
-                      </div>
-
-                      <div>
-                        <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)]">
-                          Trend (14D)
-                        </div>
-                        {historyLoading ? (
-                          <div className="mt-2 text-xs text-[var(--mri-text-dim)]">Loading trend...</div>
-                        ) : (
-                          <div className="mt-2 space-y-2">
-                            <Sparkline
-                              className="h-12 w-full"
-                              stroke={MRI_COLORS.riverSelected}
-                              values={historyRows.slice().reverse().map((x) => x.flow_cfs)}
-                            />
-                            <Sparkline
-                              className="h-12 w-full"
-                              stroke="#6b7280"
-                              values={historyRows.slice().reverse().map((x) => x.water_temp_f)}
-                            />
-                            <Sparkline
-                              className="h-12 w-full"
-                              stroke={MRI_COLORS.good}
-                              values={historyRows.slice().reverse().map((x) => x.fishability_score)}
-                            />
-                          </div>
-                        )}
-                      </div>
+                      <DetailedMetricsContent analytics={detailedAnalytics} />
 
                       <button
                         className="w-full rounded-lg border border-[var(--mri-border)] bg-[rgba(21,31,35,0.74)] px-2 py-1.5 text-left text-xs font-medium text-[var(--mri-text)] hover:bg-[rgba(26,37,43,0.82)]"
@@ -1276,6 +1522,7 @@ export default function OnxShell({
                     </div>
                   ) : null}
                 </div>
+                </div>
               </>
             ) : (
               <>
@@ -1288,10 +1535,10 @@ export default function OnxShell({
           </div>
         ) : (
           <button
-            className="onx-glass rounded-xl px-3 py-2 text-xs font-medium text-white/90 transition-colors duration-150 ease-in-out hover:text-white active:translate-y-[1px]"
+            className="mri-control-strip rounded-full px-3.5 py-2 text-[11px] font-medium text-white/86 transition-colors duration-150 ease-in-out hover:text-white active:translate-y-[1px]"
             onClick={() => setOpenTopPanel("detail")}
           >
-            Details
+            Open Detail Panel
           </button>
         )}
       </section>
@@ -1378,18 +1625,28 @@ export default function OnxShell({
                   {formatUpdatedAgo(selected.source_flow_observed_at ?? selected.source_temp_observed_at ?? selected.updated_at)}
                 </div>
                 <div className="mt-2">
-                  <span
-                    className={[
-                      "inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium",
-                      selected.temp_status === "available_fresh"
-                        ? "border-[rgba(110,150,125,0.4)] bg-[rgba(79,103,87,0.2)] text-[#b4ccb9]"
-                        : selected.temp_status === "available_stale"
-                        ? "border-[rgba(176,112,63,0.42)] bg-[rgba(176,112,63,0.2)] text-[#d7b089]"
-                        : "border-[var(--mri-border)] bg-[rgba(21,31,35,0.7)] text-[var(--mri-text-dim)]",
-                    ].join(" ")}
-                  >
-                    {getTempStatusLabel(selected)}
-                  </span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className={[
+                        "inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                        selected.temp_status === "available_fresh"
+                          ? "border-[rgba(110,150,125,0.4)] bg-[rgba(79,103,87,0.2)] text-[#b4ccb9]"
+                          : selected.temp_status === "available_stale"
+                          ? "border-[rgba(176,112,63,0.42)] bg-[rgba(176,112,63,0.2)] text-[#d7b089]"
+                          : "border-[var(--mri-border)] bg-[rgba(21,31,35,0.7)] text-[var(--mri-text-dim)]",
+                      ].join(" ")}
+                    >
+                      {getTempStatusLabel(selected)}
+                    </span>
+                    <span
+                      className={[
+                        "inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                        getConfidenceBadgeClass(selected.confidence_level ?? null),
+                      ].join(" ")}
+                    >
+                      {getConfidenceBadgeLabel(selected)}
+                    </span>
+                  </div>
                 </div>
                 <div className="mt-4 text-[56px] font-semibold leading-none tracking-[-0.02em] text-[var(--mri-text)]">
                   {selected.fishability_score_calc ?? "—"}
@@ -1452,6 +1709,11 @@ export default function OnxShell({
                         ? `${Number(selected.water_temp_f).toFixed(1)}°F`
                         : "Temp not available at this gauge"}
                     </div>
+                    <div className="mt-1 text-[10px] text-[var(--mri-text-dim)]">
+                      {selected.temp_observed_at
+                        ? `Observed ${formatPullTime(selected.temp_observed_at)} MT`
+                        : selected.temp_reason ?? "No observed water temperature"}
+                    </div>
                   </div>
                 </div>
 
@@ -1464,32 +1726,7 @@ export default function OnxShell({
 
                 {mobileDetailMetricsOpen ? (
                   <div className="mt-4 space-y-3 border-t border-[var(--mri-border)] pt-4 text-xs text-[var(--mri-text-muted)]">
-                    <div>{getTempStatusLabel(selected)}</div>
-                    <div>{getTempSourceLabel(selected)}</div>
-                    <div>
-                      Ratio: {selected.flow_ratio_calc != null ? `${Number(selected.flow_ratio_calc).toFixed(2)}x` : "—"}
-                    </div>
-                    <div>
-                      Stability: {selected.change_48h_pct_calc == null ? "—" : `${Number(selected.change_48h_pct_calc).toFixed(1)}%`}
-                    </div>
-                    <div>
-                      Rank:{" "}
-                      {selected.fishability_rank != null && filtered.length > 0
-                        ? `${selected.fishability_rank} / ${filtered.length}`
-                        : "Unavailable"}
-                    </div>
-                    {flags.length > 0 ? (
-                      <div className="flex flex-wrap gap-1.5">
-                        {flags.map((flag) => (
-                          <span
-                            key={`mf-${flag}`}
-                            className="rounded-full border border-[var(--mri-border)] bg-[rgba(20,29,32,0.72)] px-2 py-0.5 text-[10px] font-medium text-[var(--mri-text-dim)]"
-                          >
-                            {flag}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
+                    <DetailedMetricsContent analytics={detailedAnalytics} />
                   </div>
                 ) : null}
               </>
@@ -1603,11 +1840,7 @@ export default function OnxShell({
                         <div><div className="mri-kv-label">Flow</div><div className="font-semibold">{r.flow_cfs ?? "—"}</div></div>
                         <div><div className="mri-kv-label">Temp</div><div className="font-semibold">{r.water_temp_f != null ? `${Number(r.water_temp_f).toFixed(1)}°` : "—"}</div></div>
                       </div>
-                      {r.temp_status === "available_stale" ? (
-                        <div className="mt-1 text-[10px] text-amber-300">Temp stale</div>
-                      ) : r.temp_status === "unavailable_at_gauge" ? (
-                        <div className="mt-1 text-[10px] text-white/60">No temp at this gauge</div>
-                      ) : null}
+                      <div className="mt-2 text-[10px] font-medium tracking-[0.01em] text-white/58">{getRiverTrustLine(r)}</div>
                     </div>
                   </button>
                 ))}
@@ -1620,12 +1853,12 @@ export default function OnxShell({
       <div
         className="absolute bottom-0 left-0 right-0 z-10 hidden sm:block"
         style={{
-          transform: `translateY(${sheetY * 78}%)`,
+          transform: `translateY(${sheetY * 92}%)`,
           transition: isDragging ? "none" : SNAP_TRANSITION,
         }}
       >
-        <div className={`mx-auto max-w-6xl px-3 pb-3 ${detailsOpen ? "sm:pr-[340px]" : ""}`}>
-          <div className="onx-glass overflow-hidden rounded-3xl">
+        <div className={`mx-auto max-w-6xl px-3 pb-3 ${detailsOpen ? "sm:pr-[384px]" : ""}`}>
+          <div className="mri-control-strip overflow-hidden rounded-[28px]">
             <div
               className={`mx-auto mt-2 h-1.5 w-14 flex-shrink-0 cursor-grab rounded-full bg-white/45 ring-1 ring-white/35 active:cursor-grabbing ${isDragging ? "select-none" : ""}`}
               onPointerDown={onSheetPointerDown}
@@ -1634,31 +1867,31 @@ export default function OnxShell({
               style={{ touchAction: "none" }}
             />
             <div className="flex items-center justify-between px-4 pt-3">
-              <div className="text-sm font-semibold text-white">Rivers ({filtered.length})</div>
+              <div>
+                <div className="mri-surface-label">Top Rivers Today</div>
+                <div className="mt-1 text-[13px] font-medium text-white/82">Fast scan of Montana conditions</div>
+              </div>
               <button
-                className="text-xs text-white/80 hover:text-white"
+                className="rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-[11px] font-medium text-white/72 transition hover:border-white/18 hover:text-white"
                 onClick={() => {
                   const next = drawerSnap === "collapsed" ? "mid" : "collapsed";
                   setDrawerSnap(next);
                   setSheetY(DRAWER_SNAP_Y[next]);
                 }}
               >
-                {drawerSnap === "collapsed" ? "Expand" : "Collapse"}
+                {drawerSnap === "collapsed" ? "Open Tray" : "Collapse"}
               </button>
             </div>
 
             {topRivers.length > 0 ? (
               <div className="px-4 pt-2">
-                <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/60">
-                  Top Rivers Today
-                </div>
-                <div className="flex gap-2 overflow-auto pb-1">
+                <div className="flex gap-1.5 overflow-auto pb-1">
                   {topRivers.map((r) => (
                     <button
                       key={`top-${r.river_id}`}
                       onClick={() => selectRiver(r.river_id)}
                       className={[
-                        "min-h-11 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs transition active:translate-y-[1px]",
+                        "whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] transition active:translate-y-[1px]",
                         r.river_id === selectedId
                           ? "border-white/50 bg-white/20 text-white"
                           : "border-white/20 bg-white/10 text-white/85 hover:bg-white/15",
@@ -1677,72 +1910,17 @@ export default function OnxShell({
                   drawerSnap === "expanded" ? "overflow-auto" : "overflow-hidden"
                 }`}
                 style={{
-                  maxHeight: drawerSnap === "expanded" ? "65vh" : drawerSnap === "mid" ? "40vh" : "80px",
+                  maxHeight: drawerSnap === "expanded" ? "34vh" : drawerSnap === "mid" ? "17vh" : "96px",
                 }}
               >
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="flex gap-2 overflow-auto pb-1">
                   {filtered.map((r) => (
-                    <button
+                    <DesktopTrayCard
                       key={r.river_id}
-                      onClick={() => selectRiver(r.river_id)}
-                      className={`mri-drawer-card text-left active:translate-y-[1px] ${r.river_id === selectedId ? "mri-drawer-card-selected" : ""}`}
-                    >
-                      <div className="p-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="flex items-center gap-1.5">
-                              <div className="text-sm font-semibold text-white">{r.river_name}</div>
-                              {r.is_stale ? (
-                                <span
-                                  className="h-2 w-2 rounded-full"
-                                  title={r.stale_reason ?? "Stale"}
-                                  style={{ backgroundColor: MRI_COLORS.fair, opacity: 0.9 }}
-                                />
-                              ) : null}
-                            </div>
-                            <div className="text-xs text-white/60">{r.gauge_label ?? ""}</div>
-                          </div>
-                          <TierPill
-                            tier={
-                              r.bite_tier === "HOT" || r.bite_tier === "GOOD"
-                                ? "Good"
-                                : r.bite_tier === "FAIR"
-                                ? "Fair"
-                                : r.bite_tier === "TOUGH"
-                                ? "Tough"
-                                : undefined
-                            }
-                          />
-                        </div>
-
-                        <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-white/88">
-                          <div>
-                            <div className="mri-kv-label">Score</div>
-                            <div className="font-semibold">{r.fishability_score_calc ?? "—"}</div>
-                          </div>
-                          <div>
-                            <div className="mri-kv-label">Flow</div>
-                            <div className="font-semibold">
-                              {r.flow_cfs ?? "—"}
-                              <span className="ml-1 text-[11px] font-medium text-white/60">
-                                {getFlowTrendArrow(r.change_48h_pct_calc)}
-                              </span>
-                            </div>
-                          </div>
-                          <div>
-                            <div className="mri-kv-label">Temp</div>
-                            <div className="font-semibold">
-                              {r.water_temp_f != null ? `${Number(r.water_temp_f).toFixed(1)}°` : "—"}
-                            </div>
-                          </div>
-                        </div>
-                        {r.temp_status === "available_stale" ? (
-                          <div className="mt-1 text-[10px] text-amber-300">Temp stale</div>
-                        ) : r.temp_status === "unavailable_at_gauge" ? (
-                          <div className="mt-1 text-[10px] text-white/60">No temp at this gauge</div>
-                        ) : null}
-                      </div>
-                    </button>
+                      river={r}
+                      selected={r.river_id === selectedId}
+                      onSelect={() => selectRiver(r.river_id)}
+                    />
                   ))}
                 </div>
 

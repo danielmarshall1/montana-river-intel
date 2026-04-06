@@ -22,6 +22,7 @@ type RiverRoleMapRow = {
   site_no: string;
   priority: number | null;
   is_active: boolean | null;
+  updated_at: string | null;
 };
 
 type RiverStationConfigRow = {
@@ -373,14 +374,21 @@ serve(async (req) => {
 
   const roleMapResp = await sb
     .from("river_usgs_map_roles")
-    .select("river_id,role,site_no,priority,is_active")
+    .select("river_id,role,site_no,priority,is_active,updated_at")
     .eq("is_active", true);
 
   const roleMapByRiver = new Map<string, { flowSites: string[]; tempSites: string[]; stageSites: string[] }>();
   if (!roleMapResp.error && roleMapResp.data) {
     const sorted = (roleMapResp.data as RiverRoleMapRow[])
       .filter((row) => !!row.site_no)
-      .sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100));
+      .sort((a, b) => {
+        const byPriority = (a.priority ?? 100) - (b.priority ?? 100);
+        if (byPriority !== 0) return byPriority;
+        const aTs = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+        const bTs = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+        if (aTs !== bTs) return bTs - aTs;
+        return String(a.site_no).localeCompare(String(b.site_no));
+      });
     for (const row of sorted) {
       const rid = String(row.river_id ?? "");
       const siteNo = String(row.site_no ?? "").trim();
@@ -487,9 +495,14 @@ serve(async (req) => {
       let tempIsFresh = false;
       let hasTempIv = false;
       let hasTempDv = false;
+      let staleTempCandidate: {
+        value: number;
+        observedAt: string | null;
+        source: "IV" | "DV";
+        siteNo: string;
+      } | null = null;
 
       for (const candidate of tempCandidates) {
-        if (tempValue != null) break;
         try {
           const ivTempOnly = await fetchUSGSIv(candidate, "00010");
           if (ivTempOnly.parsed.hasTempSeries) hasTempIv = true;
@@ -507,15 +520,15 @@ serve(async (req) => {
               }
               break;
             }
-            if (tempValue == null) {
-              tempValue = ivTempOnly.parsed.waterTempF;
-              tempObservedAt = ivTempOnly.parsed.tempObservedAt;
-              tempSource = "IV";
-              selectedTempSiteNo = candidate;
-              tempReason = "temp_observation_stale_or_missing";
-              if (!mainIv.parameterCodes.includes("00010(TEMP_SITE_IV)")) {
-                mainIv.parameterCodes.push("00010(TEMP_SITE_IV)");
-              }
+            const obsMs = ivTempOnly.parsed.tempObservedAt ? new Date(ivTempOnly.parsed.tempObservedAt).getTime() : 0;
+            const staleMs = staleTempCandidate?.observedAt ? new Date(staleTempCandidate.observedAt).getTime() : 0;
+            if (!staleTempCandidate || obsMs > staleMs) {
+              staleTempCandidate = {
+                value: ivTempOnly.parsed.waterTempF,
+                observedAt: ivTempOnly.parsed.tempObservedAt,
+                source: "IV",
+                siteNo: candidate,
+              };
             }
           }
         } catch {
@@ -542,19 +555,36 @@ serve(async (req) => {
                 }
                 break;
               }
-              if (tempValue == null) {
-                tempValue = dvTemp.parsed.waterTempF;
-                tempObservedAt = dvTemp.parsed.observedAt;
-                tempSource = "DV";
-                selectedTempSiteNo = candidate;
-                tempReason = "temp_observation_stale_or_missing";
-                if (!mainIv.parameterCodes.includes("00010(TEMP_SITE_DV)")) {
-                  mainIv.parameterCodes.push("00010(TEMP_SITE_DV)");
-                }
+              const obsMs = dvTemp.parsed.observedAt ? new Date(dvTemp.parsed.observedAt).getTime() : 0;
+              const staleMs = staleTempCandidate?.observedAt ? new Date(staleTempCandidate.observedAt).getTime() : 0;
+              if (!staleTempCandidate || obsMs > staleMs) {
+                staleTempCandidate = {
+                  value: dvTemp.parsed.waterTempF,
+                  observedAt: dvTemp.parsed.observedAt,
+                  source: "DV",
+                  siteNo: candidate,
+                };
               }
             }
           } catch {
             // keep trying next temp candidate
+          }
+        }
+      }
+
+      if (!tempIsFresh && staleTempCandidate) {
+        tempValue = staleTempCandidate.value;
+        tempObservedAt = staleTempCandidate.observedAt;
+        tempSource = staleTempCandidate.source;
+        selectedTempSiteNo = staleTempCandidate.siteNo;
+        tempReason = "temp_observation_stale_or_missing";
+        if (staleTempCandidate.source === "IV") {
+          if (!mainIv.parameterCodes.includes("00010(TEMP_SITE_IV)")) {
+            mainIv.parameterCodes.push("00010(TEMP_SITE_IV)");
+          }
+        } else {
+          if (!mainIv.parameterCodes.includes("00010(TEMP_SITE_DV)")) {
+            mainIv.parameterCodes.push("00010(TEMP_SITE_DV)");
           }
         }
       }

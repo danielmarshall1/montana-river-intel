@@ -1,0 +1,4844 @@
+===== components/MapView.tsx =====
+"use client";
+
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import mapboxgl from "mapbox-gl";
+import "mapbox-gl/dist/mapbox-gl.css";
+import type { FishabilityRow, BiteTier } from "@/lib/types";
+import { RIVER_FOCUS_POINTS } from "@/lib/river-focus-points";
+import { MRI_COLORS } from "@/lib/theme";
+import { createDefaultLayerState, type BasemapId, type LayerId } from "@/src/map/layers/registry";
+import { MapControls } from "./MapControls";
+
+const MONTANA_CENTER: [number, number] = [-109.75, 47.05];
+const MONTANA_BOUNDS: [[number, number], [number, number]] = [
+  [-116.15, 44.25],
+  [-103.85, 49.2],
+];
+const DEFAULT_ZOOM = 6.15;
+const FLY_ZOOM = 9.5;
+const FLY_DURATION = 300;
+const FLY_CURVE = 1.5;
+
+const BITE_TIER_COLORS: Record<BiteTier, string> = {
+  HOT: MRI_COLORS.warning,
+  GOOD: MRI_COLORS.good,
+  FAIR: MRI_COLORS.fair,
+  TOUGH: MRI_COLORS.tough,
+};
+
+interface MapViewProps {
+  rivers: FishabilityRow[];
+  selectedRiver: FishabilityRow | null;
+  selectedRiverName?: string | null;
+  selectedRiverId: string | null;
+  selectedRiverGeojson: GeoJSON.GeoJSON | null;
+  riverLinesGeojson?: GeoJSON.FeatureCollection | null;
+  activeStationsGeojson?: GeoJSON.FeatureCollection<GeoJSON.Point, Record<string, unknown>> | null;
+  basemap?: BasemapId;
+  layerState?: Record<LayerId, boolean>;
+  rightPanelOpen?: boolean;
+  drawerState?: "collapsed" | "mid" | "expanded";
+  selectionSeq?: number;
+  onSelectRiver: (river: FishabilityRow) => void;
+  className?: string;
+  initialStyleUrl?: string;
+  onMapReady?: (map: mapboxgl.Map) => void;
+}
+
+const RIVERS_SOURCE = "rivers-source";
+const UNCLUSTERED_LAYER = "rivers-unclustered";
+const SELECTED_HALO_LAYER = "rivers-selected-halo";
+const SELECTED_CORE_LAYER = "rivers-selected-core";
+
+const ALL_RIVERS_SOURCE = "all-rivers-source";
+const RIVER_LABELS_SOURCE = "river-labels-source";
+const RIVER_HIT_LAYER = "rivers-hit";
+const RIVER_CASING_LAYER = "rivers-casing";
+const RIVER_BASE_LAYER = "rivers-base";
+const RIVER_SELECTED_LAYER = "rivers-selected";
+const RIVER_NAMES_LAYER = "river-labels";
+
+const STATEWIDE_HYDRO_SOURCE = "statewide-hydrology-source";
+const STATEWIDE_HYDRO_LAYER = "statewide-hydrology-line";
+
+const FEDERAL_LANDS_SOURCE = "public-lands-federal-source";
+const FEDERAL_LANDS_LAYER = "public-lands-federal-layer";
+const STATE_LANDS_SOURCE = "public-lands-state-source";
+const STATE_LANDS_LAYER = "public-lands-state-layer";
+
+const ACCESS_SOURCE = "access-fishing-sites-source";
+const ACCESS_LAYER = "access-fishing-sites-layer";
+const ACTIVE_STATIONS_SOURCE = "active-usgs-stations-source";
+const ACTIVE_STATIONS_LAYER = "active-usgs-stations-layer";
+const HYDRO_FLOW_LAYER = "hydro-flow-magnitude-layer";
+const HYDRO_CHANGE_LAYER = "hydro-change-indicator-layer";
+const HYDRO_TEMP_LAYER = "hydro-temp-stress-layer";
+
+const BLM_TILES =
+  "https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA_Cached_without_PriUnk/MapServer/tile/{z}/{y}/{x}";
+const STATE_LANDS_GEOJSON =
+  "https://fwp-gis.mt.gov/arcgis/rest/services/fwplnd/fwpLands/MapServer/5/query?where=1%3D1&outFields=NAME&returnGeometry=true&f=geojson";
+const FWP_ACCESS_GEOJSON =
+  "https://fwp-gis.mt.gov/arcgis/rest/services/fwplnd/fwpLands/MapServer/1/query?where=1%3D1&outFields=NAME&returnGeometry=true&f=geojson";
+const RIVER_ID_PROP = "river_id";
+const CLICK_PRIORITY_LAYERS = [UNCLUSTERED_LAYER, ACCESS_LAYER, ACTIVE_STATIONS_LAYER] as const;
+const MAPBOX_STYLES: Record<BasemapId, string> = {
+  hybrid: "mapbox://styles/mapbox/satellite-streets-v12",
+  satellite: "mapbox://styles/mapbox/satellite-v9",
+  topo: "mapbox://styles/mapbox/outdoors-v12",
+  light: "mapbox://styles/mapbox/light-v11",
+  dark: "mapbox://styles/mapbox/dark-v11",
+};
+const BASE_STYLE = MAPBOX_STYLES.hybrid;
+const MAPBOX_DEM_SOURCE = "mapbox-dem";
+const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
+
+mapboxgl.accessToken = MAPBOX_TOKEN;
+
+function riverIdExpr() {
+  return [
+    "to-string",
+    [
+      "coalesce",
+      ["get", RIVER_ID_PROP],
+      ["get", "river_uuid"],
+      ["get", "riverId"],
+      ["get", "id"],
+      "",
+    ],
+  ] as any;
+}
+
+function selectedRiverFilter(selectedRiverId: string | null | undefined) {
+  const sid = selectedRiverId ? String(selectedRiverId) : "";
+  if (!sid) return ["==", ["literal", 1], ["literal", 0]] as any;
+  return ["==", riverIdExpr(), sid] as any;
+}
+
+function extractRiverId(properties?: Record<string, unknown> | null): string | null {
+  if (!properties) return null;
+  const value =
+    properties[RIVER_ID_PROP] ??
+    properties.river_uuid ??
+    properties.riverId ??
+    properties.id ??
+    null;
+  if (value == null) return null;
+  const s = String(value).trim();
+  return s.length > 0 ? s : null;
+}
+
+function normalizeGeojson(g: GeoJSON.GeoJSON | null): GeoJSON.GeoJSON | null {
+  if (!g) return null;
+  if (g.type === "FeatureCollection") return g;
+  if (g.type === "Feature") return g;
+  if (g.type === "LineString" || g.type === "MultiLineString") {
+    return { type: "Feature", properties: {}, geometry: g } as GeoJSON.Feature;
+  }
+  return g;
+}
+
+function getStationTooltipHtml(properties: Record<string, unknown>) {
+  const stationName = String(properties.station_name ?? properties.site_no ?? "USGS Station");
+  const siteNo = String(properties.site_no ?? "").trim();
+  const sourceRoles = String(properties.selected_source_roles ?? "").trim();
+  const selectedName = String(properties.selected_river_name ?? "").trim();
+  const sourceLabel =
+    sourceRoles && selectedName
+      ? `Source station for ${selectedName}: ${sourceRoles}`
+      : sourceRoles
+        ? `Source station: ${sourceRoles}`
+        : "USGS monitoring station";
+
+  return `<div style="min-width:168px;font-size:11px;line-height:1.35;color:#0f172a;">
+    <div style="font-weight:700;">${escapeHtml(stationName)}</div>
+    <div style="margin-top:2px;font-size:10px;color:#475569;">${escapeHtml(siteNo || "USGS site")}</div>
+    <div style="margin-top:5px;font-size:10px;color:#1e293b;">${escapeHtml(sourceLabel)}</div>
+  </div>`;
+}
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function withSelectedRiverMetadata(
+  g: GeoJSON.GeoJSON,
+  selectedRiverId?: string | null,
+  selectedRiverName?: string | null
+): GeoJSON.GeoJSON {
+  if (!selectedRiverName && !selectedRiverId) return g;
+  if (g.type === "Feature") {
+    const props = { ...(g.properties ?? {}) } as Record<string, unknown>;
+    const hasRiverId =
+      props.river_id != null || props.river_uuid != null || props.riverId != null || props.id != null;
+    return {
+      ...g,
+      properties: {
+        ...props,
+        ...(!hasRiverId && selectedRiverId ? { river_id: selectedRiverId } : {}),
+        ...(selectedRiverName ? { name: selectedRiverName, river_name: selectedRiverName } : {}),
+      },
+    };
+  }
+  if (g.type === "FeatureCollection") {
+    return {
+      ...g,
+      features: g.features.map((f) => ({
+        ...f,
+        properties: (() => {
+          const props = { ...(f.properties ?? {}) } as Record<string, unknown>;
+          const hasRiverId =
+            props.river_id != null || props.river_uuid != null || props.riverId != null || props.id != null;
+          return {
+            ...props,
+            ...(!hasRiverId && selectedRiverId ? { river_id: selectedRiverId } : {}),
+            ...(selectedRiverName ? { name: selectedRiverName, river_name: selectedRiverName } : {}),
+          };
+        })(),
+      })),
+    };
+  }
+  return {
+    type: "Feature",
+    properties: {
+      ...(selectedRiverId ? { river_id: selectedRiverId } : {}),
+      ...(selectedRiverName ? { name: selectedRiverName, river_name: selectedRiverName } : {}),
+    },
+    geometry: g as GeoJSON.Geometry,
+  } as GeoJSON.Feature;
+}
+
+function toneRasterBasemap(map: mapboxgl.Map) {
+  const style = map.getStyle();
+  const rasterLayers = (style.layers ?? []).filter((layer) => layer.type === "raster");
+  let tonedCount = 0;
+
+  for (const layer of rasterLayers) {
+    const id = layer.id ?? "";
+    const lid = id.toLowerCase();
+    const isImagery =
+      !lid.includes("label") &&
+      !lid.includes("reference") &&
+      !lid.includes("boundaries") &&
+      id !== FEDERAL_LANDS_LAYER;
+    if (!isImagery) continue;
+
+    try {
+      map.setPaintProperty(id, "raster-saturation", -0.15);
+      map.setPaintProperty(id, "raster-brightness-min", 0.05);
+      map.setPaintProperty(id, "raster-brightness-max", 0.95);
+      tonedCount += 1;
+    } catch {
+      /* ignore per-layer paint failures */
+    }
+  }
+
+  if (tonedCount === 0 && rasterLayers.length > 0) {
+    // Useful when style ids change across providers.
+    console.log(
+      "MAP RASTER LAYERS",
+      rasterLayers.map((layer) => ({ id: layer.id, type: layer.type }))
+    );
+  }
+}
+
+function geojsonBbox(geojson: GeoJSON.GeoJSON): [number, number, number, number] | null {
+  const coords: [number, number][] = [];
+  const collect = (g: GeoJSON.Geometry) => {
+    if (g.type === "Point") coords.push(g.coordinates as [number, number]);
+    else if (g.type === "LineString") {
+      for (const c of g.coordinates) coords.push(c as [number, number]);
+    } else if (g.type === "MultiLineString") {
+      for (const line of g.coordinates) for (const c of line) coords.push(c as [number, number]);
+    } else if (g.type === "Polygon") {
+      for (const ring of g.coordinates) for (const c of ring) coords.push(c as [number, number]);
+    } else if (g.type === "MultiPoint") {
+      for (const c of g.coordinates) coords.push(c as [number, number]);
+    }
+  };
+
+  if ("geometry" in geojson && geojson.geometry) collect(geojson.geometry);
+  else if ("coordinates" in geojson) collect(geojson as GeoJSON.Geometry);
+  else if ("features" in geojson) {
+    for (const f of geojson.features) if (f.geometry) collect(f.geometry);
+  }
+
+  if (!coords.length) return null;
+  const lons = coords.map((c) => c[0]);
+  const lats = coords.map((c) => c[1]);
+  return [Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)];
+}
+
+export function computeBboxFromGeoJSON(
+  features: Array<GeoJSON.Feature<GeoJSON.Geometry, Record<string, unknown>>>
+): [number, number, number, number] | null {
+  let minLng = Infinity;
+  let minLat = Infinity;
+  let maxLng = -Infinity;
+  let maxLat = -Infinity;
+  let hasAny = false;
+
+  const pushCoord = (coord: number[]) => {
+    const lng = coord[0];
+    const lat = coord[1];
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) return;
+    minLng = Math.min(minLng, lng);
+    minLat = Math.min(minLat, lat);
+    maxLng = Math.max(maxLng, lng);
+    maxLat = Math.max(maxLat, lat);
+    hasAny = true;
+  };
+
+  for (const feature of features) {
+    const geom = feature.geometry;
+    if (!geom) continue;
+    if (geom.type === "LineString") {
+      for (const c of geom.coordinates) pushCoord(c as number[]);
+      continue;
+    }
+    if (geom.type === "MultiLineString") {
+      for (const seg of geom.coordinates) {
+        for (const c of seg) pushCoord(c as number[]);
+      }
+    }
+  }
+
+  if (!hasAny) return null;
+  return [minLng, minLat, maxLng, maxLat];
+}
+
+function selectedRiverBoundsFromGeojson(
+  geojson: GeoJSON.GeoJSON | null | undefined,
+  selectedId: string | null | undefined
+): [number, number, number, number] | null {
+  if (!geojson || !selectedId) return null;
+  const sid = String(selectedId);
+
+  const collectFeatures = (): Array<GeoJSON.Feature<GeoJSON.Geometry, Record<string, unknown>>> => {
+    if (geojson.type === "FeatureCollection") {
+      return geojson.features
+        .filter((f): f is GeoJSON.Feature<GeoJSON.Geometry, Record<string, unknown>> => Boolean(f?.geometry))
+        .filter((f) => extractRiverId((f.properties as Record<string, unknown> | undefined) ?? null) === sid);
+    }
+    if (geojson.type === "Feature") {
+      if (!geojson.geometry) return [];
+      const rid = extractRiverId((geojson.properties as Record<string, unknown> | undefined) ?? null);
+      return rid === sid ? [geojson as GeoJSON.Feature<GeoJSON.Geometry, Record<string, unknown>>] : [];
+    }
+    if (geojson.type === "LineString" || geojson.type === "MultiLineString") {
+      return [{ type: "Feature", geometry: geojson, properties: { river_id: sid } }];
+    }
+    return [];
+  };
+
+  const selectedFeatures = collectFeatures();
+  return computeBboxFromGeoJSON(selectedFeatures);
+}
+
+function riversToFeatureCollection(
+  rivers: FishabilityRow[]
+): GeoJSON.FeatureCollection<GeoJSON.Point, Record<string, unknown>> {
+  const features: GeoJSON.Feature<GeoJSON.Point, Record<string, unknown>>[] = [];
+
+  for (const river of rivers) {
+    const lat = river.lat ?? (river as { latitude?: number }).latitude;
+    const lng = river.lng ?? (river as { longitude?: number }).longitude;
+    const coords: [number, number] | undefined =
+      lat != null && lng != null ? [lng, lat] : RIVER_FOCUS_POINTS[river.river_id];
+    if (!coords) continue;
+
+    features.push({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: coords },
+      properties: {
+        river_id: river.river_id,
+        river_name: river.river_name,
+        bite_tier: river.bite_tier ?? null,
+        fishability_score: river.fishability_score_calc ?? null,
+        flow_ratio_calc: river.flow_ratio_calc ?? null,
+        change_48h_pct_calc: river.change_48h_pct_calc ?? null,
+        water_temp_f: river.water_temp_f ?? null,
+      },
+    });
+  }
+
+  return { type: "FeatureCollection", features };
+}
+
+function ensureRiversSource(map: mapboxgl.Map, rivers: FishabilityRow[]) {
+  const fc = riversToFeatureCollection(rivers);
+  const src = map.getSource(RIVERS_SOURCE) as
+    | { setData?: (d: GeoJSON.FeatureCollection) => void }
+    | undefined;
+
+  if (!src) {
+    map.addSource(RIVERS_SOURCE, {
+      type: "geojson",
+      data: fc,
+      cluster: false,
+      generateId: true,
+    });
+    return;
+  }
+  src.setData?.(fc);
+}
+
+function ensureRiverPointLayers(map: mapboxgl.Map) {
+  if (!map.getLayer(UNCLUSTERED_LAYER)) {
+    map.addLayer({
+      id: UNCLUSTERED_LAYER,
+      type: "circle",
+      source: RIVERS_SOURCE,
+      filter: ["==", ["geometry-type"], "Point"],
+      paint: {
+        "circle-color": [
+          "case",
+          ["==", ["get", "bite_tier"], "HOT"], BITE_TIER_COLORS.HOT,
+          ["==", ["get", "bite_tier"], "GOOD"], BITE_TIER_COLORS.GOOD,
+          ["==", ["get", "bite_tier"], "FAIR"], BITE_TIER_COLORS.FAIR,
+          ["==", ["get", "bite_tier"], "TOUGH"], BITE_TIER_COLORS.TOUGH,
+          MRI_COLORS.tough,
+        ],
+        "circle-radius": ["case", ["boolean", ["feature-state", "hover"], false], 8, 6],
+        "circle-stroke-color": "rgba(255,255,255,0.92)",
+        "circle-stroke-width": ["case", ["boolean", ["feature-state", "hover"], false], 2.5, 2],
+        "circle-opacity": 0.95,
+      },
+    });
+  }
+
+  if (!map.getLayer(SELECTED_HALO_LAYER)) {
+    map.addLayer({
+      id: SELECTED_HALO_LAYER,
+      type: "circle",
+      source: RIVERS_SOURCE,
+      filter: ["==", ["get", "river_id"], "__none__"],
+      paint: { "circle-color": MRI_COLORS.riverHalo, "circle-radius": 15 },
+    });
+  }
+
+  if (!map.getLayer(SELECTED_CORE_LAYER)) {
+    map.addLayer({
+      id: SELECTED_CORE_LAYER,
+      type: "circle",
+      source: RIVERS_SOURCE,
+      filter: ["==", ["get", "river_id"], "__none__"],
+      paint: {
+        "circle-color": "rgba(233,240,247,0.98)",
+        "circle-radius": 6,
+        "circle-stroke-color": MRI_COLORS.riverSelected,
+        "circle-stroke-width": 2,
+      },
+    });
+  }
+}
+
+function syncRiverPointPresentation(
+  map: mapboxgl.Map,
+  selectedRiverId: string | null,
+  showMarkers: boolean,
+  scoreColoring: boolean
+) {
+  const rid = selectedRiverId ?? "__none__";
+  const visibility = showMarkers ? "visible" : "none";
+
+  for (const layerId of [UNCLUSTERED_LAYER, SELECTED_HALO_LAYER, SELECTED_CORE_LAYER]) {
+    if (map.getLayer(layerId)) {
+      map.setLayoutProperty(layerId, "visibility", visibility);
+    }
+  }
+
+  if (map.getLayer(SELECTED_HALO_LAYER)) {
+    map.setFilter(SELECTED_HALO_LAYER, ["==", ["get", "river_id"], rid]);
+  }
+  if (map.getLayer(SELECTED_CORE_LAYER)) {
+    map.setFilter(SELECTED_CORE_LAYER, ["==", ["get", "river_id"], rid]);
+  }
+
+  if (!map.getLayer(UNCLUSTERED_LAYER)) return;
+
+  const circleColor = scoreColoring
+    ? [
+        "case",
+        ["==", ["get", "bite_tier"], "HOT"], BITE_TIER_COLORS.HOT,
+        ["==", ["get", "bite_tier"], "GOOD"], BITE_TIER_COLORS.GOOD,
+        ["==", ["get", "bite_tier"], "FAIR"], BITE_TIER_COLORS.FAIR,
+        ["==", ["get", "bite_tier"], "TOUGH"], BITE_TIER_COLORS.TOUGH,
+        MRI_COLORS.tough,
+      ]
+    : MRI_COLORS.tough;
+  map.setPaintProperty(UNCLUSTERED_LAYER, "circle-color", circleColor as any);
+
+  const circleOpacity = selectedRiverId
+    ? ["case", ["==", ["get", "river_id"], selectedRiverId], 0.95, 0.38]
+    : 0.95;
+  map.setPaintProperty(UNCLUSTERED_LAYER, "circle-opacity", circleOpacity as any);
+}
+
+function clearSelectedRiverLine(map: mapboxgl.Map) {
+  if (map.getLayer(RIVER_NAMES_LAYER)) map.removeLayer(RIVER_NAMES_LAYER);
+  if (map.getLayer(RIVER_HIT_LAYER)) map.removeLayer(RIVER_HIT_LAYER);
+  if (map.getLayer(RIVER_SELECTED_LAYER)) map.removeLayer(RIVER_SELECTED_LAYER);
+  if (map.getLayer(RIVER_BASE_LAYER)) map.removeLayer(RIVER_BASE_LAYER);
+  if (map.getLayer(RIVER_CASING_LAYER)) map.removeLayer(RIVER_CASING_LAYER);
+  if (map.getSource(RIVER_LABELS_SOURCE)) map.removeSource(RIVER_LABELS_SOURCE);
+  if (map.getSource(ALL_RIVERS_SOURCE)) map.removeSource(ALL_RIVERS_SOURCE);
+}
+
+function toLineLabelFeatures(
+  geojson: GeoJSON.GeoJSON
+): GeoJSON.FeatureCollection<GeoJSON.LineString, Record<string, unknown>> {
+  const bestByRiver = new Map<string, GeoJSON.Feature<GeoJSON.LineString, Record<string, unknown>>>();
+  const scoreLine = (coords: number[][]) => coords.length;
+  const pushCandidate = (props: Record<string, unknown>, coords: number[][]) => {
+    const riverId =
+      String(props.river_id ?? props.river_uuid ?? props.riverId ?? props.id ?? "").trim();
+    if (!riverId || !coords?.length) return;
+    const candidate: GeoJSON.Feature<GeoJSON.LineString, Record<string, unknown>> = {
+      type: "Feature",
+      properties: props,
+      geometry: { type: "LineString", coordinates: coords as [number, number][] },
+    };
+    const existing = bestByRiver.get(riverId);
+    if (!existing || scoreLine(existing.geometry.coordinates as number[][]) < scoreLine(coords)) {
+      bestByRiver.set(riverId, candidate);
+    }
+  };
+
+  const handleFeature = (f: GeoJSON.Feature) => {
+    if (!f.geometry) return;
+    const props = { ...(f.properties ?? {}) } as Record<string, unknown>;
+    if (f.geometry.type === "LineString") {
+      pushCandidate(props, f.geometry.coordinates as number[][]);
+      return;
+    }
+    if (f.geometry.type === "MultiLineString") {
+      for (const seg of f.geometry.coordinates) pushCandidate(props, seg as number[][]);
+    }
+  };
+
+  if (geojson.type === "FeatureCollection") {
+    for (const f of geojson.features) handleFeature(f);
+  } else if (geojson.type === "Feature") {
+    handleFeature(geojson);
+  } else if (geojson.type === "LineString") {
+    handleFeature({ type: "Feature", properties: {}, geometry: geojson });
+  } else if (geojson.type === "MultiLineString") {
+    handleFeature({ type: "Feature", properties: {}, geometry: geojson });
+  }
+
+  return { type: "FeatureCollection", features: Array.from(bestByRiver.values()) };
+}
+
+function syncSelectedRiverLine(
+  map: mapboxgl.Map,
+  geojson: GeoJSON.GeoJSON | null,
+  selectedRiverId: string | null | undefined,
+  selectedRiverName: string | null | undefined,
+  showRiverLines: boolean,
+  showSelectedHighlight: boolean,
+  showLabels: boolean
+) {
+  const highlightEnabled = showRiverLines && showSelectedHighlight;
+  if (!geojson || (!showRiverLines && !highlightEnabled)) {
+    clearSelectedRiverLine(map);
+    return;
+  }
+
+  const data = normalizeGeojson(geojson);
+  if (!data) return;
+  const namedData = withSelectedRiverMetadata(data, selectedRiverId, selectedRiverName);
+  const rid = selectedRiverId ? String(selectedRiverId) : "";
+  const selectedFilter = selectedRiverFilter(rid);
+
+  const src = map.getSource(ALL_RIVERS_SOURCE) as
+    | { setData?: (d: GeoJSON.GeoJSON) => void }
+    | undefined;
+
+  if (!src) {
+    map.addSource(ALL_RIVERS_SOURCE, { type: "geojson", data: namedData });
+  } else {
+    src.setData?.(namedData);
+  }
+
+  if (showRiverLines && !map.getLayer(RIVER_CASING_LAYER)) {
+    map.addLayer({
+      id: RIVER_CASING_LAYER,
+      type: "line",
+      source: ALL_RIVERS_SOURCE,
+      minzoom: 4,
+      maxzoom: 24,
+      layout: { "line-join": "round", "line-cap": "round" },
+      paint: {
+        "line-color": "#0b1e28",
+        "line-width": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          4, 2.2,
+          6, 3.2,
+          8, 4.7,
+          10, 6.2,
+          12, 8.4,
+        ],
+        "line-opacity": 0.82,
+      },
+    });
+  } else if (!showRiverLines && map.getLayer(RIVER_CASING_LAYER)) {
+    map.removeLayer(RIVER_CASING_LAYER);
+  }
+
+  if (showRiverLines && !map.getLayer(RIVER_BASE_LAYER)) {
+    map.addLayer({
+      id: RIVER_BASE_LAYER,
+      type: "line",
+      source: ALL_RIVERS_SOURCE,
+      minzoom: 4,
+      maxzoom: 24,
+      layout: { "line-join": "round", "line-cap": "round" },
+      paint: {
+        "line-color": "#4aa3ff",
+        "line-width": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          4, 1.15,
+          6, 1.9,
+          8, 2.9,
+          10, 4.15,
+          12, 5.5,
+        ],
+        "line-opacity": 0.8,
+      },
+    });
+  } else if (!showRiverLines && map.getLayer(RIVER_BASE_LAYER)) {
+    map.removeLayer(RIVER_BASE_LAYER);
+  }
+
+  if (showRiverLines && !map.getLayer(RIVER_HIT_LAYER)) {
+    map.addLayer({
+      id: RIVER_HIT_LAYER,
+      type: "line",
+      source: ALL_RIVERS_SOURCE,
+      minzoom: 4,
+      maxzoom: 24,
+      layout: { "line-join": "round", "line-cap": "round" },
+      paint: {
+        "line-color": "rgba(0,0,0,0)",
+        "line-width": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          4, 12,
+          6, 16,
+          8, 20,
+          10, 24,
+          12, 28,
+        ],
+        "line-opacity": 0,
+      },
+    });
+  } else if (!showRiverLines && map.getLayer(RIVER_HIT_LAYER)) {
+    map.removeLayer(RIVER_HIT_LAYER);
+  }
+
+  if (highlightEnabled && !map.getLayer(RIVER_SELECTED_LAYER)) {
+    map.addLayer({
+      id: RIVER_SELECTED_LAYER,
+      type: "line",
+      source: ALL_RIVERS_SOURCE,
+      filter: selectedFilter,
+      minzoom: 4,
+      maxzoom: 24,
+      layout: { "line-join": "round", "line-cap": "round" },
+      paint: {
+        "line-color": "#8fd0ff",
+        "line-width": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          4, 4.8,
+          6, 6.8,
+          8, 9.2,
+          10, 12,
+          12, 15.2,
+        ],
+        "line-opacity": 1,
+        "line-blur": 0.2,
+      },
+    });
+  } else if (!highlightEnabled && map.getLayer(RIVER_SELECTED_LAYER)) {
+    map.removeLayer(RIVER_SELECTED_LAYER);
+  }
+
+  if (map.getLayer(RIVER_CASING_LAYER)) {
+    map.setPaintProperty(RIVER_CASING_LAYER, "line-width", [
+      "interpolate",
+      ["linear"],
+      ["zoom"],
+      4, 2.2,
+      6, 3.2,
+      8, 4.7,
+      10, 6.2,
+      12, 8.4,
+    ] as any);
+    map.setPaintProperty(RIVER_CASING_LAYER, "line-opacity", 0.82 as any);
+  }
+  if (map.getLayer(RIVER_BASE_LAYER)) {
+    map.setPaintProperty(RIVER_BASE_LAYER, "line-width", [
+      "interpolate",
+      ["linear"],
+      ["zoom"],
+      4, 1.15,
+      6, 1.9,
+      8, 2.9,
+      10, 4.15,
+      12, 5.5,
+    ] as any);
+    map.setPaintProperty(RIVER_BASE_LAYER, "line-opacity", 0.8 as any);
+  }
+  if (map.getLayer(RIVER_HIT_LAYER)) {
+    map.setPaintProperty(RIVER_HIT_LAYER, "line-width", [
+      "interpolate",
+      ["linear"],
+      ["zoom"],
+      4, 12,
+      6, 16,
+      8, 20,
+      10, 24,
+      12, 28,
+    ] as any);
+    map.setPaintProperty(RIVER_HIT_LAYER, "line-opacity", 0 as any);
+  }
+  if (map.getLayer(RIVER_SELECTED_LAYER)) {
+    map.setFilter(RIVER_SELECTED_LAYER, selectedFilter);
+    map.setPaintProperty(RIVER_SELECTED_LAYER, "line-width", [
+      "interpolate",
+      ["linear"],
+      ["zoom"],
+      4, 4.8,
+      6, 6.8,
+      8, 9.2,
+      10, 12,
+      12, 15.2,
+    ] as any);
+    map.setPaintProperty(RIVER_SELECTED_LAYER, "line-blur", 0.2 as any);
+  }
+
+  if (showLabels && !map.getLayer(RIVER_NAMES_LAYER)) {
+    const labels = toLineLabelFeatures(namedData);
+    const labelSrc = map.getSource(RIVER_LABELS_SOURCE) as
+      | { setData?: (d: GeoJSON.FeatureCollection) => void }
+      | undefined;
+    if (!labelSrc) {
+      map.addSource(RIVER_LABELS_SOURCE, { type: "geojson", data: labels });
+    } else {
+      labelSrc.setData?.(labels);
+    }
+
+    map.addLayer({
+      id: RIVER_NAMES_LAYER,
+      type: "symbol",
+      source: RIVER_LABELS_SOURCE,
+      minzoom: 7,
+      layout: {
+        "symbol-placement": "line",
+        "symbol-spacing": 500,
+        "text-field": ["coalesce", ["get", "river_name"], ["get", "name"], ""],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 7, 11, 10, 13, 12, 15],
+        "text-font": ["Open Sans Semibold", "Arial Unicode MS Bold"],
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "text-padding": 2,
+        "text-max-angle": 30,
+        "text-letter-spacing": 0.02,
+      },
+      paint: {
+        "text-color": "rgba(188,204,219,0.9)",
+        "text-opacity": ["interpolate", ["linear"], ["zoom"], 7, 0, 8, 0.6, 10, 0.82],
+        "text-halo-color": "rgba(14,22,32,0.88)",
+        "text-halo-width": 1,
+        "text-halo-blur": 0.5,
+      },
+    });
+  } else if (showLabels && map.getLayer(RIVER_NAMES_LAYER)) {
+    const labels = toLineLabelFeatures(namedData);
+    const labelSrc = map.getSource(RIVER_LABELS_SOURCE) as
+      | { setData?: (d: GeoJSON.FeatureCollection) => void }
+      | undefined;
+    labelSrc?.setData?.(labels);
+  } else if (!showLabels && map.getLayer(RIVER_NAMES_LAYER)) {
+    map.removeLayer(RIVER_NAMES_LAYER);
+    if (map.getSource(RIVER_LABELS_SOURCE)) map.removeSource(RIVER_LABELS_SOURCE);
+  }
+
+  try {
+    if (map.getLayer(STATEWIDE_HYDRO_LAYER) && map.getLayer(RIVER_SELECTED_LAYER)) {
+      map.moveLayer(RIVER_SELECTED_LAYER);
+    }
+    if (map.getLayer(RIVER_CASING_LAYER) && map.getLayer(UNCLUSTERED_LAYER)) {
+      map.moveLayer(RIVER_CASING_LAYER, UNCLUSTERED_LAYER);
+    }
+    if (map.getLayer(RIVER_BASE_LAYER) && map.getLayer(UNCLUSTERED_LAYER)) {
+      map.moveLayer(RIVER_BASE_LAYER, UNCLUSTERED_LAYER);
+    }
+    if (map.getLayer(RIVER_SELECTED_LAYER) && map.getLayer(UNCLUSTERED_LAYER)) {
+      map.moveLayer(RIVER_SELECTED_LAYER, UNCLUSTERED_LAYER);
+    }
+    if (map.getLayer(RIVER_HIT_LAYER) && map.getLayer(UNCLUSTERED_LAYER)) {
+      map.moveLayer(RIVER_HIT_LAYER, UNCLUSTERED_LAYER);
+    }
+    if (map.getLayer(RIVER_NAMES_LAYER) && map.getLayer(UNCLUSTERED_LAYER)) {
+      map.moveLayer(RIVER_NAMES_LAYER, UNCLUSTERED_LAYER);
+    }
+    if (map.getLayer(UNCLUSTERED_LAYER)) {
+      map.moveLayer(UNCLUSTERED_LAYER);
+    }
+    if (map.getLayer(SELECTED_HALO_LAYER)) {
+      map.moveLayer(SELECTED_HALO_LAYER);
+    }
+    if (map.getLayer(SELECTED_CORE_LAYER)) {
+      map.moveLayer(SELECTED_CORE_LAYER);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function syncStatewideHydrologyLayer(map: mapboxgl.Map, enabled: boolean) {
+  if (enabled) {
+    if (!map.getSource(STATEWIDE_HYDRO_SOURCE)) {
+      map.addSource(STATEWIDE_HYDRO_SOURCE, {
+        type: "geojson",
+        data: "https://hydro.nationalmap.gov/arcgis/rest/services/nhd/MapServer/2/query?where=1%3D1&geometry=-116.2,44.2,-104,49.2&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=GNIS_NAME&returnGeometry=true&geometryPrecision=4&maxAllowableOffset=0.005&f=geojson" as any,
+      } as any);
+    }
+    if (!map.getLayer(STATEWIDE_HYDRO_LAYER)) {
+      map.addLayer({
+        id: STATEWIDE_HYDRO_LAYER,
+        type: "line",
+        source: STATEWIDE_HYDRO_SOURCE,
+        paint: {
+          "line-color": MRI_COLORS.riverCasing,
+          "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.35, 8, 0.55, 11, 0.9],
+          "line-opacity": 0.7,
+        },
+      });
+    }
+    try {
+      if (map.getLayer(RIVER_CASING_LAYER)) {
+        map.moveLayer(STATEWIDE_HYDRO_LAYER, RIVER_CASING_LAYER);
+      } else if (map.getLayer(UNCLUSTERED_LAYER)) {
+        map.moveLayer(STATEWIDE_HYDRO_LAYER, UNCLUSTERED_LAYER);
+      }
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+  if (map.getLayer(STATEWIDE_HYDRO_LAYER)) map.removeLayer(STATEWIDE_HYDRO_LAYER);
+}
+
+function syncFederalLandsLayer(map: mapboxgl.Map, enabled: boolean) {
+  if (enabled) {
+    if (!map.getSource(FEDERAL_LANDS_SOURCE)) {
+      map.addSource(FEDERAL_LANDS_SOURCE, {
+        type: "raster",
+        tiles: [BLM_TILES],
+        tileSize: 256,
+        attribution: "BLM Surface Management Agency",
+      });
+    }
+    if (!map.getLayer(FEDERAL_LANDS_LAYER)) {
+      map.addLayer({
+        id: FEDERAL_LANDS_LAYER,
+        type: "raster",
+        source: FEDERAL_LANDS_SOURCE,
+        minzoom: 8,
+        paint: {
+          "raster-opacity": 0.16,
+          "raster-saturation": -0.72,
+          "raster-contrast": -0.28,
+          "raster-brightness-min": 0.22,
+          "raster-brightness-max": 0.86,
+        },
+      });
+    }
+    try {
+      if (map.getLayer(STATEWIDE_HYDRO_LAYER)) {
+        map.moveLayer(FEDERAL_LANDS_LAYER, STATEWIDE_HYDRO_LAYER);
+      } else if (map.getLayer(RIVER_CASING_LAYER)) {
+        map.moveLayer(FEDERAL_LANDS_LAYER, RIVER_CASING_LAYER);
+      }
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+
+  if (map.getLayer(FEDERAL_LANDS_LAYER)) {
+    map.removeLayer(FEDERAL_LANDS_LAYER);
+  }
+}
+
+function syncStateLandsLayer(map: mapboxgl.Map, enabled: boolean) {
+  if (enabled) {
+    if (!map.getSource(STATE_LANDS_SOURCE)) {
+      map.addSource(STATE_LANDS_SOURCE, {
+        type: "geojson",
+        data: STATE_LANDS_GEOJSON as any,
+      } as any);
+    }
+    if (!map.getLayer(STATE_LANDS_LAYER)) {
+      map.addLayer({
+        id: STATE_LANDS_LAYER,
+        type: "fill",
+        source: STATE_LANDS_SOURCE,
+        minzoom: 8,
+        paint: {
+          "fill-color": "#5f725e",
+          "fill-opacity": 0.12,
+          "fill-outline-color": "rgba(148,163,184,0.3)",
+        },
+      });
+    }
+    try {
+      if (map.getLayer(STATEWIDE_HYDRO_LAYER)) {
+        map.moveLayer(STATE_LANDS_LAYER, STATEWIDE_HYDRO_LAYER);
+      } else if (map.getLayer(RIVER_CASING_LAYER)) {
+        map.moveLayer(STATE_LANDS_LAYER, RIVER_CASING_LAYER);
+      }
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+  if (map.getLayer(STATE_LANDS_LAYER)) {
+    map.removeLayer(STATE_LANDS_LAYER);
+  }
+}
+
+function syncFishingAccessLayer(map: mapboxgl.Map, enabled: boolean) {
+  if (enabled) {
+    if (!map.getSource(ACCESS_SOURCE)) {
+      map.addSource(ACCESS_SOURCE, {
+        type: "geojson",
+        data: FWP_ACCESS_GEOJSON as any,
+      } as any);
+    }
+    if (!map.getLayer(ACCESS_LAYER)) {
+      map.addLayer({
+        id: ACCESS_LAYER,
+        type: "circle",
+        source: ACCESS_SOURCE,
+        minzoom: 8,
+        paint: {
+          "circle-color": "#6f8491",
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 8, 2.4, 11, 4.6],
+          "circle-stroke-color": "#e2e8f0",
+          "circle-stroke-width": 1,
+          "circle-opacity": 0.88,
+        },
+      });
+    }
+    try {
+      if (map.getLayer(UNCLUSTERED_LAYER)) {
+        map.moveLayer(ACCESS_LAYER, UNCLUSTERED_LAYER);
+      }
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+
+  if (map.getLayer(ACCESS_LAYER)) {
+    map.removeLayer(ACCESS_LAYER);
+  }
+}
+
+function syncActiveStationsLayer(
+  map: mapboxgl.Map,
+  enabled: boolean,
+  stationsGeojson: GeoJSON.FeatureCollection<GeoJSON.Point, Record<string, unknown>> | null | undefined,
+  selectedRiver: FishabilityRow | null | undefined
+) {
+  const hasFeatures = Boolean(stationsGeojson?.features?.length);
+  if (!enabled || !hasFeatures) {
+    if (map.getLayer(ACTIVE_STATIONS_LAYER)) {
+      map.removeLayer(ACTIVE_STATIONS_LAYER);
+    }
+    if (map.getSource(ACTIVE_STATIONS_SOURCE)) {
+      map.removeSource(ACTIVE_STATIONS_SOURCE);
+    }
+    return;
+  }
+
+  const selectedFlowSiteNo = selectedRiver?.flow_source_site_no ? String(selectedRiver.flow_source_site_no) : "";
+  const selectedTempSiteNo = selectedRiver?.temp_source_site_no ? String(selectedRiver.temp_source_site_no) : "";
+  const selectedRiverName = selectedRiver?.river_name ?? null;
+  const selectedRiverId = selectedRiver?.river_id ? String(selectedRiver.river_id) : null;
+
+  const annotatedStations: GeoJSON.FeatureCollection<GeoJSON.Point, Record<string, unknown>> = {
+    type: "FeatureCollection",
+    features: (stationsGeojson?.features ?? []).map((feature) => {
+      const props = { ...(feature.properties ?? {}) } as Record<string, unknown>;
+      const siteNo = props.site_no != null ? String(props.site_no) : "";
+      const isFlowSource = Boolean(selectedFlowSiteNo && siteNo === selectedFlowSiteNo);
+      const isTempSource = Boolean(selectedTempSiteNo && siteNo === selectedTempSiteNo);
+      return {
+        ...feature,
+        properties: {
+          ...props,
+          is_selected_source: isFlowSource || isTempSource,
+          is_selected_flow_source: isFlowSource,
+          is_selected_temp_source: isTempSource,
+          selected_source_roles: [isFlowSource ? "flow" : null, isTempSource ? "temp" : null]
+            .filter(Boolean)
+            .join(" + "),
+          selected_river_name: selectedRiverName,
+          selected_river_id: selectedRiverId,
+        },
+      };
+    }),
+  };
+
+  const src = map.getSource(ACTIVE_STATIONS_SOURCE) as
+    | { setData?: (d: GeoJSON.FeatureCollection) => void }
+    | undefined;
+
+  if (!src) {
+    map.addSource(ACTIVE_STATIONS_SOURCE, {
+      type: "geojson",
+      data: annotatedStations,
+    });
+  } else {
+    src.setData?.(annotatedStations);
+  }
+
+  if (!map.getLayer(ACTIVE_STATIONS_LAYER)) {
+    map.addLayer({
+      id: ACTIVE_STATIONS_LAYER,
+      type: "circle",
+      source: ACTIVE_STATIONS_SOURCE,
+      minzoom: 5,
+      paint: {
+        "circle-color": [
+          "case",
+          ["==", ["get", "is_selected_source"], true],
+          "#dff4ff",
+          "#f8fbff",
+        ],
+        "circle-radius": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          5, ["case", ["==", ["get", "is_selected_source"], true], 4.6, 3.1],
+          9, ["case", ["==", ["get", "is_selected_source"], true], 6.1, 4.1],
+          12, ["case", ["==", ["get", "is_selected_source"], true], 7.2, 5],
+        ],
+        "circle-stroke-color": [
+          "case",
+          ["==", ["get", "is_selected_source"], true],
+          "rgba(95,183,255,0.95)",
+          "rgba(8,19,28,0.96)",
+        ],
+        "circle-stroke-width": ["case", ["==", ["get", "is_selected_source"], true], 2, 1.3],
+        "circle-opacity": 0.96,
+        "circle-blur": 0.03,
+      },
+    });
+  }
+
+  try {
+    if (map.getLayer(UNCLUSTERED_LAYER)) {
+      map.moveLayer(ACTIVE_STATIONS_LAYER, UNCLUSTERED_LAYER);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function syncHydrologyOverlays(
+  map: mapboxgl.Map,
+  showFlowMagnitude: boolean,
+  showChangeIndicator: boolean,
+  showTempStress: boolean
+) {
+  if (showFlowMagnitude) {
+    if (!map.getLayer(HYDRO_FLOW_LAYER)) {
+      map.addLayer({
+        id: HYDRO_FLOW_LAYER,
+        type: "circle",
+        source: RIVERS_SOURCE,
+        filter: ["==", ["geometry-type"], "Point"],
+        paint: {
+          "circle-color": [
+            "interpolate",
+            ["linear"],
+            ["coalesce", ["get", "flow_ratio_calc"], 1],
+            0.4, MRI_COLORS.riverSelected,
+            0.8, MRI_COLORS.good,
+            1.0, MRI_COLORS.fair,
+            1.5, MRI_COLORS.warning,
+            2.0, MRI_COLORS.warning,
+          ],
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 2.5, 9, 4.2, 12, 5.2],
+          "circle-opacity": 0.8,
+        },
+      });
+    }
+  } else if (map.getLayer(HYDRO_FLOW_LAYER)) {
+    map.removeLayer(HYDRO_FLOW_LAYER);
+  }
+
+  if (showChangeIndicator) {
+    if (!map.getLayer(HYDRO_CHANGE_LAYER)) {
+      map.addLayer({
+        id: HYDRO_CHANGE_LAYER,
+        type: "symbol",
+        source: RIVERS_SOURCE,
+        filter: ["==", ["geometry-type"], "Point"],
+        layout: {
+          "text-field": [
+            "case",
+            [">", ["coalesce", ["get", "change_48h_pct_calc"], 0], 12], "▲",
+            ["<", ["coalesce", ["get", "change_48h_pct_calc"], 0], -12], "▼",
+            "•",
+          ],
+          "text-size": ["interpolate", ["linear"], ["zoom"], 6, 9, 10, 12],
+          "text-offset": [0, 1.3],
+        },
+        paint: {
+          "text-color": [
+            "case",
+            [">", ["coalesce", ["get", "change_48h_pct_calc"], 0], 12], MRI_COLORS.good,
+            ["<", ["coalesce", ["get", "change_48h_pct_calc"], 0], -12], MRI_COLORS.warning,
+            "#94a3b8",
+          ],
+          "text-halo-color": "rgba(15,23,42,0.9)",
+          "text-halo-width": 1,
+        },
+      });
+    }
+  } else if (map.getLayer(HYDRO_CHANGE_LAYER)) {
+    map.removeLayer(HYDRO_CHANGE_LAYER);
+  }
+
+  if (showTempStress) {
+    if (!map.getLayer(HYDRO_TEMP_LAYER)) {
+      map.addLayer({
+        id: HYDRO_TEMP_LAYER,
+        type: "circle",
+        source: RIVERS_SOURCE,
+        filter: [
+          "all",
+          ["==", ["geometry-type"], "Point"],
+          [">=", ["coalesce", ["get", "water_temp_f"], 0], 67],
+        ],
+        paint: {
+          "circle-color": MRI_COLORS.warning,
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 5, 10, 7.5],
+          "circle-stroke-color": "rgba(255,255,255,0.95)",
+          "circle-stroke-width": 1.2,
+          "circle-opacity": 0.8,
+        },
+      });
+    }
+  } else if (map.getLayer(HYDRO_TEMP_LAYER)) {
+    map.removeLayer(HYDRO_TEMP_LAYER);
+  }
+
+  try {
+    if (map.getLayer(HYDRO_FLOW_LAYER) && map.getLayer(UNCLUSTERED_LAYER)) {
+      map.moveLayer(HYDRO_FLOW_LAYER, UNCLUSTERED_LAYER);
+    }
+    if (map.getLayer(HYDRO_CHANGE_LAYER) && map.getLayer(UNCLUSTERED_LAYER)) {
+      map.moveLayer(HYDRO_CHANGE_LAYER, UNCLUSTERED_LAYER);
+    }
+    if (map.getLayer(HYDRO_TEMP_LAYER) && map.getLayer(UNCLUSTERED_LAYER)) {
+      map.moveLayer(HYDRO_TEMP_LAYER, UNCLUSTERED_LAYER);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function syncLabels(map: mapboxgl.Map, visible: boolean) {
+  const style = map.getStyle();
+  const visibility = visible ? "visible" : "none";
+  for (const layer of style.layers ?? []) {
+    if (!layer.id) continue;
+    const id = layer.id.toLowerCase();
+    if (layer.id === RIVER_NAMES_LAYER || (layer as any).source === RIVER_LABELS_SOURCE) continue;
+    const hasTextField = layer.type === "symbol" && Boolean((layer as any).layout?.["text-field"]);
+    if (hasTextField || id.includes("road-label") || id.includes("place-label") || id.includes("poi-label")) {
+      try {
+        map.setLayoutProperty(layer.id, "visibility", visibility);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
+export function MapView({
+  rivers,
+  selectedRiver,
+  selectedRiverName,
+  selectedRiverId,
+  selectedRiverGeojson,
+  riverLinesGeojson,
+  activeStationsGeojson,
+  basemap = "hybrid",
+  layerState,
+  rightPanelOpen = false,
+  drawerState = "mid",
+  selectionSeq = 0,
+  onSelectRiver,
+  className,
+  initialStyleUrl,
+  onMapReady,
+}: MapViewProps) {
+  const effectiveLayerState = layerState ?? createDefaultLayerState();
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const riversRef = useRef(rivers);
+  const onSelectRiverRef = useRef(onSelectRiver);
+  const selectedRiverRef = useRef(selectedRiver);
+  const selectedRiverNameRef = useRef(selectedRiverName);
+  const selectedRiverIdRef = useRef(selectedRiverId);
+  const selectedRiverGeojsonRef = useRef(selectedRiverGeojson);
+  const riverLinesGeojsonRef = useRef<GeoJSON.FeatureCollection | null>(riverLinesGeojson ?? null);
+  const activeStationsGeojsonRef = useRef<
+    GeoJSON.FeatureCollection<GeoJSON.Point, Record<string, unknown>> | null
+  >(activeStationsGeojson ?? null);
+  const currentStyleRef = useRef<string>(MAPBOX_STYLES[basemap] ?? BASE_STYLE);
+  const layerStateRef = useRef<Record<LayerId, boolean>>(effectiveLayerState);
+  const onMapReadyRef = useRef(onMapReady);
+  const hoverIdRef = useRef<number | string | null>(null);
+  const lastFlownRef = useRef<string | null>(null);
+  const lastFitSignatureRef = useRef<string | null>(null);
+  const [mapReady, setMapReady] = useState(false);
+  const [mapInitError, setMapInitError] = useState<string | null>(null);
+
+  riversRef.current = rivers;
+  onSelectRiverRef.current = onSelectRiver;
+  selectedRiverRef.current = selectedRiver;
+  selectedRiverNameRef.current = selectedRiverName;
+  selectedRiverIdRef.current = selectedRiverId;
+  selectedRiverGeojsonRef.current = selectedRiverGeojson;
+  riverLinesGeojsonRef.current = riverLinesGeojson ?? null;
+  activeStationsGeojsonRef.current = activeStationsGeojson ?? null;
+  layerStateRef.current = effectiveLayerState;
+  onMapReadyRef.current = onMapReady;
+
+  const syncRuntimeLayers = useCallback((map: mapboxgl.Map) => {
+    toneRasterBasemap(map);
+    ensureRiversSource(map, riversRef.current);
+    ensureRiverPointLayers(map);
+    syncRiverPointPresentation(
+      map,
+      selectedRiverIdRef.current,
+      true,
+      layerStateRef.current.mri_score_coloring
+    );
+    syncSelectedRiverLine(
+      map,
+      riverLinesGeojsonRef.current ?? selectedRiverGeojsonRef.current,
+      selectedRiverIdRef.current,
+      selectedRiverNameRef.current,
+      layerStateRef.current.mri_river_lines,
+      layerStateRef.current.mri_selected_highlight,
+      layerStateRef.current.mri_labels
+    );
+    syncStatewideHydrologyLayer(map, layerStateRef.current.statewide_hydrology);
+    syncFederalLandsLayer(map, layerStateRef.current.public_federal);
+    syncStateLandsLayer(map, layerStateRef.current.public_state);
+    syncFishingAccessLayer(map, layerStateRef.current.access_fishing_sites);
+    syncActiveStationsLayer(
+      map,
+      layerStateRef.current.mri_active_stations,
+      activeStationsGeojsonRef.current,
+      selectedRiverRef.current
+    );
+    syncHydrologyOverlays(
+      map,
+      layerStateRef.current.hydro_flow_magnitude,
+      layerStateRef.current.hydro_change_indicator,
+      layerStateRef.current.hydro_temp_stress
+    );
+    syncLabels(map, layerStateRef.current.mri_labels);
+  }, []);
+
+  useEffect(() => {
+    if (!mapContainerRef.current || mapRef.current) return;
+    setMapInitError(null);
+
+    if (!MAPBOX_TOKEN) {
+      setMapInitError("Missing NEXT_PUBLIC_MAPBOX_TOKEN.");
+      return;
+    }
+    const initialStyle = initialStyleUrl ?? MAPBOX_STYLES[basemap] ?? BASE_STYLE;
+    currentStyleRef.current = initialStyle;
+
+    let map: mapboxgl.Map;
+    try {
+      map = new mapboxgl.Map({
+        container: mapContainerRef.current,
+        style: initialStyle,
+        center: MONTANA_CENTER,
+        zoom: DEFAULT_ZOOM,
+        pitch: 14,
+        bearing: 0,
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Failed to initialize map";
+      setMapInitError(msg);
+      return;
+    }
+
+    map.addControl(new mapboxgl.NavigationControl(), "top-right");
+    mapRef.current = map;
+    const stationHoverPopup = new mapboxgl.Popup({
+      closeButton: false,
+      closeOnClick: false,
+      offset: 10,
+      className: "mri-station-tooltip",
+    });
+
+    map.on("load", () => {
+      try {
+        if (!map.getSource(MAPBOX_DEM_SOURCE)) {
+          map.addSource(MAPBOX_DEM_SOURCE, {
+            type: "raster-dem",
+            url: "mapbox://mapbox.mapbox-terrain-dem-v1",
+            tileSize: 512,
+            maxzoom: 14,
+          } as any);
+        }
+        map.setTerrain({ source: MAPBOX_DEM_SOURCE, exaggeration: 1.1 });
+      } catch {
+        // Terrain is optional; keep the map usable even when DEM/WebGL2 is unavailable.
+      }
+      setMapReady(true);
+      onMapReadyRef.current?.(map);
+      syncRuntimeLayers(map);
+      map.resize();
+    });
+
+    map.on("error", (event) => {
+      const msg = (event as any)?.error?.message;
+      if (typeof msg === "string" && /Failed to initialize WebGL/i.test(msg)) {
+        setMapInitError(msg);
+      }
+    });
+
+    if (!(map as any).__mriHandlers) {
+      (map as any).__mriHandlers = true;
+      map.on("click", UNCLUSTERED_LAYER, (e: mapboxgl.MapLayerMouseEvent) => {
+        if (e.originalEvent && "cancelBubble" in e.originalEvent) {
+          (e.originalEvent as MouseEvent).cancelBubble = true;
+        }
+        const f = e.features?.[0];
+        const rid = f?.properties?.river_id as string | undefined;
+        if (!rid) return;
+        const river = riversRef.current.find((r) => r.river_id === rid);
+        if (river) onSelectRiverRef.current(river);
+      });
+
+      const handleRiverLineClick = (e: mapboxgl.MapLayerMouseEvent) => {
+        if (!layerStateRef.current.mri_river_lines) return;
+        const stationFeatures = map.queryRenderedFeatures(e.point, {
+          layers: [...CLICK_PRIORITY_LAYERS],
+        });
+        if (stationFeatures.length > 0) return;
+        const f = e.features?.[0];
+        const rid = extractRiverId((f?.properties as Record<string, unknown> | undefined) ?? null)
+          ?? selectedRiverIdRef.current
+          ?? undefined;
+        if (!rid) return;
+        const river = riversRef.current.find((r) => r.river_id === rid || r.slug === rid);
+        if (!river) return;
+        // Force refit even if the same river is clicked again.
+        lastFlownRef.current = null;
+        onSelectRiverRef.current(river);
+      };
+
+      map.on("click", RIVER_HIT_LAYER, handleRiverLineClick);
+
+      map.on("mouseenter", RIVER_HIT_LAYER, () => {
+        map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mouseleave", RIVER_HIT_LAYER, () => {
+        map.getCanvas().style.cursor = "";
+      });
+
+      map.on("mousemove", UNCLUSTERED_LAYER, (e: mapboxgl.MapLayerMouseEvent) => {
+        map.getCanvas().style.cursor = "pointer";
+        const f = e.features?.[0];
+        const id = f?.id;
+        if (id == null) return;
+        if (hoverIdRef.current != null && hoverIdRef.current !== id) {
+          try {
+            map.setFeatureState({ source: RIVERS_SOURCE, id: hoverIdRef.current as number }, { hover: false });
+          } catch {
+            /* ignore */
+          }
+        }
+        hoverIdRef.current = id;
+        try {
+          map.setFeatureState({ source: RIVERS_SOURCE, id: id as number }, { hover: true });
+        } catch {
+          /* ignore */
+        }
+      });
+
+      map.on("mouseleave", UNCLUSTERED_LAYER, () => {
+        map.getCanvas().style.cursor = "";
+        if (hoverIdRef.current != null) {
+          try {
+            map.setFeatureState({ source: RIVERS_SOURCE, id: hoverIdRef.current as number }, { hover: false });
+          } catch {
+            /* ignore */
+          }
+        }
+        hoverIdRef.current = null;
+      });
+
+      map.on("mouseenter", ACCESS_LAYER, () => {
+        map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mouseleave", ACCESS_LAYER, () => {
+        map.getCanvas().style.cursor = "";
+      });
+      map.on("click", ACCESS_LAYER, (e: mapboxgl.MapLayerMouseEvent) => {
+        const feature = e.features?.[0];
+        if (!feature || !feature.geometry || feature.geometry.type !== "Point") return;
+        const coords = [...feature.geometry.coordinates] as [number, number];
+        const props = (feature.properties ?? {}) as Record<string, unknown>;
+        const name =
+          String(props.NAME ?? props.Name ?? props.name ?? "Fishing Access Site");
+        new mapboxgl.Popup({ closeButton: false, closeOnClick: true, offset: 10 })
+          .setLngLat(coords)
+          .setHTML(`<div style="font-size:12px;font-weight:600;color:#0f172a;">${name}</div>`)
+          .addTo(map);
+      });
+
+      map.on("mouseenter", ACTIVE_STATIONS_LAYER, () => {
+        map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mouseleave", ACTIVE_STATIONS_LAYER, () => {
+        map.getCanvas().style.cursor = "";
+        stationHoverPopup.remove();
+      });
+      map.on("mousemove", ACTIVE_STATIONS_LAYER, (e: mapboxgl.MapLayerMouseEvent) => {
+        const feature = e.features?.[0];
+        if (!feature || !feature.geometry || feature.geometry.type !== "Point") return;
+        const coords = [...feature.geometry.coordinates] as [number, number];
+        const props = (feature.properties ?? {}) as Record<string, unknown>;
+        stationHoverPopup
+          .setLngLat(coords)
+          .setHTML(getStationTooltipHtml(props))
+          .addTo(map);
+      });
+      map.on("click", ACTIVE_STATIONS_LAYER, (e: mapboxgl.MapLayerMouseEvent) => {
+        const feature = e.features?.[0];
+        if (!feature || !feature.geometry || feature.geometry.type !== "Point") return;
+        const coords = [...feature.geometry.coordinates] as [number, number];
+        const props = (feature.properties ?? {}) as Record<string, unknown>;
+        const stationName = String(props.station_name ?? props.site_no ?? "USGS Station");
+        const siteNo = String(props.site_no ?? "").trim();
+        const rolesText = String(props.roles_csv ?? "").trim();
+        const relatedRiverNames = String(props.related_river_names_csv ?? "").trim();
+        const sourceRoles = String(props.selected_source_roles ?? "").trim();
+        const selectedName = String(props.selected_river_name ?? "").trim();
+        const sourceText =
+          sourceRoles && selectedName
+            ? `Used for ${selectedName}: ${sourceRoles}`
+            : sourceRoles
+              ? `Used as: ${sourceRoles}`
+              : "";
+
+        stationHoverPopup.remove();
+
+        new mapboxgl.Popup({ closeButton: false, closeOnClick: true, offset: 10 })
+          .setLngLat(coords)
+          .setHTML(
+            `<div style="min-width:184px;font-size:12px;color:#0f172a;line-height:1.4;">
+              <div style="font-weight:700;">${escapeHtml(stationName)}</div>
+              <div style="font-size:11px;color:#334155;">${escapeHtml(siteNo || "USGS station")}</div>
+              <div style="margin-top:4px;font-size:11px;color:#334155;">${escapeHtml(rolesText || "role metadata pending")}</div>
+              ${relatedRiverNames ? `<div style="margin-top:2px;font-size:11px;color:#475569;">${escapeHtml(relatedRiverNames)}</div>` : ""}
+              ${sourceText ? `<div style="margin-top:5px;font-size:11px;color:#1e293b;font-weight:600;">${escapeHtml(sourceText)}</div>` : ""}
+            </div>`
+          )
+          .addTo(map);
+      });
+    }
+
+    return () => {
+      stationHoverPopup.remove();
+      mapRef.current?.remove();
+      mapRef.current = null;
+      setMapReady(false);
+      lastFlownRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapContainerRef.current) return;
+
+    const safeResize = () => {
+      if (mapRef.current !== map) return;
+      if ((map as any)?._removed) return;
+      const container = map.getContainer?.();
+      if (!container || !container.isConnected) return;
+      try {
+        map.resize();
+      } catch {
+        // Ignore resize calls during map teardown.
+      }
+    };
+
+    const handleResize = () => safeResize();
+    window.addEventListener("resize", handleResize);
+
+    const resizeObserver = new ResizeObserver(() => safeResize());
+    resizeObserver.observe(mapContainerRef.current);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      resizeObserver.disconnect();
+    };
+  }, [mapReady]);
+
+  const riversKey = rivers.map((r) => r.river_id).join(",");
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    if (typeof map.isStyleLoaded === "function" && !map.isStyleLoaded()) return;
+
+    ensureRiversSource(map, rivers);
+    ensureRiverPointLayers(map);
+    syncRiverPointPresentation(map, selectedRiverId, true, effectiveLayerState.mri_score_coloring);
+
+    if (!selectedRiverId) {
+      const fc = riversToFeatureCollection(rivers);
+      if (fc.features.length) {
+        map.fitBounds(MONTANA_BOUNDS, {
+          padding: { top: 112, right: rightPanelOpen ? 420 : 72, bottom: 118, left: 86 },
+          duration: 0,
+          pitch: 14,
+          bearing: 0,
+          maxZoom: 6.35,
+        });
+      }
+    }
+  }, [
+    riversKey,
+    mapReady,
+    rivers,
+    selectedRiverId,
+    effectiveLayerState.mri_score_coloring,
+    rightPanelOpen,
+  ]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    if (typeof map.isStyleLoaded === "function" && !map.isStyleLoaded()) return;
+    syncRiverPointPresentation(
+      map,
+      selectedRiverId,
+      true,
+      effectiveLayerState.mri_score_coloring
+    );
+    syncSelectedRiverLine(
+      map,
+      riverLinesGeojson ?? selectedRiverGeojson,
+      selectedRiverId,
+      selectedRiverName,
+      effectiveLayerState.mri_river_lines,
+      effectiveLayerState.mri_selected_highlight,
+      effectiveLayerState.mri_labels
+    );
+
+    if (!selectedRiverId) {
+      lastFlownRef.current = null;
+      lastFitSignatureRef.current = null;
+      return;
+    }
+
+    const fitSignature = `${selectedRiverId}|${selectionSeq}|${rightPanelOpen ? 1 : 0}|${drawerState}`;
+    if (lastFitSignatureRef.current === fitSignature) return;
+    lastFitSignatureRef.current = fitSignature;
+    lastFlownRef.current = selectedRiverId;
+
+    const paddingBottom =
+      drawerState === "expanded" ? 360 : drawerState === "mid" ? 220 : 120;
+    const padding: mapboxgl.PaddingOptions = {
+      top: 80,
+      left: 40,
+      right: rightPanelOpen ? 420 : 40,
+      bottom: paddingBottom,
+    };
+
+    const focus: [number, number] | undefined =
+      selectedRiver?.lat != null && selectedRiver?.lng != null
+        ? [selectedRiver.lng, selectedRiver.lat]
+        : RIVER_FOCUS_POINTS[selectedRiverId];
+
+    const fullRiverBbox =
+      selectedRiverBoundsFromGeojson(riverLinesGeojson, selectedRiverId) ??
+      selectedRiverBoundsFromGeojson(selectedRiverGeojson, selectedRiverId) ??
+      (selectedRiverGeojson ? geojsonBbox(selectedRiverGeojson) : null);
+
+    if (fullRiverBbox && map.fitBounds) {
+      map.fitBounds(
+        [
+          [fullRiverBbox[0], fullRiverBbox[1]],
+          [fullRiverBbox[2], fullRiverBbox[3]],
+        ],
+        { padding, duration: 450, maxZoom: 11, essential: true }
+      );
+      return;
+    }
+
+    if (focus) {
+      map.flyTo({
+        center: focus,
+        zoom: FLY_ZOOM,
+        duration: 450,
+        curve: FLY_CURVE,
+        essential: true,
+      });
+    }
+  }, [
+    selectedRiverId,
+    selectedRiverGeojson,
+    riverLinesGeojson,
+    selectedRiver,
+    effectiveLayerState.mri_river_lines,
+    effectiveLayerState.mri_selected_highlight,
+    effectiveLayerState.mri_labels,
+    effectiveLayerState.mri_score_coloring,
+    rightPanelOpen,
+    drawerState,
+    selectionSeq,
+    mapReady,
+  ]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const nextStyle = MAPBOX_STYLES[basemap] ?? MAPBOX_STYLES.hybrid;
+    if (currentStyleRef.current === nextStyle) return;
+    currentStyleRef.current = nextStyle;
+    map.setStyle(nextStyle);
+  }, [basemap, mapReady]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    if (typeof map.isStyleLoaded === "function" && !map.isStyleLoaded()) return;
+
+    syncStatewideHydrologyLayer(map, effectiveLayerState.statewide_hydrology);
+    syncFederalLandsLayer(map, effectiveLayerState.public_federal);
+    syncStateLandsLayer(map, effectiveLayerState.public_state);
+    syncFishingAccessLayer(map, effectiveLayerState.access_fishing_sites);
+    syncActiveStationsLayer(map, effectiveLayerState.mri_active_stations, activeStationsGeojson, selectedRiver);
+    syncHydrologyOverlays(
+      map,
+      effectiveLayerState.hydro_flow_magnitude,
+      effectiveLayerState.hydro_change_indicator,
+      effectiveLayerState.hydro_temp_stress
+    );
+    syncLabels(map, effectiveLayerState.mri_labels);
+  }, [
+    mapReady,
+    effectiveLayerState.statewide_hydrology,
+    effectiveLayerState.public_federal,
+    effectiveLayerState.public_state,
+    effectiveLayerState.access_fishing_sites,
+    effectiveLayerState.mri_active_stations,
+    effectiveLayerState.hydro_flow_magnitude,
+    effectiveLayerState.hydro_change_indicator,
+    effectiveLayerState.hydro_temp_stress,
+    effectiveLayerState.mri_labels,
+    activeStationsGeojson,
+    selectedRiver?.river_id,
+    selectedRiver?.flow_source_site_no,
+    selectedRiver?.temp_source_site_no,
+    selectedRiver?.river_name,
+  ]);
+
+  // Re-apply custom sources/layers after every Mapbox style change.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const handleStyleLoad = () => {
+      setMapReady(true);
+      syncRuntimeLayers(map);
+      try {
+        map.resize();
+      } catch {
+        /* ignore */
+      }
+    };
+
+    map.on("style.load", handleStyleLoad);
+    return () => {
+      map.off("style.load", handleStyleLoad);
+    };
+  }, [syncRuntimeLayers]);
+
+  return (
+    <div
+      id="map"
+      ref={mapContainerRef}
+      className={`absolute inset-0 h-full w-full min-h-0 [&_.mapboxgl-marker]:cursor-pointer ${className ?? ""}`.trim()}
+      style={{ position: "absolute", inset: 0, height: "100%", width: "100%", minHeight: 320 }}
+      aria-label="Montana river map"
+    >
+      {mapInitError && (
+        <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center bg-slate-100/85">
+          <div className="pointer-events-auto rounded-xl bg-white px-6 py-5 text-center shadow-md">
+            <div className="text-xl font-bold text-slate-900">Map unavailable</div>
+            <div className="mt-1 text-sm text-slate-600">{mapInitError}</div>
+          </div>
+        </div>
+      )}
+      {mapReady && mapRef.current && <MapControls map={mapRef.current} />}
+    </div>
+  );
+}
+
+
+===== components/OnxShell.tsx =====
+"use client";
+
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import mapboxgl from "mapbox-gl";
+import { Plus, Minus, Maximize2, Crosshair, Layers, List, X } from "lucide-react";
+import { MapView } from "@/components/MapView";
+import { fetchRiverGeom } from "@/lib/supabase";
+import { fetchRiverGeojsonBrowser } from "@/lib/supabaseBrowser";
+import { RIVER_FOCUS_POINTS } from "@/lib/river-focus-points";
+import { deriveScoreBreakdown } from "@/lib/scoreBreakdown";
+import { generateTodaysRead } from "@/lib/todaysRead";
+import { MRI_COLORS } from "@/lib/theme";
+import { getFlowTrendArrow } from "@/lib/trend";
+import {
+  fetchRiverDetailAnalyticsByIdOrSlug,
+  fetchRiverHistory14d,
+  fetchRiverIntraday24h,
+  fetchRiverWeatherWindow,
+  fetchUsgsSiteSummaries,
+} from "@/lib/supabase";
+import { buildRiverDetailAnalytics } from "@/lib/riverAnalytics";
+import {
+  BASEMAP_OPTIONS,
+  DEFAULT_BASEMAP,
+  LAYER_GROUP_ORDER,
+  LAYER_REGISTRY,
+  LAYERS_STORAGE_KEY,
+  createDefaultLayerState,
+  type BasemapId,
+  type LayerId,
+} from "@/src/map/layers/registry";
+import type {
+  FishabilityRow,
+  RiverDetailAnalyticsBackendRow,
+  RiverDetailAnalytics,
+  RiverSourceSiteSummary,
+  RiverWeatherDay,
+} from "@/lib/types";
+
+type River = FishabilityRow;
+
+function TierPill({ tier }: { tier?: string }) {
+  const dotColor =
+    tier === "Good" || tier === "HOT" || tier === "GOOD"
+      ? MRI_COLORS.good
+      : tier === "Fair" || tier === "FAIR"
+      ? MRI_COLORS.fair
+      : MRI_COLORS.tough;
+  const label =
+    tier === "HOT" || tier === "GOOD"
+      ? "Good"
+      : tier === "FAIR"
+      ? "Fair"
+      : tier === "TOUGH"
+      ? "Tough"
+      : tier ?? "—";
+
+  return (
+    <span className="inline-flex items-center gap-2 text-xs font-semibold text-white/90">
+      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: dotColor }} />
+      {label}
+    </span>
+  );
+}
+
+function formatNum(value: number | null | undefined, digits = 0): string {
+  if (value == null || Number.isNaN(value)) return "—";
+  return Number(value).toFixed(digits);
+}
+
+function formatPullTime(value: string | null | undefined): string {
+  if (!value) return "—";
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return "—";
+  return dt.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: "America/Denver",
+  });
+}
+
+function formatUpdatedAgo(value: string | null | undefined): string {
+  if (!value) return "Updated recently";
+  const ms = new Date(value).getTime();
+  if (Number.isNaN(ms)) return "Updated recently";
+  const diffMin = Math.max(0, Math.floor((Date.now() - ms) / 60000));
+  if (diffMin < 1) return "Updated just now";
+  if (diffMin < 60) return `Updated ${diffMin} min ago`;
+  const h = Math.floor(diffMin / 60);
+  if (h < 24) return `Updated ${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `Updated ${d}d ago`;
+}
+
+function getFishabilityIndex(score: number | null | undefined) {
+  if (score == null || Number.isNaN(score)) {
+    return { value: "—", normalized: null as number | null, percent: 0, band: "Unavailable", optimal: false };
+  }
+  const normalized = Math.max(0, Math.min(10, Number(score) / 10));
+  const percent = Math.max(0, Math.min(100, normalized * 10));
+  const band = normalized >= 8.5 ? "Excellent" : normalized >= 6.5 ? "Good" : normalized >= 4 ? "Fair" : "Poor";
+  return {
+    value: normalized.toFixed(1),
+    normalized,
+    percent,
+    band,
+    optimal: normalized >= 7.5 && normalized <= 9.2,
+  };
+}
+
+function getTempStatusLabel(river: River | null | undefined): string {
+  if (!river) return "Temp status unavailable";
+  if (river.temp_status === "available_stale") {
+    const mins = river.temp_age_minutes;
+    if (mins != null && Number.isFinite(mins)) {
+      const h = Math.floor(mins / 60);
+      return h > 0 ? `Temp stale (${h}h old)` : `Temp stale (${mins}m old)`;
+    }
+    return "Temp stale";
+  }
+  if (river.temp_status === "unavailable_at_gauge") {
+    return "Temp not available at this gauge";
+  }
+  return "Temp fresh";
+}
+
+function getTempSourceLabel(river: River | null | undefined): string {
+  if (!river) return "—";
+  const kind = river.temp_source_kind ?? "NONE";
+  const site = river.temp_source_site_no ?? "—";
+  if (kind === "NONE") return "No temp source";
+  return `${kind} • Site ${site}`;
+}
+
+function getConfidenceBadgeLabel(river: River | null | undefined): string {
+  if (!river?.confidence_level) return "Confidence unavailable";
+  return `${river.confidence_level} confidence`;
+}
+
+function getConfidenceBadgeClass(level: River["confidence_level"]): string {
+  if (level === "High") {
+    return "border-[rgba(110,150,125,0.34)] bg-[rgba(79,103,87,0.18)] text-[#c2d5c6]";
+  }
+  if (level === "Moderate") {
+    return "border-[rgba(173,126,78,0.34)] bg-[rgba(134,97,57,0.18)] text-[#d8be97]";
+  }
+  return "border-[var(--mri-border)] bg-[rgba(21,31,35,0.7)] text-[var(--mri-text-dim)]";
+}
+
+function formatDetailedTime(value: string | null | undefined): string {
+  if (!value) return "Unavailable";
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return "Unavailable";
+  return dt.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: "America/Denver",
+  }) + " MT";
+}
+
+function formatMetricNumber(
+  value: number | null | undefined,
+  opts?: { digits?: number; suffix?: string; prefix?: string }
+): string {
+  if (value == null || Number.isNaN(value)) return "Unavailable";
+  const digits = opts?.digits ?? 0;
+  return `${opts?.prefix ?? ""}${Number(value).toFixed(digits)}${opts?.suffix ?? ""}`;
+}
+
+function formatSignedPercent(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) return "Unavailable";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${Number(value).toFixed(1)}%`;
+}
+
+function formatTempTrend(label: string | null, delta: number | null): string {
+  if (!label) return "Unavailable";
+  if (delta == null || Number.isNaN(delta)) return label;
+  const sign = delta > 0 ? "+" : "";
+  return `${label} (${sign}${delta.toFixed(1)}°F / 24h)`;
+}
+
+function metricNoteAboveMedian(flowRatio: number | null): string | null {
+  if (flowRatio == null || Number.isNaN(flowRatio)) return null;
+  if (flowRatio > 1.05) return "Above median";
+  if (flowRatio < 0.95) return "Below median";
+  return "Near median";
+}
+
+function metricNote48hChange(change48hPct: number | null): string | null {
+  if (change48hPct == null || Number.isNaN(change48hPct)) return null;
+  if (change48hPct > 5) return "Stable rise";
+  if (change48hPct < -5) return "Falling";
+  return "Relatively stable";
+}
+
+function getRiverTrustLine(river: River): string {
+  const change = river.change_48h_pct_calc;
+  if (change == null || Number.isNaN(change)) return "Trend unavailable";
+  if (change > 5) return `Rising flow (${formatSignedPercent(change)})`;
+  if (change < -5) return `Falling flow (${formatSignedPercent(change)})`;
+  return `Stable flow (${formatSignedPercent(change)})`;
+}
+
+function formatSourceSite(siteNo: string | null | undefined, siteName: string | null | undefined): string {
+  if (!siteNo && !siteName) return "Unavailable";
+  if (siteNo && siteName) return `${siteNo} • ${siteName}`;
+  return siteNo ?? siteName ?? "Unavailable";
+}
+
+function MetricRow({
+  label,
+  value,
+  note,
+}: {
+  label: string;
+  value: string;
+  note?: string | null;
+}) {
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1 border-b border-white/6 py-2 last:border-b-0">
+      <div className="min-w-0">
+        <div className="text-[11px] font-medium text-white/76">{label}</div>
+        {note ? <div className="mt-0.5 text-[10px] leading-4 text-white/40">{note}</div> : null}
+      </div>
+      <div className="max-w-[180px] text-right text-[11px] font-semibold text-white/92">{value}</div>
+    </div>
+  );
+}
+
+function MetricsSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-[18px] border border-[rgba(180,198,209,0.1)] bg-[rgba(16,24,27,0.58)] p-3.5">
+      <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-white/42">{title}</div>
+      <div className="mt-2">{children}</div>
+    </section>
+  );
+}
+
+function DetailedMetricsContent({
+  analytics,
+}: {
+  analytics: RiverDetailAnalytics | null;
+}) {
+  if (!analytics) {
+    return <div className="text-[11px] text-[var(--mri-text-dim)]">No metrics available.</div>;
+  }
+
+  return (
+    <div className="space-y-3">
+      <MetricsSection title="Hydrology">
+        <MetricRow label="Current Flow (cfs)" value={formatMetricNumber(analytics.hydrology.currentFlowCfs, { suffix: " CFS" })} />
+        <MetricRow label="Median Flow" value={formatMetricNumber(analytics.hydrology.medianFlowCfs, { suffix: " CFS" })} />
+        <MetricRow
+          label="Flow Ratio"
+          value={analytics.hydrology.flowRatio != null ? `${analytics.hydrology.flowRatio.toFixed(2)}x median` : "Unavailable"}
+          note={metricNoteAboveMedian(analytics.hydrology.flowRatio)}
+        />
+        <MetricRow
+          label="48h Flow Change"
+          value={formatSignedPercent(analytics.hydrology.change48hPct)}
+          note={metricNote48hChange(analytics.hydrology.change48hPct)}
+        />
+        <MetricRow
+          label="Flow Percentile for Date"
+          value={
+            analytics.hydrology.flowPercentile != null
+              ? `${Math.round(analytics.hydrology.flowPercentile)}th percentile`
+              : analytics.hydrology.flowPercentileStatus ?? "Insufficient history"
+          }
+        />
+        <MetricRow
+          label="Stability Index"
+          value={analytics.hydrology.stabilityLabel ?? "Unavailable"}
+          note={
+            analytics.hydrology.stabilityIndexRaw != null
+              ? `CV ${analytics.hydrology.stabilityIndexRaw.toFixed(3)}`
+              : "Insufficient recent flow history"
+          }
+        />
+        <MetricRow
+          label="Stage / Gauge Height"
+          value={formatMetricNumber(analytics.hydrology.gaugeHeightFt, { digits: 1, suffix: " ft" })}
+        />
+      </MetricsSection>
+
+      <MetricsSection title="Thermal">
+        <MetricRow
+          label="Current Water Temperature"
+          value={formatMetricNumber(analytics.thermal.currentWaterTempF, { digits: 1, suffix: "°F" })}
+        />
+        <MetricRow label="Temperature Source Type" value={analytics.thermal.tempSourceKind ?? "Unknown"} />
+        <MetricRow label="Temperature Observed At" value={formatDetailedTime(analytics.thermal.tempObservedAt)} />
+        <MetricRow label="Temperature Confidence" value={analytics.thermal.tempConfidence ?? "Unavailable"} />
+        <MetricRow
+          label="Thermal Trend"
+          value={formatTempTrend(analytics.thermal.thermalTrendLabel, analytics.thermal.thermalTrendDelta24hF)}
+        />
+        <MetricRow label="Thermal Status" value={analytics.thermal.thermalStatus ?? "Unavailable"} />
+        <MetricRow
+          label="3-Day Water Temp Direction"
+          value={analytics.thermal.direction3Day ?? "Forecast not yet enabled"}
+        />
+      </MetricsSection>
+
+      <MetricsSection title="Weather">
+        <MetricRow label="Current Air Temperature" value={formatMetricNumber(analytics.weather.airTempF, { digits: 0, suffix: "°F" })} />
+        <MetricRow
+          label="Wind Speed"
+          value={formatMetricNumber(analytics.weather.windSpeedMph, { digits: 1, suffix: " mph" })}
+          note={analytics.weather.windSpeedMph != null ? "Using current MRI weather signal" : null}
+        />
+        <MetricRow label="Wind Direction" value={analytics.weather.windDirection ?? "Unavailable"} />
+        <MetricRow label="Gusts" value={formatMetricNumber(analytics.weather.gustMph, { digits: 0, suffix: " mph" })} />
+        <MetricRow
+          label="Precipitation Probability"
+          value={formatMetricNumber(analytics.weather.precipChancePct, { digits: 0, suffix: "%" })}
+        />
+        <MetricRow
+          label="Cloud Cover"
+          value={formatMetricNumber(analytics.weather.cloudCoverPct, { digits: 0, suffix: "%" })}
+        />
+        <MetricRow
+          label="Daily High / Low"
+          value={
+            analytics.weather.highTempF != null || analytics.weather.lowTempF != null
+              ? `${analytics.weather.highTempF != null ? Math.round(analytics.weather.highTempF) : "—"}° / ${analytics.weather.lowTempF != null ? Math.round(analytics.weather.lowTempF) : "—"}°`
+              : "Unavailable"
+          }
+        />
+        <MetricRow label="Wind Fishing Impact" value={analytics.weather.windImpact ?? "Unavailable"} />
+        <MetricRow label="Dry Fly Wind Impact" value={analytics.weather.dryFlyWindImpact ?? "Unavailable"} />
+      </MetricsSection>
+
+      <MetricsSection title="Forecast">
+        <MetricRow
+          label="Tomorrow Air Temp"
+          value={analytics.forecast.day1.available ? formatMetricNumber(analytics.forecast.day1.airTempF, { digits: 0, suffix: "°F" }) : "Forecast not yet enabled"}
+        />
+        <MetricRow
+          label="Tomorrow Wind"
+          value={analytics.forecast.day1.available ? formatMetricNumber(analytics.forecast.day1.windMph, { digits: 0, suffix: " mph" }) : "Forecast not yet enabled"}
+        />
+        <MetricRow
+          label="Tomorrow Precip Chance"
+          value={analytics.forecast.day1.available ? formatMetricNumber(analytics.forecast.day1.precipChancePct, { digits: 0, suffix: "%" }) : "Forecast not yet enabled"}
+        />
+        <MetricRow
+          label="Day 2 Air Temp"
+          value={analytics.forecast.day2.available ? formatMetricNumber(analytics.forecast.day2.airTempF, { digits: 0, suffix: "°F" }) : "Forecast not yet enabled"}
+        />
+        <MetricRow
+          label="Day 2 Wind"
+          value={analytics.forecast.day2.available ? formatMetricNumber(analytics.forecast.day2.windMph, { digits: 0, suffix: " mph" }) : "Forecast not yet enabled"}
+        />
+        <MetricRow
+          label="Day 2 Precip Chance"
+          value={analytics.forecast.day2.available ? formatMetricNumber(analytics.forecast.day2.precipChancePct, { digits: 0, suffix: "%" }) : "Forecast not yet enabled"}
+        />
+        <MetricRow
+          label="Day 3 Air Temp"
+          value={analytics.forecast.day3.available ? formatMetricNumber(analytics.forecast.day3.airTempF, { digits: 0, suffix: "°F" }) : "Forecast not yet enabled"}
+        />
+        <MetricRow
+          label="Day 3 Wind"
+          value={analytics.forecast.day3.available ? formatMetricNumber(analytics.forecast.day3.windMph, { digits: 0, suffix: " mph" }) : "Forecast not yet enabled"}
+        />
+        <MetricRow
+          label="Day 3 Precip Chance"
+          value={analytics.forecast.day3.available ? formatMetricNumber(analytics.forecast.day3.precipChancePct, { digits: 0, suffix: "%" }) : "Forecast not yet enabled"}
+        />
+        <MetricRow label="3-Day Wind Outlook" value={analytics.forecast.windOutlook ?? "Forecast not yet enabled"} />
+        <MetricRow label="3-Day Fishing Outlook" value={analytics.forecast.fishingOutlook ?? "Forecast model not yet enabled"} />
+        <MetricRow label="3-Day Flow Outlook" value={analytics.forecast.flowOutlook ?? "Flow forecast not yet enabled"} />
+      </MetricsSection>
+
+      <MetricsSection title="Biology">
+        <MetricRow
+          label="Hatch Likelihood"
+          value={analytics.biology.hatchLikelihood ?? "Unavailable"}
+          note="Derived from season, temperature, and stability"
+        />
+        <MetricRow label="Dry Fly Viability" value={analytics.biology.dryFlyViability ?? "Unavailable"} />
+        <MetricRow label="Tactical Read" value={analytics.biology.tacticalRead ?? "Unavailable"} />
+      </MetricsSection>
+
+      <MetricsSection title="Data Quality / Source Trust">
+        <MetricRow
+          label="Flow Source Site"
+          value={formatSourceSite(analytics.sourceTrust.flowSourceSiteNo, analytics.sourceTrust.flowSourceSiteName)}
+        />
+        <MetricRow
+          label="Temperature Source Site"
+          value={formatSourceSite(analytics.sourceTrust.tempSourceSiteNo, analytics.sourceTrust.tempSourceSiteName)}
+        />
+        <MetricRow label="Temp Source Kind" value={analytics.sourceTrust.tempSourceKind ?? "Unknown"} />
+        <MetricRow
+          label="Observation Timestamp"
+          value={analytics.sourceTrust.observationTimestamp ? formatDetailedTime(analytics.sourceTrust.observationTimestamp) : "Unavailable"}
+        />
+        <MetricRow
+          label="Last Hydrology Pull"
+          value={analytics.sourceTrust.lastHydrologyPullAt ? formatDetailedTime(analytics.sourceTrust.lastHydrologyPullAt) : "Unavailable"}
+        />
+        <MetricRow label="Data Confidence" value={analytics.sourceTrust.overallConfidence ?? "Unavailable"} />
+        <MetricRow
+          label="Missing Inputs"
+          value={analytics.sourceTrust.missingInputs.length ? analytics.sourceTrust.missingInputs.join(", ") : "None"}
+        />
+      </MetricsSection>
+    </div>
+  );
+}
+
+function DesktopTrayCard({
+  river,
+  selected,
+  onSelect,
+}: {
+  river: River;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      onClick={onSelect}
+      className={`mri-drawer-card mri-tray-card shrink-0 text-left active:translate-y-[1px] ${
+        selected ? "mri-drawer-card-selected" : ""
+      }`}
+    >
+      <div className="p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="truncate text-[13px] font-semibold text-white">{river.river_name}</div>
+            <div className="mt-0.5 truncate text-[11px] text-white/50">{river.gauge_label ?? ""}</div>
+          </div>
+          <div className="text-right">
+            <div className="text-[24px] font-semibold leading-none tracking-[-0.02em] text-white">
+              {river.fishability_score_calc ?? "—"}
+            </div>
+            <div className="mt-1 text-[10px] uppercase tracking-[0.12em] text-white/40">Score</div>
+          </div>
+        </div>
+        <div className="mt-2.5 flex items-center justify-between gap-3">
+          <TierPill
+            tier={
+              river.bite_tier === "HOT" || river.bite_tier === "GOOD"
+                ? "Good"
+                : river.bite_tier === "FAIR"
+                ? "Fair"
+                : river.bite_tier === "TOUGH"
+                ? "Tough"
+                : undefined
+            }
+          />
+          <div className="flex items-center gap-3 text-[11px] text-white/72">
+            <span>
+              {river.flow_cfs ?? "—"}
+              <span className="ml-1 text-white/38">{getFlowTrendArrow(river.change_48h_pct_calc)}</span>
+            </span>
+            <span>{river.water_temp_f != null ? `${Number(river.water_temp_f).toFixed(1)}°` : "—"}</span>
+          </div>
+        </div>
+        <div className="mt-2 text-[10px] font-medium tracking-[0.01em] text-white/58">{getRiverTrustLine(river)}</div>
+      </div>
+    </button>
+  );
+}
+
+export default function OnxShell({
+  rivers,
+  stationGeojson,
+  riverLinesGeojson: initialRiverLinesGeojson,
+  dateLabel = new Date().toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }),
+}: {
+  rivers: River[];
+  stationGeojson?: GeoJSON.FeatureCollection<GeoJSON.Point, Record<string, unknown>> | null;
+  riverLinesGeojson?: GeoJSON.FeatureCollection<GeoJSON.Geometry, Record<string, unknown>> | null;
+  dateLabel?: string;
+}) {
+  type TopPanel = "none" | "layers" | "detail";
+  type DrawerSnap = "collapsed" | "mid" | "expanded";
+  type MobileSurface = "map" | "list" | "detail" | "tools";
+  type MobileListSnap = "peek" | "mid" | "full";
+  const DRAWER_SNAP_Y: Record<DrawerSnap, number> = {
+    collapsed: 0.94,
+    mid: 0.76,
+    expanded: 0.46,
+  };
+  const MOBILE_LIST_SNAP_Y: Record<MobileListSnap, number> = {
+    peek: 0.78,
+    mid: 0.46,
+    full: 0.08,
+  };
+  const SNAP_TRANSITION = "transform 260ms ease-in-out";
+
+  const [search, setSearch] = useState("");
+  const [tier, setTier] = useState<"All" | "Good" | "Fair" | "Tough">("All");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectionSeq, setSelectionSeq] = useState(0);
+  const [drawerSnap, setDrawerSnap] = useState<DrawerSnap>("collapsed");
+  const [sheetY, setSheetY] = useState<number>(DRAWER_SNAP_Y.collapsed);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragRef = useRef<{ startY: number; startSheetY: number } | null>(null);
+  const [isMobile, setIsMobile] = useState(false);
+  const [mobileSurface, setMobileSurface] = useState<MobileSurface>("map");
+  const [mobileListSnap, setMobileListSnap] = useState<MobileListSnap>("peek");
+  const [mobileSheetY, setMobileSheetY] = useState<number>(MOBILE_LIST_SNAP_Y.peek);
+  const [isMobileDragging, setIsMobileDragging] = useState(false);
+  const mobileDragRef = useRef<{ startY: number; startSheetY: number } | null>(null);
+  const mobileDetailDragRef = useRef<{ startY: number } | null>(null);
+
+  const [selectedGeojson, setSelectedGeojson] = useState<GeoJSON.GeoJSON | null>(null);
+  const mapRef = useRef<mapboxgl.Map | null>(null);
+
+  const [openTopPanel, setOpenTopPanel] = useState<TopPanel>("none");
+  const [transparencyOpen, setTransparencyOpen] = useState(false);
+  const [detailMetricsOpen, setDetailMetricsOpen] = useState(false);
+  const [mobileDetailMetricsOpen, setMobileDetailMetricsOpen] = useState(false);
+  const [advancedLayersOpen, setAdvancedLayersOpen] = useState(false);
+  const [historyRows, setHistoryRows] = useState<
+    Array<{ obs_date: string; flow_cfs: number | null; water_temp_f: number | null; fishability_score: number | null }>
+  >([]);
+  const [, setHistoryLoading] = useState(false);
+  const [intradayRows, setIntradayRows] = useState<
+    Array<{ observed_at: string; flow_cfs: number | null; water_temp_f: number | null; gage_height_ft: number | null }>
+  >([]);
+  const [, setIntradayLoading] = useState(false);
+  const [weatherRows, setWeatherRows] = useState<RiverWeatherDay[]>([]);
+  const [sourceSites, setSourceSites] = useState<Record<string, RiverSourceSiteSummary>>({});
+  const [backendAnalytics, setBackendAnalytics] = useState<RiverDetailAnalyticsBackendRow | null>(null);
+
+  const [basemap, setBasemap] = useState<BasemapId>("hybrid");
+  const [layerState, setLayerState] = useState<Record<LayerId, boolean>>(
+    createDefaultLayerState()
+  );
+
+  const basemapById = useMemo(
+    () => Object.fromEntries(BASEMAP_OPTIONS.map((b) => [b.id, b])) as Record<BasemapId, (typeof BASEMAP_OPTIONS)[number]>,
+    []
+  );
+
+  const filtered = useMemo(() => {
+    const s = search.trim().toLowerCase();
+    return (rivers ?? [])
+      .filter((r) => {
+        const matchesSearch =
+          !s ||
+          (r.river_name ?? "").toLowerCase().includes(s) ||
+          (r.gauge_label ?? "").toLowerCase().includes(s);
+
+        const displayTier =
+          r.bite_tier === "HOT" || r.bite_tier === "GOOD"
+            ? "Good"
+            : r.bite_tier === "FAIR"
+            ? "Fair"
+            : r.bite_tier === "TOUGH"
+            ? "Tough"
+            : "";
+
+        return matchesSearch && (tier === "All" || displayTier === tier);
+      })
+      .sort(
+        (a, b) =>
+          (b.fishability_score_calc ?? -999) - (a.fishability_score_calc ?? -999)
+      );
+  }, [rivers, search, tier]);
+
+  const selected = useMemo(() => {
+    if (!selectedId) return null;
+    return (
+      filtered.find((r) => r.river_id === selectedId) ??
+      rivers.find((r) => r.river_id === selectedId) ??
+      null
+    );
+  }, [filtered, rivers, selectedId]);
+
+  const breakdown = useMemo(() => (selected ? deriveScoreBreakdown(selected) : null), [selected]);
+  const selectedFishIndex = useMemo(
+    () => getFishabilityIndex(selected?.fishability_score_calc ?? null),
+    [selected]
+  );
+  const todaysRead = useMemo(() => generateTodaysRead(selected), [selected]);
+  const detailedAnalytics = useMemo(
+    () =>
+      buildRiverDetailAnalytics({
+        river: selected,
+        historyRows,
+        intradayRows,
+        weatherRows,
+        flowSourceSite: selected?.flow_source_site_no ? sourceSites[selected.flow_source_site_no] ?? null : null,
+        tempSourceSite: selected?.temp_source_site_no ? sourceSites[selected.temp_source_site_no] ?? null : null,
+        backendAnalytics,
+      }),
+    [selected, historyRows, intradayRows, weatherRows, sourceSites, backendAnalytics]
+  );
+  const topRivers = useMemo(
+    () => filtered.filter((r) => (r.fishability_score_calc ?? null) != null).slice(0, 5),
+    [filtered]
+  );
+  const latestPullAt = useMemo(() => {
+    let latestMs = 0;
+    for (const r of rivers) {
+      const candidate =
+        r.source_flow_observed_at ?? r.source_temp_observed_at ?? r.updated_at ?? null;
+      if (!candidate) continue;
+      const ms = new Date(candidate).getTime();
+      if (!Number.isNaN(ms) && ms > latestMs) latestMs = ms;
+    }
+    return latestMs > 0 ? new Date(latestMs).toISOString() : null;
+  }, [rivers]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function run() {
+      if (!selectedId) {
+        setSelectedGeojson(null);
+        return;
+      }
+      const river =
+        filtered.find((r) => r.river_id === selectedId) ??
+        rivers.find((r) => r.river_id === selectedId);
+      const key = river?.slug ?? river?.river_id ?? selectedId;
+
+      const gj = await fetchRiverGeojsonBrowser(key);
+      if (cancelled) return;
+      if (gj) {
+        setSelectedGeojson(gj);
+        return;
+      }
+
+      const geom = await fetchRiverGeom(selectedId);
+      if (cancelled) return;
+      setSelectedGeojson(
+        geom
+          ? ({
+              type: "Feature",
+              geometry: geom,
+              properties: { river_id: selectedId },
+            } as GeoJSON.Feature)
+          : null
+      );
+    }
+
+    run().catch(() => {
+      if (!cancelled) setSelectedGeojson(null);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId, filtered, rivers]);
+
+  function setMobileSurfaceState(next: MobileSurface, opts?: { listSnap?: MobileListSnap }) {
+    setOpenTopPanel("none");
+    setTransparencyOpen(false);
+    if (next === "list" && opts?.listSnap) {
+      setMobileListSnap(opts.listSnap);
+      setMobileSheetY(MOBILE_LIST_SNAP_Y[opts.listSnap]);
+    }
+    setMobileSurface(next);
+  }
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const media = window.matchMedia("(max-width: 639px)");
+    const sync = () => {
+      const mobile = media.matches;
+      setIsMobile(mobile);
+      if (mobile) {
+        setMobileSurface((prev) => {
+          if (prev === "map") {
+            setMobileListSnap("peek");
+            setMobileSheetY(MOBILE_LIST_SNAP_Y.peek);
+            return "list";
+          }
+          return prev;
+        });
+      }
+    };
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
+
+  useEffect(() => {
+    if (selected) {
+      setDetailMetricsOpen(false);
+      setMobileDetailMetricsOpen(false);
+      if (isMobile) {
+        setMobileSurfaceState("detail");
+        return;
+      }
+      setOpenTopPanel((prev) => (prev === "layers" ? prev : "detail"));
+      return;
+    }
+    if (isMobile && mobileSurface === "detail") {
+      setMobileSurfaceState("list", { listSnap: "peek" });
+    }
+    if (openTopPanel === "detail") {
+      setOpenTopPanel("none");
+    }
+    setTransparencyOpen(false);
+  }, [selected, openTopPanel, isMobile, mobileSurface]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadBackendAnalytics() {
+      if (!selected?.river_id) {
+        setBackendAnalytics(null);
+        return;
+      }
+      const data =
+        (await fetchRiverDetailAnalyticsByIdOrSlug(selected.river_id)) ??
+        (selected.slug ? await fetchRiverDetailAnalyticsByIdOrSlug(selected.slug) : null);
+      if (!cancelled) {
+        setBackendAnalytics(data);
+      }
+    }
+    loadBackendAnalytics().catch(() => {
+      if (!cancelled) {
+        setBackendAnalytics(null);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.river_id, selected?.slug]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadHistory() {
+      if (!selected?.river_id) {
+        setHistoryRows([]);
+        return;
+      }
+      setHistoryLoading(true);
+      const data = await fetchRiverHistory14d(selected.river_id);
+      if (!cancelled) {
+        setHistoryRows(data);
+        setHistoryLoading(false);
+      }
+    }
+    loadHistory().catch(() => {
+      if (!cancelled) {
+        setHistoryRows([]);
+        setHistoryLoading(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.river_id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadIntraday() {
+      if (!selected?.river_id) {
+        setIntradayRows([]);
+        return;
+      }
+      setIntradayLoading(true);
+      const data = await fetchRiverIntraday24h(selected.river_id);
+      if (!cancelled) {
+        setIntradayRows(data);
+        setIntradayLoading(false);
+      }
+    }
+    loadIntraday().catch(() => {
+      if (!cancelled) {
+        setIntradayRows([]);
+        setIntradayLoading(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.river_id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadWeatherAndSites() {
+      if (!selected?.river_id) {
+        setWeatherRows([]);
+        setSourceSites({});
+        return;
+      }
+
+      const [weather, sites] = await Promise.all([
+        fetchRiverWeatherWindow(selected.river_id),
+        fetchUsgsSiteSummaries(
+          [selected.flow_source_site_no, selected.temp_source_site_no].filter(
+            (value): value is string => Boolean(value)
+          )
+        ),
+      ]);
+
+      if (!cancelled) {
+        setWeatherRows(weather);
+        setSourceSites(sites);
+      }
+    }
+
+    loadWeatherAndSites().catch(() => {
+      if (!cancelled) {
+        setWeatherRows([]);
+        setSourceSites({});
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.river_id, selected?.flow_source_site_no, selected?.temp_source_site_no]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LAYERS_STORAGE_KEY);
+      if (!raw) return;
+
+      const parsed = JSON.parse(raw) as Partial<{
+        basemap: BasemapId;
+        layerState: Record<LayerId, boolean>;
+      }>;
+
+      if (parsed.basemap && basemapById[parsed.basemap]) {
+        setBasemap(parsed.basemap);
+      }
+
+      if (parsed.layerState) {
+        const defaults = createDefaultLayerState();
+        const merged: Record<LayerId, boolean> = { ...defaults };
+        for (const layer of LAYER_REGISTRY) {
+          if (typeof parsed.layerState[layer.id] === "boolean") {
+            merged[layer.id] = parsed.layerState[layer.id];
+          }
+        }
+        setLayerState(merged);
+      }
+    } catch {
+      /* ignore localStorage parse issues */
+    }
+  }, [basemapById]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        LAYERS_STORAGE_KEY,
+        JSON.stringify({ basemap, layerState })
+      );
+    } catch {
+      /* ignore write issues */
+    }
+  }, [basemap, layerState]);
+
+  function clamp(n: number, lo: number, hi: number) {
+    return Math.max(lo, Math.min(hi, n));
+  }
+
+  function onSheetPointerDown(e: React.PointerEvent | React.TouchEvent) {
+    const y = "touches" in e ? e.touches[0]?.clientY : (e as React.PointerEvent).clientY;
+    if (y == null) return;
+
+    dragRef.current = { startY: y, startSheetY: sheetY };
+    setIsDragging(true);
+    document.body.style.userSelect = "none";
+
+    const onMove = (e2: PointerEvent | TouchEvent) => {
+      const y2 =
+        "touches" in e2
+          ? (e2 as TouchEvent).touches[0]?.clientY
+          : (e2 as PointerEvent).clientY;
+      if (y2 == null || !dragRef.current) return;
+      const dy = y2 - dragRef.current.startY;
+      setSheetY(clamp(dragRef.current.startSheetY + dy / 320, 0, 1));
+    };
+
+    const onUp = () => {
+      if (!dragRef.current) return;
+      dragRef.current = null;
+      setIsDragging(false);
+      document.body.style.userSelect = "";
+      setSheetY((current) => {
+        const snaps: DrawerSnap[] = ["expanded", "mid", "collapsed"];
+        const nearest = snaps.reduce(
+          (best, next) =>
+            Math.abs(current - DRAWER_SNAP_Y[next]) < Math.abs(current - DRAWER_SNAP_Y[best])
+              ? next
+              : best,
+          "mid" as DrawerSnap
+        );
+        setDrawerSnap(nearest);
+        return DRAWER_SNAP_Y[nearest];
+      });
+
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("touchmove", onMove);
+      document.removeEventListener("touchend", onUp);
+    };
+
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("touchmove", onMove, { passive: true });
+    document.addEventListener("touchend", onUp);
+  }
+
+  function zoomIn() {
+    mapRef.current?.zoomIn?.({ duration: 180 });
+  }
+
+  function zoomOut() {
+    mapRef.current?.zoomOut?.({ duration: 180 });
+  }
+
+  function recenter() {
+    mapRef.current?.flyTo?.({
+      center: [-109.75, 47.05],
+      zoom: 6.15,
+      duration: 450,
+      pitch: 14,
+      bearing: 0,
+      essential: true,
+    });
+  }
+
+  function fitToRivers() {
+    const map = mapRef.current;
+    if (!map || !filtered.length) return;
+
+    const bounds = new mapboxgl.LngLatBounds();
+    let hasAny = false;
+
+    for (const r of filtered) {
+      const lat = r.lat ?? (r as { latitude?: number }).latitude;
+      const lng = r.lng ?? (r as { longitude?: number }).longitude;
+      const coords: [number, number] | undefined =
+        lat != null && lng != null ? [lng, lat] : RIVER_FOCUS_POINTS[r.river_id];
+
+      if (!coords) continue;
+      bounds.extend(coords);
+      hasAny = true;
+    }
+
+    if (hasAny && !bounds.isEmpty()) {
+      map.fitBounds(bounds, { padding: 60, duration: 450, essential: true });
+    }
+  }
+
+  function setBasemapStyle(next: BasemapId) {
+    const option = basemapById[next];
+    if (!option?.enabled) return;
+    setBasemap(next);
+  }
+
+  function setLayerEnabled(layerId: LayerId, enabled: boolean) {
+    setLayerState((prev) => ({ ...prev, [layerId]: enabled }));
+  }
+
+  function resetLayers() {
+    setLayerState(createDefaultLayerState());
+    setBasemap(DEFAULT_BASEMAP);
+  }
+
+  function toggleTopPanel(panel: TopPanel) {
+    if (isMobile) {
+      setMobileSurfaceState(panel === "layers" ? "tools" : panel === "detail" ? "detail" : "list");
+      return;
+    }
+    setOpenTopPanel((prev) => (prev === panel ? "none" : panel));
+  }
+
+  function selectRiver(riverId: string | null) {
+    setSelectedId(riverId);
+    if (riverId) {
+      setSelectionSeq((prev) => prev + 1);
+      if (isMobile) {
+        setMobileSurfaceState("detail");
+      } else {
+        setOpenTopPanel("detail");
+      }
+    }
+  }
+
+  function onMobileListPointerDown(e: React.PointerEvent | React.TouchEvent) {
+    const y = "touches" in e ? e.touches[0]?.clientY : (e as React.PointerEvent).clientY;
+    if (y == null) return;
+    mobileDragRef.current = { startY: y, startSheetY: mobileSheetY };
+    setIsMobileDragging(true);
+    document.body.style.userSelect = "none";
+
+    const onMove = (e2: PointerEvent | TouchEvent) => {
+      const y2 =
+        "touches" in e2
+          ? (e2 as TouchEvent).touches[0]?.clientY
+          : (e2 as PointerEvent).clientY;
+      if (y2 == null || !mobileDragRef.current) return;
+      const dy = y2 - mobileDragRef.current.startY;
+      setMobileSheetY(clamp(mobileDragRef.current.startSheetY + dy / 420, 0, 1));
+    };
+
+    const onUp = () => {
+      mobileDragRef.current = null;
+      setIsMobileDragging(false);
+      document.body.style.userSelect = "";
+      setMobileSheetY((current) => {
+        const snaps: MobileListSnap[] = ["full", "mid", "peek"];
+        const nearest = snaps.reduce(
+          (best, next) =>
+            Math.abs(current - MOBILE_LIST_SNAP_Y[next]) < Math.abs(current - MOBILE_LIST_SNAP_Y[best])
+              ? next
+              : best,
+          "mid" as MobileListSnap
+        );
+        setMobileListSnap(nearest);
+        return MOBILE_LIST_SNAP_Y[nearest];
+      });
+
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("touchmove", onMove);
+      document.removeEventListener("touchend", onUp);
+    };
+
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("touchmove", onMove, { passive: true });
+    document.addEventListener("touchend", onUp);
+  }
+
+  function onMobileDetailPointerDown(e: React.PointerEvent | React.TouchEvent) {
+    const y = "touches" in e ? e.touches[0]?.clientY : (e as React.PointerEvent).clientY;
+    if (y == null) return;
+    mobileDetailDragRef.current = { startY: y };
+    document.body.style.userSelect = "none";
+
+    const onMove = (_: PointerEvent | TouchEvent) => {
+      // no-op; we only need swipe distance on release
+    };
+
+    const onUp = (e2: PointerEvent | TouchEvent) => {
+      const y2 =
+        "changedTouches" in e2
+          ? (e2 as TouchEvent).changedTouches[0]?.clientY
+          : (e2 as PointerEvent).clientY;
+      const start = mobileDetailDragRef.current?.startY ?? 0;
+      const dy = (y2 ?? start) - start;
+      mobileDetailDragRef.current = null;
+      document.body.style.userSelect = "";
+      if (dy > 90) {
+        setMobileSurfaceState("list", { listSnap: "peek" });
+      }
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("touchmove", onMove);
+      document.removeEventListener("touchend", onUp);
+    };
+
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("touchmove", onMove, { passive: true });
+    document.addEventListener("touchend", onUp);
+  }
+
+  const layersOpen = !isMobile && openTopPanel === "layers";
+  const detailsOpen = !isMobile && openTopPanel === "detail";
+
+  useEffect(() => {
+    if (!isMobile && detailsOpen && drawerSnap !== "collapsed") {
+      setDrawerSnap("collapsed");
+      setSheetY(DRAWER_SNAP_Y.collapsed);
+    }
+  }, [detailsOpen, drawerSnap, isMobile]);
+
+  const groupedLayers = useMemo(
+    () =>
+      LAYER_GROUP_ORDER.map((group) => ({
+        group,
+        layers: LAYER_REGISTRY.filter((layer) => layer.group === group),
+      })),
+    []
+  );
+
+  return (
+    <div className="relative h-[100dvh] w-full overflow-hidden">
+      <div className="absolute inset-0 z-0">
+        <MapView
+          rivers={filtered}
+          selectedRiver={selected}
+          selectedRiverName={selected?.river_name ?? null}
+          selectedRiverId={selectedId}
+          selectedRiverGeojson={selectedGeojson}
+          riverLinesGeojson={initialRiverLinesGeojson ?? null}
+          activeStationsGeojson={stationGeojson ?? null}
+          basemap={basemap}
+          layerState={layerState}
+          rightPanelOpen={detailsOpen}
+          drawerState={isMobile ? "collapsed" : drawerSnap}
+          selectionSeq={selectionSeq}
+          onSelectRiver={(r) => selectRiver(r.river_id)}
+          className="absolute inset-0"
+          onMapReady={(m) => {
+            mapRef.current = m;
+          }}
+        />
+      </div>
+
+      <aside className="absolute left-4 top-4 z-20 hidden w-[68px] sm:block">
+        <div className="mri-control-strip overflow-hidden rounded-[20px]">
+          <div className="border-b border-white/8 px-3 py-2.5">
+            <div className="text-[15px] font-semibold leading-tight text-white">MRI</div>
+            <div className="text-[9px] uppercase tracking-[0.18em] text-white/56">Montana</div>
+          </div>
+          <div className="flex flex-col gap-1.5 p-2">
+            <button className="onx-iconbtn mri-railbtn" title="Layers" onClick={() => toggleTopPanel("layers")}>
+              <Layers size={18} strokeWidth={2.5} />
+            </button>
+            <button className="onx-iconbtn mri-railbtn" title="Zoom in" onClick={zoomIn}>
+              <Plus size={16} strokeWidth={2.5} />
+            </button>
+            <button className="onx-iconbtn mri-railbtn" title="Zoom out" onClick={zoomOut}>
+              <Minus size={16} strokeWidth={2.5} />
+            </button>
+            <button className="onx-iconbtn mri-railbtn" title="Fit to rivers" onClick={fitToRivers}>
+              <Maximize2 size={16} strokeWidth={2.5} />
+            </button>
+            <button className="onx-iconbtn mri-railbtn" title="Recenter Montana" onClick={recenter}>
+              <Crosshair size={16} strokeWidth={2.5} />
+            </button>
+            <button
+              className="onx-iconbtn mri-railbtn"
+              title="Toggle list"
+              onClick={() => {
+                const next = drawerSnap === "collapsed" ? "mid" : "collapsed";
+                setDrawerSnap(next);
+                setSheetY(DRAWER_SNAP_Y[next]);
+              }}
+            >
+              <List size={16} strokeWidth={2.5} />
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <header className="absolute left-4 right-4 top-4 z-20 sm:hidden">
+        <div className="onx-glass rounded-xl px-3 py-2">
+          <div className="text-[11px] font-medium text-white/84">{dateLabel}</div>
+          <div className="text-[10px] text-white/52">Last pull {formatPullTime(latestPullAt)} MT</div>
+        </div>
+      </header>
+
+      <header className="absolute left-4 right-4 top-4 z-20 hidden sm:block sm:left-[96px] sm:right-[394px]">
+        <div className="mri-control-strip rounded-[22px] px-3 py-2.5">
+          <div className="flex items-center gap-3">
+            <div className="hidden min-w-[184px] shrink-0 lg:block">
+              <div className="text-[9px] font-semibold uppercase tracking-[0.18em] text-white/42">Montana River Intelligence</div>
+              <div className="mt-0.5 text-[12px] text-white/72">{dateLabel} • {filtered.length} rivers • Last pull {formatPullTime(latestPullAt)} MT</div>
+            </div>
+            <div className="flex-1 rounded-2xl border border-white/8 bg-black/12 px-3 py-2">
+              <div className="text-[9px] font-semibold uppercase tracking-[0.16em] text-white/34">River Search</div>
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search Montana rivers..."
+                className="mt-0.5 mri-topbar-input"
+              />
+            </div>
+            <div className="hidden shrink-0 sm:block">
+              <div className="text-right text-[10px] leading-tight text-white/45">Status</div>
+              <div className="mt-0.5 text-right text-[11px] font-medium text-white/76">Focused on Montana</div>
+            </div>
+            <div className="shrink-0">
+              <button
+                className="rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-[11px] font-medium text-white/62 transition hover:border-white/18 hover:text-white/88"
+                onClick={() => {
+                  setSearch("");
+                  setTier("All");
+                  selectRiver(null);
+                }}
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {(["All", "Good", "Fair", "Tough"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTier(t)}
+              className={`mri-chip ${tier === t ? "mri-chip-active" : ""}`}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+      </header>
+
+      <div className="absolute right-4 top-4 z-30 hidden items-start gap-2 sm:flex">
+        <button
+          className={`onx-iconbtn mri-railbtn ${layersOpen ? "ring-2 ring-white/20" : ""}`}
+          title="Layers"
+          onClick={() => toggleTopPanel("layers")}
+        >
+          <Layers size={16} strokeWidth={2.5} />
+        </button>
+
+        <div
+          className={[
+            "mri-fade w-[min(360px,calc(100vw-1.5rem))]",
+            layersOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
+          ].join(" ")}
+        >
+          <div className="onx-card rounded-2xl p-4">
+            <div className="mri-scroll max-h-[70vh] overflow-auto pr-1">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">Layers</div>
+                  <div className="text-[11px] text-slate-500">Map display controls</div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    className="text-[11px] font-medium text-[var(--mri-text-dim)] hover:text-[var(--mri-text-muted)]"
+                    onClick={resetLayers}
+                  >
+                    Reset
+                  </button>
+                  <button
+                    className="text-[11px] font-medium text-[var(--mri-text-dim)] hover:text-[var(--mri-text-muted)]"
+                    onClick={() => setOpenTopPanel("none")}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)]">
+                Basemap
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                {BASEMAP_OPTIONS.map((option) => {
+                  const selectedBasemap = basemap === option.id;
+                  return (
+                    <button
+                      key={option.id}
+                      disabled={!option.enabled}
+                      className={[
+                        "rounded-lg border px-2 py-1.5 text-xs font-medium",
+                        selectedBasemap
+                          ? "border-[var(--mri-border-strong)] bg-[rgba(78,122,146,0.3)] text-[var(--mri-text)]"
+                          : "border-[var(--mri-border)] bg-[rgba(20,29,32,0.74)] text-[var(--mri-text-muted)]",
+                        !option.enabled ? "cursor-not-allowed opacity-55" : "hover:bg-[rgba(26,37,43,0.82)]",
+                      ].join(" ")}
+                      onClick={() => setBasemapStyle(option.id)}
+                    >
+                      <div>{option.label}</div>
+                      {!option.enabled && option.comingSoon ? (
+                        <div className="text-[10px] text-[var(--mri-text-dim)]">Coming soon</div>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="mt-4">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)]">
+                  Core Layers
+                </div>
+                <div className="mt-2 space-y-2 rounded-xl border border-[var(--mri-border)] bg-[rgba(20,29,32,0.74)] p-2.5 text-xs text-[var(--mri-text-muted)]">
+                  {groupedLayers
+                    .flatMap((g) => g.layers)
+                    .filter((layer) => layer.id === "mri_river_lines" || layer.id === "mri_selected_highlight")
+                    .map((layer) => (
+                      <label key={layer.id} className="flex items-start justify-between gap-3">
+                        <span>{layer.label}</span>
+                        <input
+                          type="checkbox"
+                          checked={layerState[layer.id]}
+                          onChange={(e) => setLayerEnabled(layer.id, e.target.checked)}
+                        />
+                      </label>
+                    ))}
+                </div>
+              </div>
+
+              <div className="mt-4">
+                <button
+                  className="w-full rounded-lg border border-[var(--mri-border)] bg-[rgba(20,29,32,0.72)] px-2.5 py-2 text-left text-xs font-medium text-[var(--mri-text)] hover:bg-[rgba(26,37,43,0.82)]"
+                  onClick={() => setAdvancedLayersOpen((v) => !v)}
+                >
+                  {advancedLayersOpen ? "Hide Advanced Layers" : "Advanced Layers"}
+                </button>
+              </div>
+
+              {advancedLayersOpen
+                ? groupedLayers.map(({ group, layers }) => (
+                    <div key={group} className="mt-4">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)]">
+                        {group}
+                      </div>
+                      <div className="mt-2 space-y-2 rounded-xl border border-[var(--mri-border)] bg-[rgba(20,29,32,0.74)] p-2.5 text-xs text-[var(--mri-text-muted)]">
+                        {layers
+                          .filter(
+                            (layer) =>
+                              !layer.locked &&
+                              layer.id !== "mri_river_lines" &&
+                              layer.id !== "mri_selected_highlight"
+                          )
+                          .map((layer) => (
+                            <label key={layer.id} className="flex items-start justify-between gap-3">
+                              <span className="leading-tight">
+                                <span className="block">{layer.label}</span>
+                                {layer.minZoomNote ? (
+                                  <span className="text-[10px] text-[var(--mri-text-dim)]">{layer.minZoomNote}</span>
+                                ) : null}
+                                {layer.comingSoon ? (
+                                  <span className="text-[10px] text-[var(--mri-text-dim)]">Coming soon</span>
+                                ) : null}
+                              </span>
+                              <input
+                                type="checkbox"
+                                checked={layerState[layer.id]}
+                                disabled={Boolean(layer.comingSoon)}
+                                onChange={(e) => setLayerEnabled(layer.id, e.target.checked)}
+                              />
+                            </label>
+                          ))}
+                      </div>
+                    </div>
+                  ))
+                : null}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div
+        className={[
+          "absolute bottom-6 right-4 z-20 flex flex-col gap-2 sm:hidden",
+          mobileSurface === "detail" || mobileSurface === "tools" ? "pointer-events-none opacity-0" : "opacity-100",
+        ].join(" ")}
+      >
+        <button
+          className="onx-glass min-h-11 rounded-xl px-3 text-xs font-semibold text-white active:translate-y-[1px]"
+          onClick={() => setMobileSurfaceState(mobileSurface === "tools" ? "list" : "tools")}
+        >
+          Map Tools
+        </button>
+        <button
+          className="onx-glass min-h-11 rounded-xl px-3 text-xs font-semibold text-white active:translate-y-[1px]"
+          onClick={() => setMobileSurfaceState(mobileSurface === "list" ? "map" : "list", { listSnap: "mid" })}
+        >
+          Rivers
+        </button>
+      </div>
+
+      <section className="absolute right-4 top-[108px] z-20 hidden w-[360px] sm:block">
+        {detailsOpen ? (
+          <div className="onx-card max-h-[calc(100vh-132px)] overflow-hidden rounded-[28px] p-5 transition-all duration-150 ease-in-out">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="mri-surface-label">Instrument Panel</div>
+                <div className="mt-1 text-[13px] font-medium text-white/76">Selected river intelligence</div>
+              </div>
+              <button
+                className="text-[11px] text-[var(--mri-text-dim)] hover:text-[var(--mri-text-muted)]"
+                onClick={() => setOpenTopPanel("none")}
+              >
+                Collapse
+              </button>
+            </div>
+
+            {selected ? (
+              <>
+                <div className="mri-scroll mt-3 max-h-[calc(100vh-220px)] overflow-auto pr-1">
+                <div className="space-y-5">
+                  <div>
+                    <div className="text-[24px] font-semibold tracking-[-0.02em] text-[var(--mri-text)]">{selected.river_name}</div>
+                    <div className="mt-1 text-[12px] text-[var(--mri-text-muted)]">{selected.gauge_label ?? ""}</div>
+                    <div className="mt-2 text-[11px] text-[var(--mri-text-dim)]">
+                      {formatUpdatedAgo(selected.source_flow_observed_at ?? selected.source_temp_observed_at ?? selected.updated_at)}
+                    </div>
+                  </div>
+
+                  <div className="rounded-[22px] border border-[rgba(180,198,209,0.12)] bg-[rgba(18,27,31,0.72)] p-4">
+                    <div className="flex items-end justify-between gap-4">
+                      <div>
+                        <div className="mri-surface-label">Fishability Score</div>
+                        <div className="mt-2 text-[64px] font-semibold leading-none tracking-[-0.03em] text-[var(--mri-text)]">
+                          {selected.fishability_score_calc ?? "—"}
+                        </div>
+                      </div>
+                      <TierPill
+                        tier={
+                          selected.bite_tier === "HOT" || selected.bite_tier === "GOOD"
+                            ? "Good"
+                            : selected.bite_tier === "FAIR"
+                            ? "Fair"
+                            : selected.bite_tier === "TOUGH"
+                            ? "Tough"
+                            : undefined
+                        }
+                      />
+                    </div>
+                  </div>
+
+                  <div className="rounded-[20px] border border-[rgba(180,198,209,0.1)] bg-[rgba(17,25,28,0.62)] px-4 py-3 text-[12px] leading-5 text-[var(--mri-text-muted)]">
+                    <span className="font-medium text-[var(--mri-text)]">Today&apos;s Read</span>
+                    <div className="mt-1">{todaysRead}</div>
+                  </div>
+
+                  <div className="rounded-xl border border-[var(--mri-border)] bg-[rgba(23,34,40,0.64)] p-3">
+                    <div className="flex items-end justify-between">
+                      <div className="text-[36px] font-semibold leading-none tracking-[-0.02em] text-[var(--mri-text)]">
+                        {selectedFishIndex.value}
+                        <span className="ml-1 text-[26px] font-medium text-[var(--mri-text-dim)]">/ 10.0</span>
+                      </div>
+                      {selectedFishIndex.optimal ? (
+                        <span className="rounded border border-[rgba(173,190,202,0.32)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--mri-text-muted)]">
+                          Optimal
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="mt-3">
+                      <div className="mri-fish-scale-track">
+                        <div className="mri-fish-scale-fill" style={{ width: `${selectedFishIndex.percent}%` }} />
+                        {selectedFishIndex.normalized != null ? (
+                          <div className="mri-fish-scale-marker" style={{ left: `${selectedFishIndex.percent}%` }} />
+                        ) : null}
+                      </div>
+                      <div className="mt-2 grid grid-cols-4 text-[10px] uppercase tracking-[0.1em] text-[var(--mri-text-dim)]">
+                        <span>Poor</span>
+                        <span className="text-center">Fair</span>
+                        <span className="text-center">Good</span>
+                        <span className="text-right">Excellent</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 border-t border-[var(--mri-border)] pt-4">
+                    <div className="rounded-[18px] border border-[rgba(180,198,209,0.08)] bg-[rgba(16,24,27,0.56)] p-3">
+                      <div className="text-[10px] uppercase tracking-[0.1em] text-[var(--mri-text-dim)]">Flow</div>
+                      <div className="mt-1 text-[17px] font-medium text-[var(--mri-text)]">
+                        {selected.flow_cfs ?? "Flow not available at this gauge"}
+                        <span className="ml-1 text-xs text-[var(--mri-text-dim)]">
+                          {getFlowTrendArrow(selected.change_48h_pct_calc)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="rounded-[18px] border border-[rgba(180,198,209,0.08)] bg-[rgba(16,24,27,0.56)] p-3">
+                      <div className="text-[10px] uppercase tracking-[0.1em] text-[var(--mri-text-dim)]">Temp</div>
+                      <div className="mt-1 text-[17px] font-medium text-[var(--mri-text)]">
+                        {selected.water_temp_f != null
+                          ? `${Number(selected.water_temp_f).toFixed(1)}°F`
+                          : "Temp not available at this gauge"}
+                      </div>
+                      <div className="mt-1 text-[10px] leading-4 text-[var(--mri-text-dim)]">
+                        {selected.temp_observed_at
+                          ? `Observed ${formatPullTime(selected.temp_observed_at)} MT`
+                          : selected.temp_reason ?? "No observed water temperature"}
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    className="w-full rounded-xl border border-[var(--mri-border)] bg-[rgba(20,29,32,0.72)] px-3 py-2 text-left text-xs font-medium text-[var(--mri-text-muted)] hover:bg-[rgba(26,37,43,0.82)]"
+                    onClick={() => setDetailMetricsOpen((v) => !v)}
+                  >
+                    {detailMetricsOpen ? "Hide Detailed Metrics" : "Detailed Metrics"}
+                  </button>
+
+                  {detailMetricsOpen ? (
+                    <div className="space-y-4 border-t border-[var(--mri-border)] pt-4 text-xs text-[var(--mri-text-muted)]">
+                      <DetailedMetricsContent analytics={detailedAnalytics} />
+
+                      <button
+                        className="w-full rounded-lg border border-[var(--mri-border)] bg-[rgba(21,31,35,0.74)] px-2 py-1.5 text-left text-xs font-medium text-[var(--mri-text)] hover:bg-[rgba(26,37,43,0.82)]"
+                        onClick={() => setTransparencyOpen((v) => !v)}
+                      >
+                        How this score is calculated
+                      </button>
+
+                      {transparencyOpen && breakdown ? (
+                        <div className="rounded-lg bg-[rgba(21,31,35,0.66)] p-2 text-[11px] text-[var(--mri-text-muted)]">
+                          <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                            <div>Flow Score</div>
+                            <div className="text-right font-semibold">{formatNum(breakdown.flowScore)}</div>
+                            <div>Stability Score</div>
+                            <div className="text-right font-semibold">{formatNum(breakdown.stabilityScore)}</div>
+                            <div>Thermal Score</div>
+                            <div className="text-right font-semibold">
+                              {breakdown.thermalScore == null ? "Unavailable" : formatNum(breakdown.thermalScore)}
+                            </div>
+                            <div>Wind Penalty</div>
+                            <div className="text-right font-semibold">{formatNum(breakdown.windPenalty)}</div>
+                            <div className="border-t border-[var(--mri-border)] pt-1 font-semibold text-[var(--mri-text)]">Total Score</div>
+                            <div className="border-t border-[var(--mri-border)] pt-1 text-right font-semibold text-[var(--mri-text)]">
+                              {formatNum(breakdown.totalScore)}
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="mt-2 text-sm font-semibold text-[var(--mri-text)]">Montana River Intel</div>
+                <div className="text-xs text-[var(--mri-text-muted)]">
+                  Tap a river in the list to preview details here.
+                </div>
+              </>
+            )}
+          </div>
+        ) : (
+          <button
+            className="mri-control-strip rounded-full px-3.5 py-2 text-[11px] font-medium text-white/86 transition-colors duration-150 ease-in-out hover:text-white active:translate-y-[1px]"
+            onClick={() => setOpenTopPanel("detail")}
+          >
+            Open Detail Panel
+          </button>
+        )}
+      </section>
+
+      {isMobile && mobileSurface === "tools" ? (
+        <section className="absolute inset-0 z-30 sm:hidden">
+          <button
+            className="absolute inset-0 bg-black/45"
+            aria-label="Close map tools"
+            onClick={() => setMobileSurfaceState("list", { listSnap: "peek" })}
+          />
+          <div className="onx-card absolute inset-x-0 bottom-0 rounded-t-3xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] transition-all duration-150 ease-in-out">
+            <div className="mx-auto mb-3 h-1.5 w-14 cursor-grab rounded-full bg-white/45 ring-1 ring-white/35" style={{ touchAction: "none" }} />
+            <div className="mb-3 flex items-center justify-between">
+              <div className="text-sm font-semibold text-[var(--mri-text)]">Map Tools</div>
+              <button className="rounded-md p-2 text-[var(--mri-text-muted)]" onClick={() => setMobileSurfaceState("list", { listSnap: "peek" })}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)]">Basemap</div>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {BASEMAP_OPTIONS.map((option) => (
+                <button
+                  key={`m-${option.id}`}
+                  disabled={!option.enabled}
+                  className={[
+                    "min-h-11 rounded-lg border px-2 py-1.5 text-xs font-medium",
+                    basemap === option.id
+                      ? "border-[var(--mri-border-strong)] bg-[rgba(78,122,146,0.3)] text-[var(--mri-text)]"
+                      : "border-[var(--mri-border)] bg-[rgba(20,29,32,0.72)] text-[var(--mri-text-muted)]",
+                    !option.enabled ? "cursor-not-allowed opacity-55" : "",
+                  ].join(" ")}
+                  onClick={() => setBasemapStyle(option.id)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)]">Core Layers</div>
+            <div className="mt-2 space-y-2 rounded-xl border border-[var(--mri-border)] bg-[rgba(20,29,32,0.74)] p-3 text-xs text-[var(--mri-text-muted)]">
+              {groupedLayers
+                .flatMap((g) => g.layers)
+                .filter((layer) => layer.id === "mri_river_lines" || layer.id === "mri_selected_highlight")
+                .map((layer) => (
+                  <label key={`ml-${layer.id}`} className="flex items-center justify-between">
+                    <span>{layer.label}</span>
+                    <input
+                      type="checkbox"
+                      checked={layerState[layer.id]}
+                      onChange={(e) => setLayerEnabled(layer.id, e.target.checked)}
+                    />
+                  </label>
+                ))}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {isMobile && mobileSurface === "detail" ? (
+        <section className="absolute inset-0 z-20 bg-black/45 sm:hidden">
+          <div className="onx-card absolute inset-x-0 bottom-0 max-h-[92vh] overflow-auto rounded-t-3xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] transition-all duration-150 ease-in-out">
+            <div
+              className="mx-auto mb-2 h-1.5 w-14 cursor-grab rounded-full bg-white/45 ring-1 ring-white/35"
+              onPointerDown={onMobileDetailPointerDown}
+              onTouchStart={onMobileDetailPointerDown}
+              style={{ touchAction: "none" }}
+            />
+            <div className="mb-3 flex items-center justify-between">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)]">River Detail</div>
+              <button
+                className="min-h-11 rounded-md px-3 text-xs font-semibold text-slate-600"
+                onClick={() => setMobileSurfaceState("list", { listSnap: "peek" })}
+              >
+                Close
+              </button>
+            </div>
+            {selected ? (
+              <>
+                <div className="text-xl font-semibold text-[var(--mri-text)]">{selected.river_name}</div>
+                <div className="text-sm text-[var(--mri-text-muted)]">{selected.gauge_label ?? ""}</div>
+                <div className="mt-1 text-xs text-[var(--mri-text-dim)]">
+                  {formatUpdatedAgo(selected.source_flow_observed_at ?? selected.source_temp_observed_at ?? selected.updated_at)}
+                </div>
+                <div className="mt-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className={[
+                        "inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                        selected.temp_status === "available_fresh"
+                          ? "border-[rgba(110,150,125,0.4)] bg-[rgba(79,103,87,0.2)] text-[#b4ccb9]"
+                          : selected.temp_status === "available_stale"
+                          ? "border-[rgba(176,112,63,0.42)] bg-[rgba(176,112,63,0.2)] text-[#d7b089]"
+                          : "border-[var(--mri-border)] bg-[rgba(21,31,35,0.7)] text-[var(--mri-text-dim)]",
+                      ].join(" ")}
+                    >
+                      {getTempStatusLabel(selected)}
+                    </span>
+                    <span
+                      className={[
+                        "inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                        getConfidenceBadgeClass(selected.confidence_level ?? null),
+                      ].join(" ")}
+                    >
+                      {getConfidenceBadgeLabel(selected)}
+                    </span>
+                  </div>
+                </div>
+                <div className="mt-4 text-[56px] font-semibold leading-none tracking-[-0.02em] text-[var(--mri-text)]">
+                  {selected.fishability_score_calc ?? "—"}
+                </div>
+                <div className="mt-2">
+                  <TierPill
+                    tier={
+                      selected.bite_tier === "HOT" || selected.bite_tier === "GOOD"
+                        ? "Good"
+                        : selected.bite_tier === "FAIR"
+                        ? "Fair"
+                        : selected.bite_tier === "TOUGH"
+                        ? "Tough"
+                        : undefined
+                    }
+                  />
+                </div>
+                <div className="mt-2 text-xs text-[var(--mri-text-muted)]">{todaysRead}</div>
+
+                <div className="mt-3 rounded-xl border border-[var(--mri-border)] bg-[rgba(23,34,40,0.64)] p-3">
+                  <div className="flex items-end justify-between">
+                    <div className="text-[34px] font-semibold leading-none tracking-[-0.02em] text-[var(--mri-text)]">
+                      {selectedFishIndex.value}
+                      <span className="ml-1 text-[22px] font-medium text-[var(--mri-text-dim)]">/ 10.0</span>
+                    </div>
+                    {selectedFishIndex.optimal ? (
+                      <span className="rounded border border-[rgba(173,190,202,0.32)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--mri-text-muted)]">
+                        Optimal
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="mt-3">
+                    <div className="mri-fish-scale-track">
+                      <div className="mri-fish-scale-fill" style={{ width: `${selectedFishIndex.percent}%` }} />
+                      {selectedFishIndex.normalized != null ? (
+                        <div className="mri-fish-scale-marker" style={{ left: `${selectedFishIndex.percent}%` }} />
+                      ) : null}
+                    </div>
+                    <div className="mt-2 grid grid-cols-4 text-[10px] uppercase tracking-[0.1em] text-[var(--mri-text-dim)]">
+                      <span>Poor</span>
+                      <span className="text-center">Fair</span>
+                      <span className="text-center">Good</span>
+                      <span className="text-right">Excellent</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="my-4 h-px bg-[var(--mri-border)]" />
+                <div className="space-y-3 text-xs">
+                  <div>
+                    <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--mri-text-dim)]">Flow</div>
+                    <div className="font-medium text-[var(--mri-text)]">
+                      {selected.flow_cfs ?? "Flow not available at this gauge"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--mri-text-dim)]">Temp</div>
+                    <div className="font-medium text-[var(--mri-text)]">
+                      {selected.water_temp_f != null
+                        ? `${Number(selected.water_temp_f).toFixed(1)}°F`
+                        : "Temp not available at this gauge"}
+                    </div>
+                    <div className="mt-1 text-[10px] text-[var(--mri-text-dim)]">
+                      {selected.temp_observed_at
+                        ? `Observed ${formatPullTime(selected.temp_observed_at)} MT`
+                        : selected.temp_reason ?? "No observed water temperature"}
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  className="mt-4 w-full rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-left text-xs font-medium text-white/85"
+                  onClick={() => setMobileDetailMetricsOpen((v) => !v)}
+                >
+                  {mobileDetailMetricsOpen ? "Hide Detailed Metrics" : "Detailed Metrics"}
+                </button>
+
+                {mobileDetailMetricsOpen ? (
+                  <div className="mt-4 space-y-3 border-t border-[var(--mri-border)] pt-4 text-xs text-[var(--mri-text-muted)]">
+                    <DetailedMetricsContent analytics={detailedAnalytics} />
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <div className="text-sm text-[var(--mri-text-muted)]">Select a river to view details.</div>
+            )}
+          </div>
+        </section>
+      ) : null}
+
+      {isMobile && mobileSurface === "list" ? (
+        <section
+          className="absolute inset-x-0 bottom-0 z-10 sm:hidden"
+          style={{
+            transform: `translateY(${mobileSheetY * 92}%)`,
+            transition: isMobileDragging ? "none" : SNAP_TRANSITION,
+          }}
+        >
+          <div className="rounded-t-3xl border border-white/10 bg-[#0b1220]/94 backdrop-blur-md">
+            <div
+              className={`mx-auto mt-2 h-1.5 w-14 cursor-grab rounded-full bg-white/45 ring-1 ring-white/35 ${isMobileDragging ? "select-none" : ""}`}
+              onPointerDown={onMobileListPointerDown}
+              onTouchStart={onMobileListPointerDown}
+              style={{ touchAction: "none" }}
+            />
+            <div className="flex items-center justify-between px-4 pt-3">
+              <div className="text-sm font-semibold text-white">Rivers ({filtered.length})</div>
+              <button
+                className="min-h-11 rounded-md px-3 text-xs font-semibold text-white/80"
+                onClick={() => {
+                  if (mobileListSnap === "peek") {
+                    setMobileListSnap("mid");
+                    setMobileSheetY(MOBILE_LIST_SNAP_Y.mid);
+                  } else {
+                    setMobileListSnap("peek");
+                    setMobileSheetY(MOBILE_LIST_SNAP_Y.peek);
+                  }
+                }}
+              >
+                {mobileListSnap === "peek" ? "Expand" : "Peek"}
+              </button>
+            </div>
+            <div className="px-4 pt-2">
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search rivers..."
+                className="mri-topbar-input"
+              />
+              <div className="mt-2 flex flex-wrap gap-2">
+                {(["All", "Good", "Fair", "Tough"] as const).map((t) => (
+                  <button key={`m-tier-${t}`} onClick={() => setTier(t)} className={`mri-chip min-h-11 ${tier === t ? "mri-chip-active" : ""}`}>
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div
+              className={`mri-scroll max-h-[65vh] px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 ${
+                mobileListSnap === "full" ? "overflow-auto" : "overflow-hidden"
+              }`}
+            >
+              {topRivers.length > 0 ? (
+                <>
+                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/60">Top Rivers Today</div>
+                  <div className="mb-3 flex gap-2 overflow-auto">
+                    {topRivers.map((r) => (
+                      <button
+                        key={`m-top-${r.river_id}`}
+                        onClick={() => selectRiver(r.river_id)}
+                        className={[
+                          "min-h-11 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs active:translate-y-[1px]",
+                          r.river_id === selectedId
+                            ? "border-white/50 bg-white/20 text-white"
+                            : "border-white/20 bg-white/10 text-white/85",
+                        ].join(" ")}
+                      >
+                        #{r.fishability_rank ?? "—"} {r.river_name}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+              <div className="space-y-2">
+                {filtered.map((r) => (
+                  <button
+                    key={`m-r-${r.river_id}`}
+                    onClick={() => selectRiver(r.river_id)}
+                    className={`mri-drawer-card w-full text-left active:translate-y-[1px] ${r.river_id === selectedId ? "mri-drawer-card-selected" : ""}`}
+                  >
+                    <div className="p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-semibold text-white">{r.river_name}</div>
+                          <div className="text-xs text-white/60">{r.gauge_label ?? ""}</div>
+                        </div>
+                        <TierPill
+                          tier={
+                            r.bite_tier === "HOT" || r.bite_tier === "GOOD"
+                              ? "Good"
+                              : r.bite_tier === "FAIR"
+                              ? "Fair"
+                              : r.bite_tier === "TOUGH"
+                              ? "Tough"
+                              : undefined
+                          }
+                        />
+                      </div>
+                      <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-white/88">
+                        <div><div className="mri-kv-label">Score</div><div className="font-semibold">{r.fishability_score_calc ?? "—"}</div></div>
+                        <div><div className="mri-kv-label">Flow</div><div className="font-semibold">{r.flow_cfs ?? "—"}</div></div>
+                        <div><div className="mri-kv-label">Temp</div><div className="font-semibold">{r.water_temp_f != null ? `${Number(r.water_temp_f).toFixed(1)}°` : "—"}</div></div>
+                      </div>
+                      <div className="mt-2 text-[10px] font-medium tracking-[0.01em] text-white/58">{getRiverTrustLine(r)}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      <div
+        className="absolute bottom-0 left-0 right-0 z-10 hidden sm:block"
+        style={{
+          transform: `translateY(${sheetY * 92}%)`,
+          transition: isDragging ? "none" : SNAP_TRANSITION,
+        }}
+      >
+        <div className={`mx-auto max-w-6xl px-3 pb-3 ${detailsOpen ? "sm:pr-[384px]" : ""}`}>
+          <div className="mri-control-strip overflow-hidden rounded-[28px]">
+            <div
+              className={`mx-auto mt-2 h-1.5 w-14 flex-shrink-0 cursor-grab rounded-full bg-white/45 ring-1 ring-white/35 active:cursor-grabbing ${isDragging ? "select-none" : ""}`}
+              onPointerDown={onSheetPointerDown}
+              onTouchStart={onSheetPointerDown}
+              title="Drag to expand/collapse"
+              style={{ touchAction: "none" }}
+            />
+            <div className="flex items-center justify-between px-4 pt-3">
+              <div>
+                <div className="mri-surface-label">Top Rivers Today</div>
+                <div className="mt-1 text-[13px] font-medium text-white/82">Fast scan of Montana conditions</div>
+              </div>
+              <button
+                className="rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-[11px] font-medium text-white/72 transition hover:border-white/18 hover:text-white"
+                onClick={() => {
+                  const next = drawerSnap === "collapsed" ? "mid" : "collapsed";
+                  setDrawerSnap(next);
+                  setSheetY(DRAWER_SNAP_Y[next]);
+                }}
+              >
+                {drawerSnap === "collapsed" ? "Open Tray" : "Collapse"}
+              </button>
+            </div>
+
+            {topRivers.length > 0 ? (
+              <div className="px-4 pt-2">
+                <div className="flex gap-1.5 overflow-auto pb-1">
+                  {topRivers.map((r) => (
+                    <button
+                      key={`top-${r.river_id}`}
+                      onClick={() => selectRiver(r.river_id)}
+                      className={[
+                        "whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] transition active:translate-y-[1px]",
+                        r.river_id === selectedId
+                          ? "border-white/50 bg-white/20 text-white"
+                          : "border-white/20 bg-white/10 text-white/85 hover:bg-white/15",
+                      ].join(" ")}
+                    >
+                      #{r.fishability_rank ?? "—"} {r.river_name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="px-3 pb-3 pt-2">
+              <div
+                className={`mri-scroll pr-1 transition-[max-height] duration-200 ease-in-out ${
+                  drawerSnap === "expanded" ? "overflow-auto" : "overflow-hidden"
+                }`}
+                style={{
+                  maxHeight: drawerSnap === "expanded" ? "34vh" : drawerSnap === "mid" ? "17vh" : "96px",
+                }}
+              >
+                <div className="flex gap-2 overflow-auto pb-1">
+                  {filtered.map((r) => (
+                    <DesktopTrayCard
+                      key={r.river_id}
+                      river={r}
+                      selected={r.river_id === selectedId}
+                      onSelect={() => selectRiver(r.river_id)}
+                    />
+                  ))}
+                </div>
+
+                {filtered.length === 0 ? (
+                  <div className="px-2 py-6 text-center text-sm text-white/70">
+                    No rivers match your search/filter.
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+===== app/page.tsx =====
+import { fetchActiveStationGeojsonByRiverIds, fetchFishabilityData } from "@/lib/supabase";
+import { fetchRiverLinesGeojson } from "@/lib/supabase-server";
+import OnxShell from "@/components/OnxShell";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 600;
+
+export default async function HomePage() {
+  const useMock = !process.env.NEXT_PUBLIC_SUPABASE_URL;
+  let rivers: Awaited<ReturnType<typeof fetchFishabilityData>> = [];
+  let stationGeojson: GeoJSON.FeatureCollection<GeoJSON.Point, Record<string, unknown>> = {
+    type: "FeatureCollection",
+    features: [],
+  };
+  let riverLinesGeojson: GeoJSON.FeatureCollection<GeoJSON.Geometry, Record<string, unknown>> = {
+    type: "FeatureCollection",
+    features: [],
+  };
+  try {
+    rivers = await fetchFishabilityData(useMock);
+    if (!useMock && rivers.length > 0) {
+      stationGeojson = await fetchActiveStationGeojsonByRiverIds(rivers.map((r) => r.river_id));
+      riverLinesGeojson = await fetchRiverLinesGeojson(rivers);
+    }
+  } catch (e) {
+    console.error("[HomePage]", e);
+  }
+  return <OnxShell rivers={rivers} stationGeojson={stationGeojson} riverLinesGeojson={riverLinesGeojson} />;
+}
+
+
+===== lib/supabase.ts =====
+import { SupabaseClient } from "@supabase/supabase-js";
+import { getSupabaseClient } from "./supabaseClient";
+import type {
+  FishabilityRow,
+  BiteTier,
+  RiverDetailAnalyticsBackendRow,
+  RiverSourceSiteSummary,
+  RiverWeatherDay,
+} from "./types";
+
+/** Raw row from river_daily_scores */
+type RiverScoreRow = {
+  river?: string;
+  date?: string;
+  usgs_site_no?: string;
+  fishability_score?: number | null;
+  flow_cfs?: number | null;
+  change_48h_pct?: number | null;
+  water_temp_f?: number | null;
+  wind_am_mph?: number | null;
+  wind_pm_mph?: number | null;
+  bite_tier?: string | null;
+  median_flow_cfs?: number | null;
+  flow_ratio_calc?: number | null;
+  fishability_score_calc?: number | null;
+  river_id?: string | null;
+  river_name?: string | null;
+  gauge_label?: string | null;
+};
+
+type RiverLatestRow = {
+  river_id?: string | number | null;
+  slug?: string | null;
+  river_name?: string | null;
+  gauge_label?: string | null;
+  usgs_site_no?: string | null;
+  date?: string | null;
+  flow_cfs?: number | null;
+  gage_height_ft?: number | null;
+  median_flow_cfs?: number | null;
+  flow_ratio_calc?: number | null;
+  change_48h_pct_calc?: number | null;
+  water_temp_f?: number | null;
+  wind_am_mph?: number | null;
+  wind_pm_mph?: number | null;
+  precip_mm?: number | null;
+  precip_probability_pct?: number | null;
+  fishability_rank?: number | null;
+  fishability_percentile?: number | null;
+  fishability_score_calc?: number | null;
+  bite_tier?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  source_flow_observed_at?: string | null;
+  source_temp_observed_at?: string | null;
+  flow_source_site_no?: string | null;
+  temp_status?: "available_fresh" | "available_stale" | "unavailable_at_gauge" | null;
+  temp_stale?: boolean | null;
+  temp_age_minutes?: number | null;
+  temp_source_site_no?: string | null;
+  temp_source_kind?: "IV" | "DV" | "NONE" | null;
+  temp_observed_at?: string | null;
+  confidence_level?: "High" | "Moderate" | "Low" | null;
+  temp_unavailable?: boolean | null;
+  temp_reason?: string | null;
+  updated_at?: string | null;
+  is_stale?: boolean | null;
+  stale_reason?: string | null;
+  last_usgs_pull_at?: string | null;
+  last_weather_pull_at?: string | null;
+  last_river_daily_date?: string | null;
+};
+
+type RiverHealthRow = {
+  river_id?: string | number | null;
+  is_stale?: boolean | null;
+  stale_reason?: string | null;
+  last_usgs_pull_at?: string | null;
+  last_weather_pull_at?: string | null;
+  last_river_daily_date?: string | null;
+};
+
+type StationRegistryRow = {
+  river_id?: string | number | null;
+  river_name?: string | null;
+  site_no?: string | null;
+  station_name?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  has_flow?: boolean | null;
+  has_temp?: boolean | null;
+  has_wq?: boolean | null;
+  parameter_codes?: string[] | null;
+  monitoring_location_id?: string | null;
+};
+
+type RiverUsgsMapRoleRow = {
+  river_id?: string | number | null;
+  site_no?: string | null;
+  role?: "flow" | "temp" | "stage" | "aux" | string | null;
+  priority?: number | null;
+};
+
+type UsgsSiteCatalogRow = {
+  site_no?: string | null;
+  station_name?: string | null;
+  lat?: number | null;
+  lon?: number | null;
+  active?: boolean | null;
+  parameter_codes?: string[] | null;
+};
+
+type RiverNameRow = {
+  id?: string | number | null;
+  river_name?: string | null;
+  slug?: string | null;
+};
+
+type WeatherDailyRow = {
+  date?: string | null;
+  wind_am_mph?: number | null;
+  wind_pm_mph?: number | null;
+  wind_speed_max_mph?: number | null;
+  air_temp_f?: number | null;
+  wind_direction_deg?: number | null;
+  gust_mph?: number | null;
+  cloud_cover_pct?: number | null;
+  air_temp_high_f?: number | null;
+  air_temp_low_f?: number | null;
+  precip_mm?: number | null;
+  precip_probability_pct?: number | null;
+  observed_at?: string | null;
+  created_at?: string | null;
+};
+
+type RiverDetailAnalyticsRow = RiverDetailAnalyticsBackendRow;
+
+export async function fetchRiverGeom(
+  riverId: string
+): Promise<GeoJSON.Geometry | null> {
+  const supabase = createSupabaseClient();
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("river_geoms")
+    .select("geom")
+    .eq("river_id", riverId)
+    .single();
+  if (error || !data) return null;
+  return (data as { geom: GeoJSON.Geometry }).geom ?? null;
+}
+
+/** Fetch river geometry as GeoJSON via PostGIS RPC (river_geometries table) */
+export async function fetchRiverGeojson(riverId: string): Promise<GeoJSON.GeoJSON | null> {
+  const client = createSupabaseClient();
+  if (!client) return null;
+  try {
+    const { data, error } = await client.rpc("get_river_geojson", { p_river_id: riverId });
+    if (error) {
+      console.warn("[fetchRiverGeojson] rpc error", error);
+      return null;
+    }
+    if (!data) return null;
+    return { type: "Feature", geometry: data, properties: { river_id: riverId } } as GeoJSON.Feature<GeoJSON.Geometry>;
+  } catch (e) {
+    console.warn("[fetchRiverGeojson] exception", e);
+    return null;
+  }
+}
+
+export function createSupabaseClient(): SupabaseClient | null {
+  return getSupabaseClient();
+}
+
+/** Fetch latest score per river from river_daily_scores (no coords) */
+export async function fetchLatestRiverScores(): Promise<RiverScoreRow[]> {
+  const supabase = createSupabaseClient();
+  if (!supabase) return [];
+
+  const fromLatest = await supabase
+    .from("v_river_latest")
+    .select("*");
+
+  if (!fromLatest.error && fromLatest.data && fromLatest.data.length > 0) {
+    return (fromLatest.data as RiverLatestRow[]).map((r) => ({
+      river_id: String(r.slug ?? r.river_id ?? ""),
+      river_name: r.river_name ?? undefined,
+      gauge_label: r.gauge_label ?? undefined,
+      usgs_site_no: r.usgs_site_no ?? undefined,
+      date: r.date ?? undefined,
+      fishability_score_calc: r.fishability_score_calc ?? null,
+      flow_cfs: r.flow_cfs ?? null,
+      gage_height_ft: r.gage_height_ft ?? null,
+      change_48h_pct: r.change_48h_pct_calc ?? null,
+      water_temp_f: r.water_temp_f ?? null,
+      wind_am_mph: r.wind_am_mph ?? null,
+      wind_pm_mph: r.wind_pm_mph ?? null,
+      bite_tier: r.bite_tier ?? null,
+      median_flow_cfs: r.median_flow_cfs ?? null,
+      flow_ratio_calc: r.flow_ratio_calc ?? null,
+      source_flow_observed_at: r.source_flow_observed_at ?? null,
+      source_temp_observed_at: r.source_temp_observed_at ?? null,
+      temp_observed_at: r.temp_observed_at ?? r.source_temp_observed_at ?? null,
+      flow_source_site_no: r.flow_source_site_no ?? null,
+      temp_status: r.temp_status ?? null,
+      temp_stale: r.temp_stale ?? null,
+      temp_age_minutes: r.temp_age_minutes ?? null,
+      temp_source_site_no: r.temp_source_site_no ?? null,
+      temp_source_kind: r.temp_source_kind ?? null,
+      confidence_level: r.confidence_level ?? null,
+      temp_unavailable: r.temp_unavailable ?? null,
+      temp_reason: r.temp_reason ?? null,
+      updated_at: r.updated_at ?? null,
+    }));
+  }
+  return [];
+}
+
+async function fetchHealthMap(supabase: SupabaseClient): Promise<Map<string, RiverHealthRow>> {
+  const out = new Map<string, RiverHealthRow>();
+  const healthRes = await supabase
+    .from("v_river_health")
+    .select("river_id,is_stale,stale_reason,last_usgs_pull_at,last_weather_pull_at,last_river_daily_date");
+  if (healthRes.error || !healthRes.data) return out;
+  for (const row of healthRes.data as RiverHealthRow[]) {
+    const id = String(row.river_id ?? "");
+    if (!id) continue;
+    out.set(id, row);
+  }
+  return out;
+}
+
+/** Fetch rivers metadata + latest scores, merge to FishabilityRow[] */
+export async function fetchRiversWithLatest(): Promise<FishabilityRow[]> {
+  const supabase = createSupabaseClient();
+  if (!supabase) return [];
+
+  const latestRes: any = await supabase
+    .from("v_river_latest")
+    .select("*")
+    .order("fishability_score_calc", { ascending: false, nullsFirst: false });
+
+  if (!latestRes.error && latestRes.data && latestRes.data.length > 0) {
+    const healthMap = await fetchHealthMap(supabase);
+    const rows = (latestRes.data as RiverLatestRow[]).map((r) => ({
+      river_id: String(r.river_id ?? ""),
+      slug: r.slug ?? undefined,
+      river_name: r.river_name ?? formatSlug(String(r.slug ?? r.river_id ?? "")),
+      gauge_label: r.gauge_label ?? "",
+      usgs_site_no: r.usgs_site_no ?? "",
+      date: r.date ?? "",
+      flow_cfs: r.flow_cfs ?? null,
+      gage_height_ft: r.gage_height_ft ?? null,
+      median_flow_cfs: r.median_flow_cfs ?? null,
+      flow_ratio_calc: r.flow_ratio_calc ?? null,
+      change_48h_pct_calc: r.change_48h_pct_calc ?? null,
+      water_temp_f: r.water_temp_f ?? null,
+      wind_am_mph: r.wind_am_mph ?? null,
+      wind_pm_mph: r.wind_pm_mph ?? null,
+      precip_mm: r.precip_mm ?? null,
+      precip_probability_pct: r.precip_probability_pct ?? null,
+      fishability_score_calc: r.fishability_score_calc ?? null,
+      fishability_rank: r.fishability_rank ?? null,
+      fishability_percentile: r.fishability_percentile ?? null,
+      bite_tier: normalizeBiteTier(r.bite_tier),
+      lat: r.latitude ?? null,
+      lng: r.longitude ?? null,
+      source_flow_observed_at: r.source_flow_observed_at ?? null,
+      source_temp_observed_at: r.source_temp_observed_at ?? null,
+      temp_observed_at: r.temp_observed_at ?? r.source_temp_observed_at ?? null,
+      flow_source_site_no: r.flow_source_site_no ?? null,
+      temp_status: r.temp_status ?? null,
+      temp_stale: r.temp_stale ?? null,
+      temp_age_minutes: r.temp_age_minutes ?? null,
+      temp_source_site_no: r.temp_source_site_no ?? null,
+      temp_source_kind: r.temp_source_kind ?? null,
+      confidence_level: r.confidence_level ?? null,
+      temp_unavailable: r.temp_unavailable ?? null,
+      temp_reason: r.temp_reason ?? null,
+      updated_at: r.updated_at ?? null,
+      is_stale:
+        r.is_stale ??
+        healthMap.get(String(r.river_id ?? ""))?.is_stale ??
+        null,
+      stale_reason:
+        r.stale_reason ??
+        healthMap.get(String(r.river_id ?? ""))?.stale_reason ??
+        null,
+      last_usgs_pull_at:
+        r.last_usgs_pull_at ??
+        healthMap.get(String(r.river_id ?? ""))?.last_usgs_pull_at ??
+        null,
+      last_weather_pull_at:
+        r.last_weather_pull_at ??
+        healthMap.get(String(r.river_id ?? ""))?.last_weather_pull_at ??
+        null,
+      last_river_daily_date:
+        r.last_river_daily_date ??
+        healthMap.get(String(r.river_id ?? ""))?.last_river_daily_date ??
+        null,
+    })) as FishabilityRow[];
+
+    rows.sort((a, b) => (b.fishability_score_calc ?? 0) - (a.fishability_score_calc ?? 0));
+    return rows;
+  }
+
+  return [];
+}
+
+function normalizeBiteTier(t?: string | null): BiteTier | null {
+  if (!t) return null;
+  const u = t.toUpperCase();
+  if (u === "HOT" || u === "GOOD" || u === "FAIR" || u === "TOUGH") return u as BiteTier;
+  return null;
+}
+
+function formatSlug(slug: string): string {
+  return slug
+    .split("-")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+}
+
+export async function fetchFishabilityData(useMock = false): Promise<FishabilityRow[]> {
+  if (useMock) {
+    const { MOCK_RIVERS } = await import("./mock-data");
+    return MOCK_RIVERS;
+  }
+
+  const supabase = createSupabaseClient();
+  if (!supabase) {
+    const { MOCK_RIVERS } = await import("./mock-data");
+    return MOCK_RIVERS;
+  }
+
+  try {
+    const fromRivers = await fetchRiversWithLatest();
+    if (fromRivers.length > 0) return fromRivers;
+  } catch (_) {
+    /* fall through */
+  }
+
+  const { MOCK_RIVERS } = await import("./mock-data");
+  return MOCK_RIVERS;
+}
+
+export async function fetchActiveStationGeojsonByRiverIds(
+  riverIds: string[]
+): Promise<GeoJSON.FeatureCollection<GeoJSON.Point, Record<string, unknown>>> {
+  const client = createSupabaseClient();
+  if (!client || riverIds.length === 0) {
+    return { type: "FeatureCollection", features: [] };
+  }
+
+  const uniqueIds = Array.from(new Set(riverIds.map((id) => String(id).trim()).filter(Boolean)));
+  if (uniqueIds.length === 0) {
+    return { type: "FeatureCollection", features: [] };
+  }
+
+  const roleRes = await client
+    .from("river_usgs_map_roles")
+    .select("river_id,site_no,role,priority")
+    .eq("is_active", true)
+    .in("river_id", uniqueIds);
+
+  if (roleRes.error || !roleRes.data?.length) {
+    return { type: "FeatureCollection", features: [] };
+  }
+
+  const activeRoles = (roleRes.data as RiverUsgsMapRoleRow[])
+    .map((row) => ({
+      river_id: row.river_id != null ? String(row.river_id) : null,
+      site_no: row.site_no ? String(row.site_no).trim() : "",
+      role: row.role ? String(row.role).trim().toLowerCase() : "",
+      priority: row.priority ?? null,
+    }))
+    .filter((row) => row.river_id && row.site_no && row.role);
+
+  const activeSiteNos = Array.from(new Set(activeRoles.map((row) => row.site_no)));
+  if (!activeSiteNos.length) {
+    return { type: "FeatureCollection", features: [] };
+  }
+
+  const [registryRes, catalogRes, riversRes] = await Promise.all([
+    client
+      .from("usgs_station_registry")
+      .select(
+        "river_id,river_name,site_no,station_name,latitude,longitude,has_flow,has_temp,has_wq,parameter_codes,monitoring_location_id,is_active"
+      )
+      .eq("is_active", true)
+      .in("site_no", activeSiteNos),
+    client
+      .from("usgs_sites")
+      .select("site_no,station_name,lat,lon,active,parameter_codes")
+      .eq("active", true)
+      .in("site_no", activeSiteNos),
+    client
+      .from("rivers")
+      .select("id,river_name,slug")
+      .in("id", uniqueIds),
+  ]);
+
+  if (catalogRes.error || !catalogRes.data?.length) {
+    return { type: "FeatureCollection", features: [] };
+  }
+
+  const rows = (registryRes.data ?? []) as StationRegistryRow[];
+  const catalogRows = catalogRes.data as UsgsSiteCatalogRow[];
+  const riverNameById = new Map<string, string>();
+  for (const row of (riversRes.data ?? []) as RiverNameRow[]) {
+    const id = row.id != null ? String(row.id) : "";
+    if (!id) continue;
+    riverNameById.set(id, row.river_name?.trim() || row.slug?.trim() || id);
+  }
+
+  const catalogBySite = new Map<string, UsgsSiteCatalogRow>();
+  for (const row of catalogRows) {
+    const siteNo = row.site_no ? String(row.site_no).trim() : "";
+    if (!siteNo) continue;
+    catalogBySite.set(siteNo, row);
+  }
+
+  const registryBySite = new Map<string, StationRegistryRow[]>();
+  for (const row of rows) {
+    const siteNo = row.site_no ? String(row.site_no).trim() : "";
+    if (!siteNo) continue;
+    const bucket = registryBySite.get(siteNo) ?? [];
+    bucket.push(row);
+    registryBySite.set(siteNo, bucket);
+  }
+
+  const rolesBySite = new Map<string, Set<string>>();
+  const riverIdsBySite = new Map<string, Set<string>>();
+  for (const row of activeRoles) {
+    const roleBucket = rolesBySite.get(row.site_no) ?? new Set<string>();
+    roleBucket.add(row.role);
+    rolesBySite.set(row.site_no, roleBucket);
+    if (row.river_id) {
+      const riverBucket = riverIdsBySite.get(row.site_no) ?? new Set<string>();
+      riverBucket.add(row.river_id);
+      riverIdsBySite.set(row.site_no, riverBucket);
+    }
+  }
+
+  const roleOrder = ["flow", "temp", "stage", "aux"];
+  const features: GeoJSON.Feature<GeoJSON.Point, Record<string, unknown>>[] = [];
+  for (const siteNo of activeSiteNos) {
+    const siteRows = registryBySite.get(siteNo) ?? [];
+    const catalogRow = catalogBySite.get(siteNo);
+    const baseRegistryRow =
+      siteRows.find((row) => row.latitude != null && row.longitude != null && row.station_name) ??
+      siteRows.find((row) => row.latitude != null && row.longitude != null) ??
+      siteRows[0];
+    const lng = baseRegistryRow?.longitude ?? catalogRow?.lon ?? null;
+    const lat = baseRegistryRow?.latitude ?? catalogRow?.lat ?? null;
+    if (lng == null || lat == null || Number.isNaN(Number(lng)) || Number.isNaN(Number(lat))) continue;
+    const roles = Array.from(rolesBySite.get(siteNo) ?? []).sort((a, b) => {
+      const ai = roleOrder.indexOf(a);
+      const bi = roleOrder.indexOf(b);
+      return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+    });
+    const relatedRiverIds = Array.from(riverIdsBySite.get(siteNo) ?? []);
+    const relatedRiverNames = Array.from(
+      new Set(
+        [
+          ...siteRows.map((row) => row.river_name?.trim()),
+          ...relatedRiverIds.map((riverId) => riverNameById.get(riverId)?.trim()),
+        ].filter((value): value is string => Boolean(value))
+      )
+    );
+    const parameterCodes = Array.from(
+      new Set(
+        [
+          ...siteRows.flatMap((row) => row.parameter_codes ?? []),
+          ...(catalogRow?.parameter_codes ?? []),
+        ]
+          .map((code) => String(code).trim())
+          .filter(Boolean)
+      )
+    );
+    const hasFlow = siteRows.some((row) => row.has_flow === true) || roles.includes("flow");
+    const hasTemp = siteRows.some((row) => row.has_temp === true) || roles.includes("temp");
+    const hasWq = siteRows.some((row) => row.has_wq === true);
+
+    features.push({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [Number(lng), Number(lat)] },
+      properties: {
+        river_id: relatedRiverIds[0] ?? (baseRegistryRow?.river_id ? String(baseRegistryRow.river_id) : null),
+        river_name: relatedRiverNames[0] ?? baseRegistryRow?.river_name ?? null,
+        related_river_ids: relatedRiverIds,
+        related_river_ids_csv: relatedRiverIds.join(" | "),
+        related_river_names: relatedRiverNames,
+        related_river_names_csv: relatedRiverNames.join(" | "),
+        site_no: siteNo,
+        station_name: baseRegistryRow?.station_name ?? catalogRow?.station_name ?? null,
+        roles,
+        roles_csv: roles.join(" • "),
+        primary_role: roles[0] ?? null,
+        role_count: roles.length,
+        has_flow: hasFlow,
+        has_temp: hasTemp,
+        has_wq: hasWq,
+        parameter_codes: parameterCodes,
+        monitoring_location_id: baseRegistryRow?.monitoring_location_id ?? null,
+      },
+    });
+  }
+
+  return { type: "FeatureCollection", features };
+}
+
+export async function fetchRiverDetailByIdOrSlug(
+  riverIdOrSlug: string
+): Promise<FishabilityRow | null> {
+  const client = createSupabaseClient();
+  if (!client) return null;
+
+  const bySlug = await client
+    .from("v_river_detail")
+    .select("*")
+    .eq("slug", riverIdOrSlug)
+    .maybeSingle();
+
+  const row = (!bySlug.error ? bySlug.data : null) as RiverLatestRow | null;
+  if (row) {
+    return {
+      river_id: String(row.river_id ?? ""),
+      slug: row.slug ?? undefined,
+      river_name: row.river_name ?? formatSlug(String(row.slug ?? row.river_id ?? "")),
+      gauge_label: row.gauge_label ?? "",
+      usgs_site_no: row.usgs_site_no ?? "",
+      date: row.date ?? "",
+      flow_cfs: row.flow_cfs ?? null,
+      gage_height_ft: row.gage_height_ft ?? null,
+      median_flow_cfs: row.median_flow_cfs ?? null,
+      flow_ratio_calc: row.flow_ratio_calc ?? null,
+      change_48h_pct_calc: row.change_48h_pct_calc ?? null,
+      water_temp_f: row.water_temp_f ?? null,
+      wind_am_mph: row.wind_am_mph ?? null,
+      wind_pm_mph: row.wind_pm_mph ?? null,
+      precip_mm: row.precip_mm ?? null,
+      precip_probability_pct: row.precip_probability_pct ?? null,
+      fishability_score_calc: row.fishability_score_calc ?? null,
+      fishability_rank: row.fishability_rank ?? null,
+      fishability_percentile: row.fishability_percentile ?? null,
+      bite_tier: normalizeBiteTier(row.bite_tier),
+      lat: row.latitude ?? null,
+      lng: row.longitude ?? null,
+      source_flow_observed_at: row.source_flow_observed_at ?? null,
+      source_temp_observed_at: row.source_temp_observed_at ?? null,
+      temp_observed_at: row.temp_observed_at ?? row.source_temp_observed_at ?? null,
+      flow_source_site_no: row.flow_source_site_no ?? null,
+      temp_status: row.temp_status ?? null,
+      temp_stale: row.temp_stale ?? null,
+      temp_age_minutes: row.temp_age_minutes ?? null,
+      temp_source_site_no: row.temp_source_site_no ?? null,
+      temp_source_kind: row.temp_source_kind ?? null,
+      confidence_level: row.confidence_level ?? null,
+      temp_unavailable: row.temp_unavailable ?? null,
+      temp_reason: row.temp_reason ?? null,
+      updated_at: row.updated_at ?? null,
+      is_stale: row.is_stale ?? null,
+      stale_reason: row.stale_reason ?? null,
+      last_usgs_pull_at: row.last_usgs_pull_at ?? null,
+      last_weather_pull_at: row.last_weather_pull_at ?? null,
+      last_river_daily_date: row.last_river_daily_date ?? null,
+    };
+  }
+
+  return null;
+}
+
+export async function fetchRiverDetailAnalyticsByIdOrSlug(
+  riverIdOrSlug: string
+): Promise<RiverDetailAnalyticsBackendRow | null> {
+  const client = createSupabaseClient();
+  if (!client) return null;
+
+  const byId = await client
+    .from("v_river_detail_analytics")
+    .select("*")
+    .eq("river_id", riverIdOrSlug)
+    .maybeSingle();
+
+  if (!byId.error && byId.data) {
+    return byId.data as RiverDetailAnalyticsRow;
+  }
+
+  const bySlug = await client
+    .from("v_river_detail_analytics")
+    .select("*")
+    .eq("slug", riverIdOrSlug)
+    .maybeSingle();
+
+  if (!bySlug.error && bySlug.data) {
+    return bySlug.data as RiverDetailAnalyticsRow;
+  }
+
+  return null;
+}
+
+export async function fetchRiverHistory14d(
+  riverDbId: string
+): Promise<Array<{ obs_date: string; flow_cfs: number | null; water_temp_f: number | null; fishability_score: number | null }>> {
+  const client = createSupabaseClient();
+  if (!client) return [];
+
+  const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  let resolvedRiverId = riverDbId;
+  if (!uuidLike.test(riverDbId)) {
+    const bySlug = await client
+      .from("rivers")
+      .select("id")
+      .eq("slug", riverDbId)
+      .maybeSingle();
+    if (bySlug.error || !bySlug.data?.id) return [];
+    resolvedRiverId = String(bySlug.data.id);
+  }
+
+  const { data, error } = await client.rpc("river_history_14d", {
+    p_river_id: resolvedRiverId,
+  });
+  if (!error && data) {
+    return data as Array<{
+      obs_date: string;
+      flow_cfs: number | null;
+      water_temp_f: number | null;
+      fishability_score: number | null;
+    }>;
+  }
+
+  // Fallback path when RPC is missing/mismatched: read directly from river_daily.
+  const dailyRes = await client
+    .from("river_daily")
+    .select("obs_date,flow_cfs,water_temp_f,fishability_score")
+    .eq("river_id", resolvedRiverId)
+    .order("obs_date", { ascending: false })
+    .limit(14);
+
+  if (dailyRes.error || !dailyRes.data) return [];
+  return (dailyRes.data as Array<{
+    obs_date: string;
+    flow_cfs: number | null;
+    water_temp_f: number | null;
+    fishability_score: number | null;
+  }>);
+}
+
+export async function fetchRiverIntraday24h(
+  riverDbId: string
+): Promise<
+  Array<{
+    observed_at: string;
+    flow_cfs: number | null;
+    water_temp_f: number | null;
+    gage_height_ft: number | null;
+  }>
+> {
+  const client = createSupabaseClient();
+  if (!client) return [];
+
+  const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  let resolvedRiverId = riverDbId;
+  if (!uuidLike.test(riverDbId)) {
+    const bySlug = await client
+      .from("rivers")
+      .select("id")
+      .eq("slug", riverDbId)
+      .maybeSingle();
+    if (bySlug.error || !bySlug.data?.id) return [];
+    resolvedRiverId = String(bySlug.data.id);
+  }
+
+  const rpc = await client.rpc("river_intraday_24h", {
+    p_river_id: resolvedRiverId,
+  });
+  if (!rpc.error && rpc.data) {
+    return rpc.data as Array<{
+      observed_at: string;
+      flow_cfs: number | null;
+      water_temp_f: number | null;
+      gage_height_ft: number | null;
+    }>;
+  }
+
+  const fallback = await client
+    .from("river_hourly")
+    .select("observed_at,flow_cfs,water_temp_f,gage_height_ft")
+    .eq("river_id", resolvedRiverId)
+    .gte("observed_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+    .order("observed_at", { ascending: true });
+
+  if (fallback.error || !fallback.data) return [];
+  return fallback.data as Array<{
+    observed_at: string;
+    flow_cfs: number | null;
+    water_temp_f: number | null;
+    gage_height_ft: number | null;
+  }>;
+}
+
+function mountainDate(date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Denver",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+async function resolveRiverId(client: SupabaseClient, riverDbId: string): Promise<string | null> {
+  const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (uuidLike.test(riverDbId)) return riverDbId;
+  const bySlug = await client
+    .from("rivers")
+    .select("id")
+    .eq("slug", riverDbId)
+    .maybeSingle();
+  if (bySlug.error || !bySlug.data?.id) return null;
+  return String(bySlug.data.id);
+}
+
+export async function fetchRiverWeatherWindow(riverDbId: string): Promise<RiverWeatherDay[]> {
+  const client = createSupabaseClient();
+  if (!client) return [];
+
+  const resolvedRiverId = await resolveRiverId(client, riverDbId);
+  if (!resolvedRiverId) return [];
+
+  const today = mountainDate();
+  let res = await client
+    .from("weather_daily")
+    .select("*")
+    .eq("river_id", resolvedRiverId)
+    .gte("date", today)
+    .order("date", { ascending: true })
+    .limit(4);
+
+  if (res.error || !res.data?.length) {
+    res = await client
+      .from("weather_daily")
+      .select("*")
+      .eq("river_id", resolvedRiverId)
+      .order("date", { ascending: false })
+      .limit(4);
+  }
+
+  if (res.error || !res.data) return [];
+  return [...(res.data as WeatherDailyRow[])]
+    .map((row) => ({
+      date: row.date ?? "",
+      wind_am_mph: row.wind_am_mph ?? null,
+      wind_pm_mph: row.wind_pm_mph ?? null,
+      wind_speed_max_mph: row.wind_speed_max_mph ?? null,
+      air_temp_f: row.air_temp_f ?? null,
+      wind_direction_deg: row.wind_direction_deg ?? null,
+      gust_mph: row.gust_mph ?? null,
+      cloud_cover_pct: row.cloud_cover_pct ?? null,
+      air_temp_high_f: row.air_temp_high_f ?? null,
+      air_temp_low_f: row.air_temp_low_f ?? null,
+      precip_mm: row.precip_mm ?? null,
+      precip_probability_pct: row.precip_probability_pct ?? null,
+      observed_at: row.observed_at ?? null,
+      created_at: row.created_at ?? null,
+    }))
+    .filter((row) => Boolean(row.date))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+export async function fetchUsgsSiteSummaries(
+  siteNos: string[]
+): Promise<Record<string, RiverSourceSiteSummary>> {
+  const client = createSupabaseClient();
+  if (!client) return {};
+  const normalized = Array.from(new Set(siteNos.map((siteNo) => String(siteNo).trim()).filter(Boolean)));
+  if (!normalized.length) return {};
+
+  const [registryRes, catalogRes] = await Promise.all([
+    client.from("usgs_station_registry").select("site_no,station_name").in("site_no", normalized),
+    client.from("usgs_sites").select("site_no,station_name").in("site_no", normalized),
+  ]);
+
+  const out: Record<string, RiverSourceSiteSummary> = {};
+  for (const row of (catalogRes.data ?? []) as Array<{ site_no?: string | null; station_name?: string | null }>) {
+    const siteNo = row.site_no ? String(row.site_no).trim() : "";
+    if (!siteNo) continue;
+    out[siteNo] = { site_no: siteNo, station_name: row.station_name ?? null };
+  }
+  for (const row of (registryRes.data ?? []) as Array<{ site_no?: string | null; station_name?: string | null }>) {
+    const siteNo = row.site_no ? String(row.site_no).trim() : "";
+    if (!siteNo) continue;
+    out[siteNo] = out[siteNo] ?? { site_no: siteNo, station_name: row.station_name ?? null };
+    if (!out[siteNo].station_name && row.station_name) {
+      out[siteNo] = { site_no: siteNo, station_name: row.station_name };
+    }
+  }
+  return out;
+}
+
+
+===== lib/supabase-server.ts =====
+import { createClient } from "@supabase/supabase-js";
+import type { FishabilityRow } from "./types";
+
+export function createSupabaseServer() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
+  const key =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !key) return null;
+  return createClient(url, key, {
+    global: {
+      fetch: (input, init) =>
+        fetch(input, {
+          ...init,
+          cache: "no-store",
+        }),
+    },
+  });
+}
+
+type RiverGeometryJoinRow = {
+  id?: string | null;
+  slug?: string | null;
+  river_name?: string | null;
+  river_geometries?:
+    | {
+        geom?: GeoJSON.Geometry | null;
+      }
+    | Array<{
+        geom?: GeoJSON.Geometry | null;
+      }>
+    | null;
+};
+
+function featureFromJoinRow(
+  row: RiverGeometryJoinRow
+): GeoJSON.Feature<GeoJSON.Geometry, Record<string, unknown>> | null {
+  const joined = Array.isArray(row.river_geometries)
+    ? row.river_geometries[0] ?? null
+    : row.river_geometries ?? null;
+  const geometry = joined?.geom ?? null;
+  const riverId = row.id ? String(row.id) : null;
+  if (!geometry || !riverId) return null;
+
+  return {
+    type: "Feature",
+    geometry,
+    properties: {
+      river_id: riverId,
+      slug: row.slug ?? null,
+      river_name: row.river_name ?? row.slug ?? riverId,
+      name: row.river_name ?? row.slug ?? riverId,
+    },
+  };
+}
+
+export async function fetchRiverLinesGeojson(
+  rivers: Pick<FishabilityRow, "river_id" | "slug" | "river_name">[]
+): Promise<GeoJSON.FeatureCollection<GeoJSON.Geometry, Record<string, unknown>>> {
+  const client = createSupabaseServer();
+  if (!client || rivers.length === 0) {
+    return { type: "FeatureCollection", features: [] };
+  }
+
+  const byId = new Map(
+    rivers
+      .map((river) => {
+        const id = String(river.river_id ?? "").trim();
+        if (!id) return null;
+        return [id, river] as const;
+      })
+      .filter((entry): entry is readonly [string, Pick<FishabilityRow, "river_id" | "slug" | "river_name">] => Boolean(entry))
+  );
+
+  if (byId.size === 0) {
+    return { type: "FeatureCollection", features: [] };
+  }
+
+  const { data, error } = await client
+    .from("rivers")
+    .select("id,slug,river_name,river_geometries!inner(geom)")
+    .in("id", Array.from(byId.keys()));
+
+  const features = new Map<string, GeoJSON.Feature<GeoJSON.Geometry, Record<string, unknown>>>();
+  if (!error && data) {
+    for (const row of data as RiverGeometryJoinRow[]) {
+      const feature = featureFromJoinRow(row);
+      if (!feature) continue;
+      features.set(String(feature.properties?.river_id ?? ""), feature);
+    }
+  }
+
+  const missing = rivers.filter((river) => !features.has(String(river.river_id ?? "")));
+  for (const river of missing) {
+    const key = river.slug ?? river.river_id;
+    if (!key) continue;
+    const { data: geojson, error: rpcError } = await client.rpc("get_river_geojson_by_slug", {
+      p_slug: key,
+    });
+    if (rpcError || !geojson) continue;
+
+    const normalized = geojson as GeoJSON.Feature<GeoJSON.Geometry, Record<string, unknown>>;
+    if (!normalized.geometry) continue;
+    const riverId = String(river.river_id ?? "").trim();
+    if (!riverId) continue;
+    features.set(riverId, {
+      type: "Feature",
+      geometry: normalized.geometry,
+      properties: {
+        ...(normalized.properties ?? {}),
+        river_id: riverId,
+        slug: river.slug ?? normalized.properties?.slug ?? null,
+        river_name: river.river_name ?? normalized.properties?.river_name ?? normalized.properties?.name ?? null,
+        name: river.river_name ?? normalized.properties?.river_name ?? normalized.properties?.name ?? null,
+      },
+    });
+  }
+
+  return {
+    type: "FeatureCollection",
+    features: rivers
+      .map((river) => features.get(String(river.river_id ?? "")))
+      .filter(
+        (
+          feature
+        ): feature is GeoJSON.Feature<GeoJSON.Geometry, Record<string, unknown>> => Boolean(feature)
+      ),
+  };
+}
+
+
+===== lib/types.ts =====
+export type BiteTier = "HOT" | "GOOD" | "FAIR" | "TOUGH";
+
+export interface FishabilityRow {
+  river_id: string;
+  slug?: string;
+  river_name: string;
+  /** Optional map coords from DB (lon, lat) - used when RIVER_FOCUS_POINTS has no entry */
+  lat?: number | null;
+  lng?: number | null;
+  gauge_label: string;
+  usgs_site_no: string;
+  date: string;
+  flow_cfs: number | null;
+  gage_height_ft?: number | null;
+  median_flow_cfs: number | null;
+  flow_ratio_calc: number | null;
+  change_48h_pct_calc: number | null;
+  water_temp_f: number | null;
+  wind_am_mph: number | null;
+  wind_pm_mph: number | null;
+  precip_mm?: number | null;
+  precip_probability_pct?: number | null;
+  fishability_score_calc: number | null;
+  fishability_rank?: number | null;
+  fishability_percentile?: number | null;
+  bite_tier: BiteTier | null;
+  source_flow_observed_at?: string | null;
+  source_temp_observed_at?: string | null;
+  flow_source_site_no?: string | null;
+  temp_status?: "available_fresh" | "available_stale" | "unavailable_at_gauge" | null;
+  temp_stale?: boolean | null;
+  temp_age_minutes?: number | null;
+  temp_source_site_no?: string | null;
+  temp_source_kind?: "IV" | "DV" | "NONE" | null;
+  temp_observed_at?: string | null;
+  confidence_level?: "High" | "Moderate" | "Low" | null;
+  temp_unavailable?: boolean | null;
+  temp_reason?: string | null;
+  updated_at?: string | null;
+  is_stale?: boolean | null;
+  stale_reason?: string | null;
+  last_usgs_pull_at?: string | null;
+  last_weather_pull_at?: string | null;
+  last_river_daily_date?: string | null;
+}
+
+export interface RiverGeom {
+  river_id: string;
+  geom: GeoJSON.Geometry;
+}
+
+export interface RiverWeatherDay {
+  date: string;
+  wind_am_mph: number | null;
+  wind_pm_mph: number | null;
+  wind_speed_max_mph: number | null;
+  air_temp_f?: number | null;
+  wind_direction_deg?: number | null;
+  gust_mph?: number | null;
+  cloud_cover_pct?: number | null;
+  air_temp_high_f: number | null;
+  air_temp_low_f: number | null;
+  precip_mm: number | null;
+  precip_probability_pct: number | null;
+  observed_at?: string | null;
+  created_at?: string | null;
+}
+
+export interface RiverSourceSiteSummary {
+  site_no: string;
+  station_name: string | null;
+}
+
+export interface RiverDetailAnalyticsBackendRow {
+  river_id: string;
+  slug?: string | null;
+  river_name?: string | null;
+  gauge_label?: string | null;
+  date?: string | null;
+  current_flow_cfs: number | null;
+  current_temp_f: number | null;
+  current_stage_ft: number | null;
+  median_flow_cfs: number | null;
+  flow_ratio: number | null;
+  flow_48h_ago: number | null;
+  temp_24h_ago: number | null;
+  change_48h_pct: number | null;
+  temp_change_24h_f: number | null;
+  stability_index_raw: number | null;
+  stability_label: string | null;
+  flow_trend_label?: string | null;
+  flow_percentile: number | null;
+  flow_percentile_status: string | null;
+  flow_p10?: number | null;
+  flow_p25?: number | null;
+  flow_p50?: number | null;
+  flow_p75?: number | null;
+  flow_p90?: number | null;
+  historical_sample_size?: number | null;
+  temp_source_kind: string | null;
+  temp_observed_at: string | null;
+  confidence_level: "High" | "Moderate" | "Low" | null;
+  flow_source_site_no: string | null;
+  flow_source_site_name: string | null;
+  temp_source_site_no: string | null;
+  temp_source_site_name: string | null;
+  observation_timestamp: string | null;
+  last_hydrology_pull_at: string | null;
+  air_temp_f: number | null;
+  wind_speed_mph: number | null;
+  wind_direction_deg?: number | null;
+  wind_direction: string | null;
+  gust_mph: number | null;
+  precip_chance_pct: number | null;
+  cloud_cover_pct: number | null;
+  daily_high_f: number | null;
+  daily_low_f: number | null;
+  weather_observed_at: string | null;
+  thermal_trend_label?: string | null;
+  temp_direction_3d?: string | null;
+  forecast_day1_air_temp_f: number | null;
+  forecast_day1_wind_mph: number | null;
+  forecast_day1_precip_chance_pct: number | null;
+  forecast_day2_air_temp_f: number | null;
+  forecast_day2_wind_mph: number | null;
+  forecast_day2_precip_chance_pct: number | null;
+  forecast_day3_air_temp_f: number | null;
+  forecast_day3_wind_mph: number | null;
+  forecast_day3_precip_chance_pct: number | null;
+  wind_outlook?: string | null;
+  flow_outlook?: string | null;
+  fishing_outlook?: string | null;
+}
+
+export interface RiverDetailAnalytics {
+  hydrology: {
+    currentFlowCfs: number | null;
+    medianFlowCfs: number | null;
+    flowRatio: number | null;
+    change48hPct: number | null;
+    flowPercentile: number | null;
+    flowPercentileStatus: string | null;
+    stabilityIndexRaw: number | null;
+    stabilityLabel: string | null;
+    gaugeHeightFt: number | null;
+  };
+  thermal: {
+    currentWaterTempF: number | null;
+    tempSourceKind: string | null;
+    tempObservedAt: string | null;
+    tempConfidence: string | null;
+    thermalTrendLabel: string | null;
+    thermalTrendDelta24hF: number | null;
+    thermalStatus: string | null;
+    direction3Day: string | null;
+  };
+  weather: {
+    airTempF: number | null;
+    windSpeedMph: number | null;
+    windDirection: string | null;
+    gustMph: number | null;
+    precipChancePct: number | null;
+    cloudCoverPct: number | null;
+    highTempF: number | null;
+    lowTempF: number | null;
+    windImpact: string | null;
+    dryFlyWindImpact: string | null;
+  };
+  forecast: {
+    day1: {
+      label: string;
+      airTempF: number | null;
+      windMph: number | null;
+      precipChancePct: number | null;
+      available: boolean;
+    };
+    day2: {
+      label: string;
+      airTempF: number | null;
+      windMph: number | null;
+      precipChancePct: number | null;
+      available: boolean;
+    };
+    day3: {
+      label: string;
+      airTempF: number | null;
+      windMph: number | null;
+      precipChancePct: number | null;
+      available: boolean;
+    };
+    windOutlook: string | null;
+    fishingOutlook: string | null;
+    flowOutlook: string | null;
+  };
+  biology: {
+    hatchLikelihood: string | null;
+    dryFlyViability: string | null;
+    tacticalRead: string | null;
+  };
+  sourceTrust: {
+    flowSourceSiteNo: string | null;
+    flowSourceSiteName: string | null;
+    tempSourceSiteNo: string | null;
+    tempSourceSiteName: string | null;
+    tempSourceKind: string | null;
+    observationTimestamp: string | null;
+    lastHydrologyPullAt: string | null;
+    overallConfidence: string | null;
+    missingInputs: string[];
+  };
+}
+
+

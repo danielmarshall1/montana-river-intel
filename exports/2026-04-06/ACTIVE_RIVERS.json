@@ -1,0 +1,122 @@
+[dotenv@17.3.1] injecting env (6) from .env.local -- tip: 🔐 prevent committing .env to code: https://dotenvx.com/precommit
+[
+  {
+    "river_name": "Big Hole River",
+    "gauge_label": "near Melrose",
+    "usgs_site_no": "06025500",
+    "slug": "big-hole-melrose",
+    "is_active": true
+  },
+  {
+    "river_name": "Bighorn River",
+    "gauge_label": "at bridge, at St. Xavier",
+    "usgs_site_no": "06287800",
+    "slug": "bighorn-st-xavier",
+    "is_active": true
+  },
+  {
+    "river_name": "Bitterroot River",
+    "gauge_label": "near Missoula",
+    "usgs_site_no": "12352500",
+    "slug": "bitterroot-missoula",
+    "is_active": true
+  },
+  {
+    "river_name": "Blackfoot River",
+    "gauge_label": "near Bonner",
+    "usgs_site_no": "12340000",
+    "slug": "blackfoot-bonner",
+    "is_active": true
+  },
+  {
+    "river_name": "Clark Fork",
+    "gauge_label": "at St. Regis",
+    "usgs_site_no": "12354500",
+    "slug": "clark-fork-st-regis",
+    "is_active": true
+  },
+  {
+    "river_name": "Flathead River",
+    "gauge_label": "at Columbia Falls",
+    "usgs_site_no": "12363000",
+    "slug": "flathead-columbia-falls",
+    "is_active": true
+  },
+  {
+    "river_name": "Gallatin River",
+    "gauge_label": "near Gallatin Gateway",
+    "usgs_site_no": "06043500",
+    "slug": "gallatin-gateway",
+    "is_active": true
+  },
+  {
+    "river_name": "Jefferson River",
+    "gauge_label": "near Three Forks",
+    "usgs_site_no": "06036650",
+    "slug": "jefferson-river-three-forks",
+    "is_active": true
+  },
+  {
+    "river_name": "Kootenai River",
+    "gauge_label": "below Libby Dam near Libby",
+    "usgs_site_no": "12301933",
+    "slug": "kootenai-below-libby-dam",
+    "is_active": true
+  },
+  {
+    "river_name": "Kootenai River",
+    "gauge_label": "at Libby",
+    "usgs_site_no": "12303000",
+    "slug": "kootenai-libby",
+    "is_active": true
+  },
+  {
+    "river_name": "Madison River",
+    "gauge_label": "near West Yellowstone",
+    "usgs_site_no": "06037500",
+    "slug": "madison-west-yellowstone",
+    "is_active": true
+  },
+  {
+    "river_name": "Marias River",
+    "gauge_label": "near Chester",
+    "usgs_site_no": "06101500",
+    "slug": "marias-chester",
+    "is_active": true
+  },
+  {
+    "river_name": "Missouri River",
+    "gauge_label": "at Toston",
+    "usgs_site_no": "06054500",
+    "slug": "missouri-toston",
+    "is_active": true
+  },
+  {
+    "river_name": "North Fork Flathead River",
+    "gauge_label": "near Columbia Falls",
+    "usgs_site_no": "12355500",
+    "slug": "nf-flathead-columbia-falls",
+    "is_active": true
+  },
+  {
+    "river_name": "Rock Creek",
+    "gauge_label": "near Clinton",
+    "usgs_site_no": "12334510",
+    "slug": "rock-creek-clinton",
+    "is_active": true
+  },
+  {
+    "river_name": "Yellowstone River",
+    "gauge_label": "near Livingston",
+    "usgs_site_no": "06192500",
+    "slug": "yellowstone-livingston",
+    "is_active": true
+  },
+  {
+    "river_name": "Yellowstone River",
+    "gauge_label": "at Corwin Springs",
+    "usgs_site_no": "06191500",
+    "slug": "yellowstone-corwin-springs",
+    "is_active": true
+  }
+]

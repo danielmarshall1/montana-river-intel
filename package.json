@@ -3,15 +3,17 @@
   "version": "1.0.0",
   "description": "Montana River Intel - map-first outdoor intelligence",
   "scripts": {
-    "dev": "next dev",
-    "dev:reset": "pkill -f \"next dev\" 2>/dev/null || true; rm -rf .next .next_*; next dev -H localhost -p 3000",
+    "dev": "bash -c 'ulimit -n 65536 2>/dev/null || ulimit -n 10240 2>/dev/null || true; export WATCHPACK_POLLING=1000 WATCHPACK_WATCHER_LIMIT=20; exec next dev -H localhost -p 3000'",
+    "dev:reset": "pkill -f \"next dev\" 2>/dev/null || true; rm -rf .next .next_*; bash -c 'ulimit -n 65536 2>/dev/null || ulimit -n 10240 2>/dev/null || true; export WATCHPACK_POLLING=1000 WATCHPACK_WATCHER_LIMIT=20; exec next dev -H localhost -p 3000'",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "test": "echo \"Error: no test specified\" && exit 1",
     "audit:temp": "tsx scripts/auditTempAvailability.ts",
     "assign:temp-sites": "tsx scripts/assignBestTempStations.ts",
-    "sync:usgs-registry": "tsx scripts/syncUsgsMonitoringRegistry.ts"
+    "sync:usgs-registry": "tsx scripts/syncUsgsMonitoringRegistry.ts",
+    "sync:usgs-sites": "tsx scripts/syncUsgsSiteCatalog.ts",
+    "assign:usgs-candidates": "tsx scripts/refreshUsgsSiteRiverCandidates.ts"
   },
   "keywords": [],
   "author": "",
