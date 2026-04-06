@@ -424,6 +424,247 @@ function DetailedMetricsContent({
   );
 }
 
+// ─── TrendChart ────────────────────────────────────────────────────────────
+
+type HistoryRow = {
+  obs_date: string;
+  flow_cfs: number | null;
+  water_temp_f: number | null;
+  fishability_score: number | null;
+};
+
+const TC_VB_W = 300; // SVG viewBox coordinate width
+
+/** Smooth cubic bezier through the given points (horizontal control handles). */
+function buildSmoothPath(pts: [number, number][]): string {
+  if (pts.length < 2) return "";
+  let d = `M${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const cx = ((pts[i][0] + pts[i + 1][0]) / 2).toFixed(1);
+    d += ` C${cx},${pts[i][1].toFixed(1)} ${cx},${pts[i + 1][1].toFixed(1)} ${pts[i + 1][0].toFixed(1)},${pts[i + 1][1].toFixed(1)}`;
+  }
+  return d;
+}
+
+/** Map data rows onto SVG coordinate space, skipping null values. */
+function toChartPts(
+  rows: HistoryRow[],
+  key: "fishability_score" | "flow_cfs" | "water_temp_f",
+  vbH: number,
+  padX: number,
+  padY: number
+): { pts: [number, number][]; min: number; max: number } {
+  const n = rows.length;
+  if (n === 0) return { pts: [], min: 0, max: 0 };
+  const vals = rows.map((r) => r[key] as number | null);
+  const valid = vals.filter((v): v is number => v != null);
+  if (valid.length < 2) return { pts: [], min: 0, max: 0 };
+  const lo = Math.min(...valid);
+  const hi = Math.max(...valid);
+  const range = hi - lo || 1;
+  const pts: [number, number][] = [];
+  for (let i = 0; i < n; i++) {
+    const v = vals[i];
+    if (v == null) continue;
+    const x = padX + (i / (n - 1)) * (TC_VB_W - 2 * padX);
+    const y = padY + (1 - (v - lo) / range) * (vbH - 2 * padY);
+    pts.push([x, y]);
+  }
+  return { pts, min: lo, max: hi };
+}
+
+/** Parse a YYYY-MM-DD date string without timezone shift. */
+function fmtShortDate(d: string | undefined): string {
+  if (!d) return "";
+  const [y, m, day] = d.split("-").map(Number);
+  return new Date(y, m - 1, day).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function TrendChart({ historyRows }: { historyRows: HistoryRow[] }) {
+  const rows = useMemo(
+    () => [...historyRows].sort((a, b) => a.obs_date.localeCompare(b.obs_date)),
+    [historyRows]
+  );
+
+  if (rows.length < 2) return null;
+
+  const H1 = 44; // score sparkline viewBox height
+  const H2 = 52; // flow/temp viewBox height
+  const PX = 4;
+  const PY = 4;
+
+  const { pts: scorePts, min: scoreMin, max: scoreMax } = toChartPts(rows, "fishability_score", H1, PX, PY);
+  const { pts: flowPts, min: flowMin, max: flowMax } = toChartPts(rows, "flow_cfs", H2, PX, PY);
+  const { pts: tempPts, min: tempMin, max: tempMax } = toChartPts(rows, "water_temp_f", H2, PX, PY);
+
+  const hasScore = scorePts.length >= 2;
+  const hasFlow = flowPts.length >= 2;
+  const hasTemp = tempPts.length >= 2;
+
+  if (!hasScore && !hasFlow && !hasTemp) return null;
+
+  const lastRow = rows.at(-1);
+  const firstDate = fmtShortDate(rows[0]?.obs_date);
+  const lastDate = fmtShortDate(lastRow?.obs_date);
+
+  const scoreAreaPath =
+    scorePts.length >= 2
+      ? `${buildSmoothPath(scorePts)} L${scorePts.at(-1)![0].toFixed(1)},${(H1 - PY).toFixed(1)} L${scorePts[0][0].toFixed(1)},${(H1 - PY).toFixed(1)} Z`
+      : "";
+
+  return (
+    <div className="rounded-[18px] border border-[rgba(180,198,209,0.07)] bg-[rgba(12,19,22,0.72)] p-3 space-y-3.5">
+      <div className="text-[9px] font-semibold uppercase tracking-[0.14em] text-white/32">14-Day Trends</div>
+
+      {/* Fishability score sparkline */}
+      {hasScore && (
+        <div>
+          <div className="mb-1 flex items-baseline justify-between">
+            <span className="text-[10px] text-white/46">Fishability</span>
+            {lastRow?.fishability_score != null && (
+              <span className="text-[10px] font-semibold" style={{ color: MRI_COLORS.riverSelected }}>
+                {Math.round(lastRow.fishability_score)} today
+              </span>
+            )}
+          </div>
+          <svg
+            viewBox={`0 0 ${TC_VB_W} ${H1}`}
+            width="100%"
+            height={H1}
+            preserveAspectRatio="none"
+            style={{ display: "block" }}
+          >
+            {/* Area fill */}
+            {scoreAreaPath && (
+              <path d={scoreAreaPath} fill={MRI_COLORS.riverSelected} fillOpacity="0.09" />
+            )}
+            {/* Line */}
+            <path
+              d={buildSmoothPath(scorePts)}
+              fill="none"
+              stroke={MRI_COLORS.riverSelected}
+              strokeWidth="1.5"
+              vectorEffect="non-scaling-stroke"
+            />
+            {/* End dot */}
+            {scorePts.at(-1) && (
+              <circle
+                cx={scorePts.at(-1)![0]}
+                cy={scorePts.at(-1)![1]}
+                r="3"
+                fill={MRI_COLORS.riverSelected}
+                vectorEffect="non-scaling-stroke"
+              />
+            )}
+          </svg>
+          <div className="mt-0.5 flex justify-between text-[9px] text-white/24">
+            <span>{firstDate}</span>
+            {scoreMin !== scoreMax && (
+              <span>
+                {Math.round(scoreMin)}–{Math.round(scoreMax)}
+              </span>
+            )}
+            <span>{lastDate}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Flow + Temp dual-line, each on its own normalized Y scale */}
+      {(hasFlow || hasTemp) && (
+        <div>
+          <div className="mb-1 flex items-baseline justify-between">
+            <span className="text-[10px] text-white/46">Flow &amp; Temp</span>
+            <div className="flex items-center gap-3 text-[10px] font-semibold">
+              {hasFlow && lastRow?.flow_cfs != null && (
+                <span style={{ color: "#4aa3ff" }}>
+                  {Math.round(lastRow.flow_cfs).toLocaleString()} cfs
+                </span>
+              )}
+              {hasTemp && lastRow?.water_temp_f != null && (
+                <span style={{ color: MRI_COLORS.warning }}>
+                  {lastRow.water_temp_f.toFixed(1)}°F
+                </span>
+              )}
+            </div>
+          </div>
+          <svg
+            viewBox={`0 0 ${TC_VB_W} ${H2}`}
+            width="100%"
+            height={H2}
+            preserveAspectRatio="none"
+            style={{ display: "block" }}
+          >
+            {hasFlow && (
+              <path
+                d={buildSmoothPath(flowPts)}
+                fill="none"
+                stroke="#4aa3ff"
+                strokeWidth="1.5"
+                strokeOpacity="0.72"
+                vectorEffect="non-scaling-stroke"
+              />
+            )}
+            {hasTemp && (
+              <path
+                d={buildSmoothPath(tempPts)}
+                fill="none"
+                stroke={MRI_COLORS.warning}
+                strokeWidth="1.5"
+                strokeOpacity="0.72"
+                vectorEffect="non-scaling-stroke"
+              />
+            )}
+            {hasFlow && flowPts.at(-1) && (
+              <circle
+                cx={flowPts.at(-1)![0]}
+                cy={flowPts.at(-1)![1]}
+                r="2.5"
+                fill="#4aa3ff"
+                fillOpacity="0.9"
+                vectorEffect="non-scaling-stroke"
+              />
+            )}
+            {hasTemp && tempPts.at(-1) && (
+              <circle
+                cx={tempPts.at(-1)![0]}
+                cy={tempPts.at(-1)![1]}
+                r="2.5"
+                fill={MRI_COLORS.warning}
+                fillOpacity="0.9"
+                vectorEffect="non-scaling-stroke"
+              />
+            )}
+          </svg>
+          {/* Range labels (left) + date range (right) */}
+          <div className="mt-0.5 flex items-start justify-between text-[9px]">
+            <div className="flex flex-col gap-0.5">
+              {hasFlow && (
+                <span style={{ color: "#4aa3ff55" }}>
+                  {Math.round(flowMin).toLocaleString()}–{Math.round(flowMax).toLocaleString()} cfs
+                </span>
+              )}
+              {hasTemp && (
+                <span style={{ color: `${MRI_COLORS.warning}66` }}>
+                  {tempMin.toFixed(0)}–{tempMax.toFixed(0)}°F
+                </span>
+              )}
+            </div>
+            <div className="flex flex-col items-end text-white/24">
+              <span>{firstDate}</span>
+              <span>{lastDate}</span>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── River tray card ────────────────────────────────────────────────────────
+
 function DesktopTrayCard({
   river,
   selected,
@@ -1480,6 +1721,8 @@ export default function OnxShell({
                       </div>
                     </div>
                   </div>
+
+                  <TrendChart historyRows={historyRows} />
 
                   <button
                     className="w-full rounded-xl border border-[var(--mri-border)] bg-[rgba(20,29,32,0.72)] px-3 py-2 text-left text-xs font-medium text-[var(--mri-text-muted)] hover:bg-[rgba(26,37,43,0.82)]"
