@@ -308,8 +308,14 @@ export async function fetchRiversWithLatest(): Promise<FishabilityRow[]> {
 
 function normalizeBiteTier(t?: string | null): BiteTier | null {
   if (!t) return null;
-  const u = t.toUpperCase();
-  if (u === "HOT" || u === "GOOD" || u === "FAIR" || u === "TOUGH") return u as BiteTier;
+  const u = t.toUpperCase().trim();
+  // Handle canonical uppercase values
+  if (u === "HOT") return "HOT";
+  if (u === "GOOD") return "GOOD";
+  if (u === "FAIR") return "FAIR";
+  if (u === "TOUGH") return "TOUGH";
+  // Handle v_river_latest emoji/label format: "🔥 Great"
+  if (u.includes("GREAT") || u.includes("HOT")) return "HOT";
   return null;
 }
 
