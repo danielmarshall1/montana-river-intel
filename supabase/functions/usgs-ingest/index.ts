@@ -710,6 +710,7 @@ serve(async (req) => {
           temp_reason: tempReason,
           source_parameter_codes: mainIv.parameterCodes,
           source_payload: mainIv.rawSummary,
+          updated_at: new Date().toISOString(),
         },
         { onConflict: "river_id,obs_date" }
       );

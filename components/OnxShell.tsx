@@ -856,11 +856,13 @@ export default function OnxShell({
     () => filtered.filter((r) => (r.fishability_score_calc ?? null) != null).slice(0, 5),
     [filtered]
   );
+  // Use updated_at (when MRI wrote to river_daily) rather than
+  // source_flow_observed_at (USGS observation clock, which is not the same
+  // as when MRI ran). updated_at reflects the actual ingest write time.
   const latestPullAt = useMemo(() => {
     let latestMs = 0;
     for (const r of rivers) {
-      const candidate =
-        r.source_flow_observed_at ?? r.source_temp_observed_at ?? r.updated_at ?? null;
+      const candidate = r.updated_at ?? null;
       if (!candidate) continue;
       const ms = new Date(candidate).getTime();
       if (!Number.isNaN(ms) && ms > latestMs) latestMs = ms;
