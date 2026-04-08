@@ -530,10 +530,28 @@ function LayersPanel({
   onClose: () => void;
   onToggleAdvanced: () => void;
 }) {
-  const groupedLayers = useMemo(
-    () => LAYER_GROUP_ORDER.map((group) => ({ group, layers: LAYER_REGISTRY.filter((l) => l.group === group) })),
-    []
-  );
+  const coreLayers = useMemo(() => LAYER_REGISTRY.filter((l) => l.group === "Core" && !l.locked), []);
+  const publicLandsLayers = useMemo(() => LAYER_REGISTRY.filter((l) => l.group === "Public Lands"), []);
+  const advancedLayers = useMemo(() => LAYER_REGISTRY.filter((l) => l.group === "Advanced" && !l.locked), []);
+
+  function LayerToggle({ layer }: { layer: (typeof LAYER_REGISTRY)[number] }) {
+    return (
+      <label className="flex items-start justify-between gap-2 text-[12px] text-[var(--mri-text-muted)] cursor-pointer">
+        <span className="leading-tight">
+          {layer.label}
+          {layer.minZoomNote && <span className="block text-[10px] text-[var(--mri-text-dim)]">{layer.minZoomNote}</span>}
+          {layer.comingSoon && <span className="block text-[10px] text-[var(--mri-text-dim)]">Coming soon</span>}
+        </span>
+        <input
+          type="checkbox"
+          checked={layerState[layer.id]}
+          disabled={Boolean(layer.comingSoon)}
+          onChange={(e) => onLayer(layer.id, e.target.checked)}
+          className="mt-0.5 accent-[#2d5a1b] flex-shrink-0"
+        />
+      </label>
+    );
+  }
 
   return (
     <div className="mri-layers-panel w-[300px] p-4">
@@ -549,6 +567,15 @@ function LayersPanel({
       </div>
 
       <div className="mri-scroll max-h-[65vh] overflow-auto space-y-4">
+        {/* Core */}
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)] mb-2">Core</div>
+          <div className="mri-card p-2.5 space-y-2">
+            {coreLayers.map((layer) => <LayerToggle key={layer.id} layer={layer} />)}
+          </div>
+        </div>
+
+        {/* Basemap */}
         <div>
           <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)] mb-2">Basemap</div>
           <div className="grid grid-cols-2 gap-1.5">
@@ -574,61 +601,28 @@ function LayersPanel({
           </div>
         </div>
 
+        {/* Public Lands */}
         <div>
-          <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)] mb-2">Core Layers</div>
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)] mb-2">Public Lands</div>
           <div className="mri-card p-2.5 space-y-2">
-            {groupedLayers
-              .flatMap((g) => g.layers)
-              .filter((l) => l.id === "mri_river_lines" || l.id === "mri_selected_highlight")
-              .map((layer) => (
-                <label key={layer.id} className="flex items-center justify-between text-[12px] text-[var(--mri-text-muted)] cursor-pointer">
-                  <span>{layer.label}</span>
-                  <input
-                    type="checkbox"
-                    checked={layerState[layer.id]}
-                    onChange={(e) => onLayer(layer.id, e.target.checked)}
-                    className="ml-2 accent-[#2d5a1b]"
-                  />
-                </label>
-              ))}
+            {publicLandsLayers.map((layer) => <LayerToggle key={layer.id} layer={layer} />)}
           </div>
         </div>
 
+        {/* Advanced (collapsed) */}
         <div>
           <button
             className="w-full text-left text-[12px] font-medium text-[var(--mri-text-muted)] hover:text-[var(--mri-text)] py-1"
             onClick={onToggleAdvanced}
           >
-            {advancedOpen ? "Hide Advanced Layers ↑" : "Advanced Layers ↓"}
+            {advancedOpen ? "Advanced ↑" : "Advanced ↓"}
           </button>
-        </div>
-
-        {advancedOpen &&
-          groupedLayers.map(({ group, layers }) => (
-            <div key={group}>
-              <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)] mb-2">{group}</div>
-              <div className="mri-card p-2.5 space-y-2">
-                {layers
-                  .filter((l) => !l.locked && l.id !== "mri_river_lines" && l.id !== "mri_selected_highlight")
-                  .map((layer) => (
-                    <label key={layer.id} className="flex items-start justify-between gap-2 text-[12px] text-[var(--mri-text-muted)] cursor-pointer">
-                      <span className="leading-tight">
-                        {layer.label}
-                        {layer.minZoomNote && <span className="block text-[10px] text-[var(--mri-text-dim)]">{layer.minZoomNote}</span>}
-                        {layer.comingSoon && <span className="block text-[10px] text-[var(--mri-text-dim)]">Coming soon</span>}
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={layerState[layer.id]}
-                        disabled={Boolean(layer.comingSoon)}
-                        onChange={(e) => onLayer(layer.id, e.target.checked)}
-                        className="mt-0.5 accent-[#2d5a1b]"
-                      />
-                    </label>
-                  ))}
-              </div>
+          {advancedOpen && (
+            <div className="mri-card p-2.5 space-y-2 mt-2">
+              {advancedLayers.map((layer) => <LayerToggle key={layer.id} layer={layer} />)}
             </div>
-          ))}
+          )}
+        </div>
       </div>
     </div>
   );

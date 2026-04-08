@@ -78,8 +78,8 @@ const BLM_TILES =
   "https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA_Cached_without_PriUnk/MapServer/tile/{z}/{y}/{x}";
 const STATE_LANDS_GEOJSON =
   "https://fwp-gis.mt.gov/arcgis/rest/services/fwplnd/fwpLands/MapServer/5/query?where=1%3D1&outFields=NAME&returnGeometry=true&f=geojson";
-const FWP_ACCESS_GEOJSON =
-  "https://fwp-gis.mt.gov/arcgis/rest/services/fwplnd/fwpLands/MapServer/1/query?where=1%3D1&outFields=NAME&returnGeometry=true&f=geojson";
+// FWP_ACCESS_GEOJSON removed — we now serve from /api/fishing-access-geojson
+// which includes river_id on every feature (the raw FWP endpoint does not).
 const RIVER_ID_PROP = "river_id";
 const CLICK_PRIORITY_LAYERS = [UNCLUSTERED_LAYER, ACCESS_LAYER, ACTIVE_STATIONS_LAYER] as const;
 const MAPBOX_STYLES: Record<BasemapId, string> = {
@@ -870,11 +870,11 @@ function syncFederalLandsLayer(map: mapboxgl.Map, enabled: boolean) {
         source: FEDERAL_LANDS_SOURCE,
         minzoom: 8,
         paint: {
-          "raster-opacity": 0.16,
-          "raster-saturation": -0.72,
-          "raster-contrast": -0.28,
-          "raster-brightness-min": 0.22,
-          "raster-brightness-max": 0.86,
+          "raster-opacity": 0.38,
+          "raster-saturation": -0.40,
+          "raster-contrast": -0.18,
+          "raster-brightness-min": 0.18,
+          "raster-brightness-max": 0.92,
         },
       });
     }
@@ -910,9 +910,9 @@ function syncStateLandsLayer(map: mapboxgl.Map, enabled: boolean) {
         source: STATE_LANDS_SOURCE,
         minzoom: 8,
         paint: {
-          "fill-color": "#5f725e",
-          "fill-opacity": 0.12,
-          "fill-outline-color": "rgba(148,163,184,0.3)",
+          "fill-color": "#4a7c3f",
+          "fill-opacity": 0.22,
+          "fill-outline-color": "rgba(74,124,63,0.6)",
         },
       });
     }
@@ -932,41 +932,86 @@ function syncStateLandsLayer(map: mapboxgl.Map, enabled: boolean) {
   }
 }
 
-function syncFishingAccessLayer(map: mapboxgl.Map, enabled: boolean) {
-  if (enabled) {
-    if (!map.getSource(ACCESS_SOURCE)) {
-      map.addSource(ACCESS_SOURCE, {
-        type: "geojson",
-        data: FWP_ACCESS_GEOJSON as any,
-      } as any);
-    }
-    if (!map.getLayer(ACCESS_LAYER)) {
-      map.addLayer({
-        id: ACCESS_LAYER,
-        type: "circle",
-        source: ACCESS_SOURCE,
-        minzoom: 8,
-        paint: {
-          "circle-color": "#6f8491",
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], 8, 2.4, 11, 4.6],
-          "circle-stroke-color": "#e2e8f0",
-          "circle-stroke-width": 1,
-          "circle-opacity": 0.88,
-        },
-      });
-    }
-    try {
-      if (map.getLayer(UNCLUSTERED_LAYER)) {
-        map.moveLayer(ACCESS_LAYER, UNCLUSTERED_LAYER);
-      }
-    } catch {
-      /* ignore */
-    }
+// URL for our own API endpoint that returns fishing_access_sites as GeoJSON
+// with river_id on every feature (the raw FWP endpoint does not include river_id).
+const ACCESS_GEOJSON_URL = "/api/fishing-access-geojson";
+
+function syncFishingAccessLayer(
+  map: mapboxgl.Map,
+  enabled: boolean,
+  selectedRiverUuid: string | null,
+  riverTier: string | null
+) {
+  // Always remove the layer so we can re-add with the correct filter
+  if (map.getLayer(ACCESS_LAYER)) map.removeLayer(ACCESS_LAYER);
+
+  // Only show when the layer is enabled AND a river is selected
+  if (!enabled || !selectedRiverUuid) {
+    console.log("[access] hidden — enabled:", enabled, "uuid:", selectedRiverUuid);
     return;
   }
 
-  if (map.getLayer(ACCESS_LAYER)) {
-    map.removeLayer(ACCESS_LAYER);
+  // Ensure source exists, pointing at our API endpoint (includes river_id)
+  if (!map.getSource(ACCESS_SOURCE)) {
+    console.log("[access] adding source →", ACCESS_GEOJSON_URL);
+    map.addSource(ACCESS_SOURCE, {
+      type: "geojson",
+      data: ACCESS_GEOJSON_URL,
+    });
+  }
+
+  const filter = [
+    "==",
+    ["get", "river_id"],
+    selectedRiverUuid,
+  ] as mapboxgl.Expression;
+
+  console.log("[access] adding layer, filter:", JSON.stringify(filter), "tier:", riverTier);
+
+  map.addLayer({
+    id: ACCESS_LAYER,
+    type: "circle",
+    source: ACCESS_SOURCE,
+    minzoom: 7,
+    filter,
+    paint: {
+      "circle-color": [
+        "case",
+        ["==", ["get", "river_id"], selectedRiverUuid],
+        riverTier === "TOUGH" ? "#dc2626"
+          : riverTier === "FAIR" ? "#d4900a"
+          : "#2d5a1b",
+        "#2d5a1b",
+      ],
+      "circle-radius": [
+        "interpolate", ["linear"], ["zoom"],
+        7, 5,
+        10, 8,
+        13, 10,
+      ],
+      "circle-stroke-color": "#ffffff",
+      "circle-stroke-width": 2.5,
+      "circle-opacity": 0.95,
+    },
+  });
+
+  // Log feature count from the source after a tick to confirm data loaded
+  setTimeout(() => {
+    const src = map.getSource(ACCESS_SOURCE) as mapboxgl.GeoJSONSource | undefined;
+    if (src) {
+      const features = map.querySourceFeatures(ACCESS_SOURCE, {
+        filter: ["==", ["get", "river_id"], selectedRiverUuid],
+      });
+      console.log("[access] features matching uuid:", features.length, "uuid:", selectedRiverUuid);
+    }
+  }, 1500);
+
+  try {
+    if (map.getLayer(UNCLUSTERED_LAYER)) {
+      map.moveLayer(ACCESS_LAYER, UNCLUSTERED_LAYER);
+    }
+  } catch {
+    /* ignore */
   }
 }
 
@@ -1268,7 +1313,12 @@ export function MapView({
     syncStatewideHydrologyLayer(map, layerStateRef.current.statewide_hydrology);
     syncFederalLandsLayer(map, layerStateRef.current.public_federal);
     syncStateLandsLayer(map, layerStateRef.current.public_state);
-    syncFishingAccessLayer(map, layerStateRef.current.access_fishing_sites);
+    syncFishingAccessLayer(
+      map,
+      layerStateRef.current.access_fishing_sites,
+      selectedRiverRef.current?.river_uuid ?? selectedRiverRef.current?.river_id ?? null,
+      selectedRiverRef.current?.bite_tier ?? null
+    );
     syncActiveStationsLayer(
       map,
       layerStateRef.current.mri_active_stations,
@@ -1664,7 +1714,12 @@ export function MapView({
     syncStatewideHydrologyLayer(map, effectiveLayerState.statewide_hydrology);
     syncFederalLandsLayer(map, effectiveLayerState.public_federal);
     syncStateLandsLayer(map, effectiveLayerState.public_state);
-    syncFishingAccessLayer(map, effectiveLayerState.access_fishing_sites);
+    syncFishingAccessLayer(
+      map,
+      effectiveLayerState.access_fishing_sites,
+      selectedRiver?.river_uuid ?? selectedRiver?.river_id ?? null,
+      selectedRiver?.bite_tier ?? null
+    );
     syncActiveStationsLayer(map, effectiveLayerState.mri_active_stations, activeStationsGeojson, selectedRiver);
     syncHydrologyOverlays(
       map,
@@ -1686,6 +1741,8 @@ export function MapView({
     effectiveLayerState.mri_labels,
     activeStationsGeojson,
     selectedRiver?.river_id,
+    selectedRiver?.river_uuid,
+    selectedRiver?.bite_tier,
     selectedRiver?.flow_source_site_no,
     selectedRiver?.temp_source_site_no,
     selectedRiver?.river_name,

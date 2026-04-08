@@ -1,6 +1,6 @@
 export type BasemapId = "dark" | "light" | "satellite" | "hybrid" | "topo";
 
-export type LayerGroup = "Public Lands" | "Access" | "MRI Overlays";
+export type LayerGroup = "Core" | "Public Lands" | "Advanced";
 
 export type LayerId =
   | "statewide_hydrology"
@@ -126,19 +126,36 @@ export const BASEMAP_OPTIONS: BasemapOption[] = [
 ];
 
 export const LAYER_REGISTRY: LayerDefinition[] = [
+  // ── Core ──────────────────────────────────────────────────────────────────
   {
-    id: "statewide_hydrology",
-    label: "Statewide hydrology",
-    group: "MRI Overlays",
+    id: "mri_river_lines",
+    label: "Rivers",
+    group: "Core",
+    defaultOn: true,
+    source: { id: "all-rivers-source", type: "geojson" },
+    layers: ["rivers-casing", "rivers-base", "rivers-hit"],
+  },
+  {
+    id: "mri_selected_highlight",
+    label: "Selected river highlight",
+    group: "Core",
+    defaultOn: true,
+    source: { id: "all-rivers-source", type: "geojson" },
+    layers: ["rivers-selected"],
+  },
+  {
+    id: "access_fishing_sites",
+    label: "Fishing Accesses",
+    group: "Core",
     defaultOn: true,
     source: {
-      id: "statewide-hydrology-source",
+      id: "access-fishing-sites-source",
       type: "geojson",
-      data: "https://hydro.nationalmap.gov/arcgis/rest/services/nhd/MapServer/2/query?where=1%3D1&geometry=-116.2,44.2,-104,49.2&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=GNIS_NAME&returnGeometry=true&geometryPrecision=4&maxAllowableOffset=0.005&f=geojson",
+      data: "https://fwp-gis.mt.gov/arcgis/rest/services/fwplnd/fwpLands/MapServer/1/query?where=1%3D1&outFields=NAME&returnGeometry=true&f=geojson",
     },
-    layers: ["statewide-hydrology-line"],
-    locked: true,
+    layers: ["access-fishing-sites-layer"],
   },
+  // ── Public Lands ─────────────────────────────────────────────────────────
   {
     id: "public_federal",
     label: "Federal",
@@ -167,40 +184,26 @@ export const LAYER_REGISTRY: LayerDefinition[] = [
       data: "https://fwp-gis.mt.gov/arcgis/rest/services/fwplnd/fwpLands/MapServer/5/query?where=1%3D1&outFields=NAME&returnGeometry=true&f=geojson",
     },
     layers: ["public-lands-state-layer"],
-    minZoomNote: "Visible at zoom 7+",
+    minZoomNote: "Zoom 7+",
   },
+  // ── Advanced ──────────────────────────────────────────────────────────────
   {
-    id: "access_fishing_sites",
-    label: "Fishing Access Sites (MT FWP)",
-    group: "Access",
-    defaultOn: false,
+    id: "statewide_hydrology",
+    label: "Statewide hydrology",
+    group: "Advanced",
+    defaultOn: true,
     source: {
-      id: "access-fishing-sites-source",
+      id: "statewide-hydrology-source",
       type: "geojson",
-      data: "https://fwp-gis.mt.gov/arcgis/rest/services/fwplnd/fwpLands/MapServer/1/query?where=1%3D1&outFields=NAME&returnGeometry=true&f=geojson",
+      data: "https://hydro.nationalmap.gov/arcgis/rest/services/nhd/MapServer/2/query?where=1%3D1&geometry=-116.2,44.2,-104,49.2&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=GNIS_NAME&returnGeometry=true&geometryPrecision=4&maxAllowableOffset=0.005&f=geojson",
     },
-    layers: ["access-fishing-sites-layer"],
-  },
-  {
-    id: "mri_river_lines",
-    label: "Rivers",
-    group: "MRI Overlays",
-    defaultOn: true,
-    source: { id: "all-rivers-source", type: "geojson" },
-    layers: ["rivers-casing", "rivers-base", "rivers-hit"],
-  },
-  {
-    id: "mri_selected_highlight",
-    label: "Selected river highlight",
-    group: "MRI Overlays",
-    defaultOn: true,
-    source: { id: "all-rivers-source", type: "geojson" },
-    layers: ["rivers-selected"],
+    layers: ["statewide-hydrology-line"],
+    locked: true,
   },
   {
     id: "mri_river_markers",
     label: "River markers",
-    group: "MRI Overlays",
+    group: "Advanced",
     defaultOn: true,
     source: { id: "rivers-source", type: "geojson" },
     layers: ["rivers-unclustered", "rivers-selected-halo", "rivers-selected-core"],
@@ -209,7 +212,7 @@ export const LAYER_REGISTRY: LayerDefinition[] = [
   {
     id: "mri_active_stations",
     label: "USGS Stations",
-    group: "MRI Overlays",
+    group: "Advanced",
     defaultOn: true,
     source: { id: "active-usgs-stations-source", type: "geojson" },
     layers: ["active-usgs-stations-layer"],
@@ -217,7 +220,7 @@ export const LAYER_REGISTRY: LayerDefinition[] = [
   {
     id: "mri_score_coloring",
     label: "Score coloring",
-    group: "MRI Overlays",
+    group: "Advanced",
     defaultOn: false,
     source: { id: "rivers-source", type: "geojson" },
     layers: ["rivers-unclustered"],
@@ -225,7 +228,7 @@ export const LAYER_REGISTRY: LayerDefinition[] = [
   {
     id: "mri_labels",
     label: "Labels",
-    group: "MRI Overlays",
+    group: "Advanced",
     defaultOn: true,
     source: { id: "basemap-style", type: "none" },
     layers: ["river-labels"],
@@ -233,7 +236,7 @@ export const LAYER_REGISTRY: LayerDefinition[] = [
   {
     id: "hydro_flow_magnitude",
     label: "Flow magnitude",
-    group: "MRI Overlays",
+    group: "Advanced",
     defaultOn: false,
     source: { id: "rivers-source", type: "geojson" },
     layers: ["hydro-flow-magnitude-layer"],
@@ -241,7 +244,7 @@ export const LAYER_REGISTRY: LayerDefinition[] = [
   {
     id: "hydro_change_indicator",
     label: "48h change indicator",
-    group: "MRI Overlays",
+    group: "Advanced",
     defaultOn: false,
     source: { id: "rivers-source", type: "geojson" },
     layers: ["hydro-change-indicator-layer"],
@@ -249,14 +252,14 @@ export const LAYER_REGISTRY: LayerDefinition[] = [
   {
     id: "hydro_temp_stress",
     label: "Temp stress flag",
-    group: "MRI Overlays",
+    group: "Advanced",
     defaultOn: false,
     source: { id: "rivers-source", type: "geojson" },
     layers: ["hydro-temp-stress-layer"],
   },
 ];
 
-export const LAYERS_STORAGE_KEY = "mri.layers.v2";
+export const LAYERS_STORAGE_KEY = "mri.layers.v3"; // bumped to reset cached layer state
 
 export const DEFAULT_BASEMAP: BasemapId =
   BASEMAP_OPTIONS.find((b) => b.defaultOn)?.id ?? "dark";
@@ -268,4 +271,4 @@ export function createDefaultLayerState(): Record<LayerId, boolean> {
   }, {} as Record<LayerId, boolean>);
 }
 
-export const LAYER_GROUP_ORDER: LayerGroup[] = ["MRI Overlays", "Public Lands", "Access"];
+export const LAYER_GROUP_ORDER: LayerGroup[] = ["Core", "Public Lands", "Advanced"];
