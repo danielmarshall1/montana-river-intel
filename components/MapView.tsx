@@ -940,8 +940,13 @@ function syncFishingAccessLayer(
   map: mapboxgl.Map,
   enabled: boolean,
   selectedRiverUuid: string | null,
-  riverTier: string | null
+  riverTier: string | null,
+  cachedGeojson?: GeoJSON.FeatureCollection | null
 ) {
+  const cachedCount = cachedGeojson ? (cachedGeojson.features?.length ?? 0) : null;
+  const sourceExists = Boolean(map.getSource(ACCESS_SOURCE));
+  console.log("[access] syncFishingAccessLayer called — enabled:", enabled, "uuid:", selectedRiverUuid, "cachedFeatures:", cachedCount, "sourceExists:", sourceExists);
+
   // Always remove the layer so we can re-add with the correct filter
   if (map.getLayer(ACCESS_LAYER)) map.removeLayer(ACCESS_LAYER);
 
@@ -951,13 +956,28 @@ function syncFishingAccessLayer(
     return;
   }
 
-  // Ensure source exists, pointing at our API endpoint (includes river_id)
+  const sourceData: GeoJSON.FeatureCollection | string = cachedGeojson ?? ACCESS_GEOJSON_URL;
+
+  // Ensure source exists; if it does and we have fresh cached data, update it
   if (!map.getSource(ACCESS_SOURCE)) {
-    console.log("[access] adding source →", ACCESS_GEOJSON_URL);
+    console.log("[access] adding source, using:", cachedGeojson ? "FeatureCollection" : "URL");
     map.addSource(ACCESS_SOURCE, {
       type: "geojson",
-      data: ACCESS_GEOJSON_URL,
+      data: sourceData,
     });
+  } else if (cachedGeojson) {
+    console.log("[access] source exists, calling setData with FeatureCollection");
+    (map.getSource(ACCESS_SOURCE) as mapboxgl.GeoJSONSource).setData(cachedGeojson);
+  } else {
+    console.log("[access] source exists, no cached data — leaving as-is");
+  }
+
+  // Pre-count matching features from cached data for diagnostics
+  if (cachedGeojson) {
+    const matching = cachedGeojson.features.filter(
+      (f) => f.properties?.river_id === selectedRiverUuid
+    ).length;
+    console.log("[access] features matching uuid in cache:", matching, "uuid:", selectedRiverUuid);
   }
 
   const filter = [
@@ -1271,6 +1291,9 @@ export function MapView({
   const activeStationsGeojsonRef = useRef<
     GeoJSON.FeatureCollection<GeoJSON.Point, Record<string, unknown>> | null
   >(activeStationsGeojson ?? null);
+  // Pre-fetched access sites GeoJSON — fetched once on mount so the data is
+  // always present when syncFishingAccessLayer runs (no async gap on first select)
+  const accessGeojsonRef = useRef<GeoJSON.FeatureCollection | null>(null);
   const currentStyleRef = useRef<string>(MAPBOX_STYLES[basemap] ?? BASE_STYLE);
   const layerStateRef = useRef<Record<LayerId, boolean>>(effectiveLayerState);
   const onMapReadyRef = useRef(onMapReady);
@@ -1317,7 +1340,8 @@ export function MapView({
       map,
       layerStateRef.current.access_fishing_sites,
       selectedRiverRef.current?.river_uuid ?? selectedRiverRef.current?.river_id ?? null,
-      selectedRiverRef.current?.bite_tier ?? null
+      selectedRiverRef.current?.bite_tier ?? null,
+      accessGeojsonRef.current
     );
     syncActiveStationsLayer(
       map,
@@ -1384,10 +1408,23 @@ export function MapView({
       } catch {
         // Terrain is optional; keep the map usable even when DEM/WebGL2 is unavailable.
       }
-      setMapReady(true);
-      onMapReadyRef.current?.(map);
-      syncRuntimeLayers(map);
-      map.resize();
+
+      // Fetch access GeoJSON before calling syncRuntimeLayers so the data is
+      // always present when syncFishingAccessLayer first runs (no async race).
+      console.log("[access-load] fetching access GeoJSON before syncRuntimeLayers");
+      fetch(ACCESS_GEOJSON_URL)
+        .then((r) => r.ok ? r.json() : Promise.reject(r.status))
+        .then((geojson: GeoJSON.FeatureCollection) => {
+          console.log("[access-load] access GeoJSON loaded, features:", geojson.features?.length ?? 0);
+          accessGeojsonRef.current = geojson;
+        })
+        .catch((err) => console.warn("[access-load] fetch failed, will fall back to URL:", err))
+        .finally(() => {
+          setMapReady(true);
+          onMapReadyRef.current?.(map);
+          syncRuntimeLayers(map);
+          map.resize();
+        });
     });
 
     map.on("error", (event) => {
@@ -1718,7 +1755,8 @@ export function MapView({
       map,
       effectiveLayerState.access_fishing_sites,
       selectedRiver?.river_uuid ?? selectedRiver?.river_id ?? null,
-      selectedRiver?.bite_tier ?? null
+      selectedRiver?.bite_tier ?? null,
+      accessGeojsonRef.current
     );
     syncActiveStationsLayer(map, effectiveLayerState.mri_active_stations, activeStationsGeojson, selectedRiver);
     syncHydrologyOverlays(
