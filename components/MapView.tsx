@@ -20,10 +20,10 @@ const FLY_DURATION = 300;
 const FLY_CURVE = 1.5;
 
 const BITE_TIER_COLORS: Record<BiteTier, string> = {
-  HOT: MRI_COLORS.warning,
-  GOOD: MRI_COLORS.good,
-  FAIR: MRI_COLORS.fair,
-  TOUGH: MRI_COLORS.tough,
+  HOT:   "#4ade80", // green-400 — visible on satellite
+  GOOD:  "#4ade80",
+  FAIR:  "#fbbf24", // amber-400
+  TOUGH: "#f87171", // red-400
 };
 
 interface MapViewProps {

@@ -1063,69 +1063,55 @@ export default function OnxShell({
   }
 
   // ── Mobile bottom sheet drag
+  // Uses setPointerCapture so iOS Safari routes all pointer events to the handle
+  // element — no document-level listeners, no passive/active conflict.
   function clamp(n: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, n)); }
 
-  function onSheetPointerDown(e: React.PointerEvent | React.TouchEvent) {
-    const clientY = "touches" in e ? e.touches[0]?.clientY : (e as React.PointerEvent).clientY;
-    if (clientY == null) return;
-    sheetDragRef.current = { startY: clientY, startFraction: sheetY };
+  function onHandlePointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    // Capture so pointermove/pointerup fire on this element even when the
+    // finger moves outside it (required on iOS Safari).
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    sheetDragRef.current = { startY: e.clientY, startFraction: sheetY };
     setIsDragging(true);
     document.body.style.userSelect = "none";
+  }
 
-    const h = window.innerHeight;
+  function onHandlePointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!sheetDragRef.current) return;
+    const dy = e.clientY - sheetDragRef.current.startY;
+    const h = window.innerHeight || 800;
+    setSheetY(clamp(sheetDragRef.current.startFraction + dy / h, 0, 0.80));
+  }
 
-    function onMove(ev: PointerEvent | TouchEvent) {
-      const y = "touches" in ev ? (ev as TouchEvent).touches[0]?.clientY : (ev as PointerEvent).clientY;
-      if (y == null || !sheetDragRef.current) return;
-      const dy = y - sheetDragRef.current.startY;
-      setSheetY(clamp(sheetDragRef.current.startFraction + dy / h, 0, 0.80));
-    }
-
-    function onUp() {
-      sheetDragRef.current = null;
-      setIsDragging(false);
-      document.body.style.userSelect = "";
-      setSheetY((current) => {
-        const snaps = Object.entries(SHEET_SNAPS) as [MobileListSnap, number][];
-        const nearest = snaps.reduce(
-          (best, [k, v]) => Math.abs(current - v) < Math.abs(current - SHEET_SNAPS[best]) ? k : best,
-          "mid" as MobileListSnap
-        );
-        setSheetSnap(nearest);
-        return SHEET_SNAPS[nearest];
-      });
-      document.removeEventListener("pointermove", onMove);
-      document.removeEventListener("pointerup", onUp);
-      document.removeEventListener("touchmove", onMove);
-      document.removeEventListener("touchend", onUp);
-    }
-
-    document.addEventListener("pointermove", onMove);
-    document.addEventListener("pointerup", onUp);
-    document.addEventListener("touchmove", onMove, { passive: true });
-    document.addEventListener("touchend", onUp);
+  function snapSheet() {
+    sheetDragRef.current = null;
+    setIsDragging(false);
+    document.body.style.userSelect = "";
+    setSheetY((current) => {
+      const snaps = Object.entries(SHEET_SNAPS) as [MobileListSnap, number][];
+      const nearest = snaps.reduce(
+        (best, [k, v]) => Math.abs(current - v) < Math.abs(current - SHEET_SNAPS[best]) ? k : best,
+        "mid" as MobileListSnap
+      );
+      setSheetSnap(nearest);
+      return SHEET_SNAPS[nearest];
+    });
   }
 
   // ── Mobile detail sheet drag-to-dismiss
-  function onMobileDetailPointerDown(e: React.PointerEvent | React.TouchEvent) {
-    const clientY = "touches" in e ? e.touches[0]?.clientY : (e as React.PointerEvent).clientY;
-    if (clientY == null) return;
-    mobileDetailDragRef.current = { startY: clientY };
+  // Same pointer-capture pattern.
+  function onDetailHandlePointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    mobileDetailDragRef.current = { startY: e.clientY };
     document.body.style.userSelect = "none";
+  }
 
-    function onUp(ev: PointerEvent | TouchEvent) {
-      const y = "changedTouches" in ev ? (ev as TouchEvent).changedTouches[0]?.clientY : (ev as PointerEvent).clientY;
-      const start = mobileDetailDragRef.current?.startY ?? 0;
-      const dy = (y ?? start) - start;
-      mobileDetailDragRef.current = null;
-      document.body.style.userSelect = "";
-      if (dy > 80) { setMobileDetailOpen(false); setSelectedId(null); }
-      document.removeEventListener("pointerup", onUp);
-      document.removeEventListener("touchend", onUp);
-    }
-
-    document.addEventListener("pointerup", onUp);
-    document.addEventListener("touchend", onUp);
+  function onDetailHandlePointerUp(e: React.PointerEvent<HTMLDivElement>) {
+    const start = mobileDetailDragRef.current?.startY ?? e.clientY;
+    const dy = e.clientY - start;
+    mobileDetailDragRef.current = null;
+    document.body.style.userSelect = "";
+    if (dy > 80) { setMobileDetailOpen(false); setSelectedId(null); }
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -1196,12 +1182,14 @@ export default function OnxShell({
         }}
       >
         <div className="mri-sheet h-full rounded-t-2xl flex flex-col">
-          {/* Handle */}
+          {/* Handle — 44px touch target, pointer capture for iOS Safari */}
           <div
-            className="flex-shrink-0 pt-2.5 pb-1 flex flex-col items-center cursor-grab active:cursor-grabbing"
-            onPointerDown={onSheetPointerDown}
-            onTouchStart={onSheetPointerDown}
-            style={{ touchAction: "none" }}
+            className="flex-shrink-0 flex flex-col items-center justify-center cursor-grab active:cursor-grabbing select-none"
+            style={{ touchAction: "none", minHeight: "44px" }}
+            onPointerDown={onHandlePointerDown}
+            onPointerMove={onHandlePointerMove}
+            onPointerUp={snapSheet}
+            onPointerCancel={snapSheet}
           >
             <div className="mri-handle" />
           </div>
@@ -1241,12 +1229,13 @@ export default function OnxShell({
       {/* Mobile detail sheet — slides up over list */}
       {mobileDetailOpen && selected && (
         <section className="absolute inset-0 z-30 sm:hidden" style={{ background: "#f2f0eb" }}>
-          {/* Back bar */}
+          {/* Back bar — drag down to dismiss */}
           <div
-            className="flex-shrink-0 px-4 pt-[max(16px,env(safe-area-inset-top))] pb-3 flex items-center justify-between border-b border-[var(--mri-border)] bg-[#f2f0eb]"
-            onPointerDown={onMobileDetailPointerDown}
-            onTouchStart={onMobileDetailPointerDown}
+            className="flex-shrink-0 px-4 pt-[max(16px,env(safe-area-inset-top))] pb-3 flex items-center justify-between border-b border-[var(--mri-border)] bg-[#f2f0eb] select-none"
             style={{ touchAction: "none" }}
+            onPointerDown={onDetailHandlePointerDown}
+            onPointerUp={onDetailHandlePointerUp}
+            onPointerCancel={onDetailHandlePointerUp}
           >
             <button
               className="flex items-center gap-1.5 text-[13px] font-medium text-[#2d5a1b]"
