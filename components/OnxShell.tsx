@@ -634,6 +634,151 @@ function LayersPanel({
   );
 }
 
+// ─── AccessWeatherPanel ───────────────────────────────────────────────────────
+
+type AccessWeatherPoint = {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  temp_f: number | null;
+  wind_mph: number | null;
+  wind_dir_deg: number | null;
+  wind_direction: string | null;
+  gust_mph: number | null;
+  precip_chance_pct: number | null;
+};
+
+function WindArrow({ deg }: { deg: number }) {
+  // Arrow points "from" — rotate so 0° (N wind, blowing south) points down
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      style={{ transform: `rotate(${deg}deg)`, flexShrink: 0 }}
+      aria-hidden="true"
+    >
+      <line x1="7" y1="12" x2="7" y2="2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <polyline points="4,5 7,2 10,5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function AccessWeatherSkeleton() {
+  return (
+    <div className="space-y-2">
+      {[1, 2, 3].map((i) => (
+        <div key={i} className="mri-card p-3 animate-pulse">
+          <div className="h-3 w-32 bg-gray-200 rounded mb-2" />
+          <div className="flex gap-3">
+            <div className="h-3 w-16 bg-gray-100 rounded" />
+            <div className="h-3 w-16 bg-gray-100 rounded" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// UUID regex — skip the fetch if we only have a slug
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function AccessWeatherPanel({ riverId }: { riverId: string }) {
+  const [points, setPoints] = useState<AccessWeatherPoint[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  const isUuid = UUID_RE.test(riverId);
+
+  useEffect(() => {
+    if (!isUuid) { setLoading(false); return; }
+    setLoading(true);
+    setError(false);
+    fetch(`/api/access-weather?river_id=${encodeURIComponent(riverId)}`)
+      .then((r) => r.ok ? r.json() : Promise.reject(r.status))
+      .then((data: AccessWeatherPoint[]) => {
+        setPoints(data);
+        setLoading(false);
+      })
+      .catch(() => {
+        setError(true);
+        setLoading(false);
+      });
+  }, [riverId, isUuid]);
+
+  if (!isUuid) return null;
+
+  if (loading) {
+    return (
+      <div>
+        <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)] mb-2">
+          Conditions by Access Point
+        </div>
+        <AccessWeatherSkeleton />
+      </div>
+    );
+  }
+
+  if (error || points.length === 0) return null;
+
+  return (
+    <div>
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)] mb-2">
+        Conditions by Access Point
+      </div>
+      <div className="space-y-1.5">
+        {points.map((pt) => {
+          const showGust = pt.gust_mph != null && pt.wind_mph != null && pt.gust_mph > pt.wind_mph + 5;
+          const showPrecip = pt.precip_chance_pct != null && pt.precip_chance_pct > 20;
+          return (
+            <div key={pt.id} className="mri-card px-3 py-2.5">
+              <div className="text-[12px] font-semibold text-[var(--mri-text)] leading-snug truncate mb-1.5">
+                {pt.name}
+              </div>
+              <div className="flex items-center gap-3 flex-wrap">
+                {/* Wind */}
+                {pt.wind_mph != null && (
+                  <div className="flex items-center gap-1 text-[11px] text-[var(--mri-text-muted)]">
+                    {pt.wind_dir_deg != null && (
+                      <span className="text-[var(--mri-text-dim)]">
+                        <WindArrow deg={pt.wind_dir_deg} />
+                      </span>
+                    )}
+                    <span className="font-medium text-[var(--mri-text)]">
+                      {pt.wind_mph.toFixed(0)} mph
+                    </span>
+                    {pt.wind_direction && (
+                      <span className="text-[var(--mri-text-dim)]">{pt.wind_direction}</span>
+                    )}
+                    {showGust && (
+                      <span className="text-[var(--mri-text-dim)]">
+                        · gusts {pt.gust_mph!.toFixed(0)}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {/* Temp */}
+                {pt.temp_f != null && (
+                  <div className="text-[11px] text-[var(--mri-text-muted)]">
+                    <span className="font-medium text-[var(--mri-text)]">{pt.temp_f.toFixed(0)}°F</span>
+                  </div>
+                )}
+                {/* Precip */}
+                {showPrecip && (
+                  <div className="text-[11px] text-[var(--mri-text-muted)]">
+                    <span className="font-medium text-[var(--mri-text)]">{pt.precip_chance_pct}%</span> precip
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── RiverDetailContent ───────────────────────────────────────────────────────
 
 function RiverDetailContent({
@@ -661,6 +806,8 @@ function RiverDetailContent({
 }) {
   const tc = getTierColors(selected.bite_tier);
   const score = selected.fishability_score_calc;
+  // Use the raw DB UUID for the access-weather lookup (river_id may be slug-based)
+  const riverId = selected.river_uuid ?? selected.river_id;
 
   return (
     <div className="space-y-3">
@@ -736,6 +883,9 @@ function RiverDetailContent({
         <div className="text-[10px] font-semibold text-[#2d5a1b] uppercase tracking-wide mb-1">Today&apos;s Read</div>
         <div className="text-[13px] text-[var(--mri-text-muted)] leading-relaxed">{todaysRead}</div>
       </div>
+
+      {/* Hyperlocal access-point weather */}
+      <AccessWeatherPanel riverId={riverId} />
 
       {/* 14-day trend chart */}
       <TrendChart historyRows={historyRows} />

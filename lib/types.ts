@@ -2,6 +2,8 @@ export type BiteTier = "HOT" | "GOOD" | "FAIR" | "TOUGH";
 
 export interface FishabilityRow {
   river_id: string;
+  /** The raw DB UUID for the river (river_id may be slug-based in some fetch paths) */
+  river_uuid?: string | null;
   slug?: string;
   river_name: string;
   /** Optional map coords from DB (lon, lat) - used when RIVER_FOCUS_POINTS has no entry */
