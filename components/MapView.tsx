@@ -943,50 +943,39 @@ function syncFishingAccessLayer(
   riverTier: string | null,
   cachedGeojson?: GeoJSON.FeatureCollection | null
 ) {
-  // Filter expression — matches nothing when no river selected
-  const accessFilter: mapboxgl.Expression = selectedRiverUuid
-    ? ["==", ["get", "river_id"], selectedRiverUuid]
-    : ["==", ["literal", false], ["literal", true]];
+  // Always tear down layer and source first — guarantees a clean slate
+  if (map.getLayer(ACCESS_LAYER)) map.removeLayer(ACCESS_LAYER);
+  if (map.getSource(ACCESS_SOURCE)) map.removeSource(ACCESS_SOURCE);
 
-  // Hide layer and exit when disabled or no river selected
-  if (!enabled || !selectedRiverUuid) {
-    if (map.getLayer(ACCESS_LAYER)) map.setFilter(ACCESS_LAYER, ["==", ["literal", false], ["literal", true]]);
-    return;
-  }
+  if (!enabled || !selectedRiverUuid || !cachedGeojson) return;
 
-  // Ensure source exists with the best available data
-  const sourceData: GeoJSON.FeatureCollection | string = cachedGeojson ?? ACCESS_GEOJSON_URL;
-  if (!map.getSource(ACCESS_SOURCE)) {
-    map.addSource(ACCESS_SOURCE, { type: "geojson", data: sourceData });
-  } else if (cachedGeojson) {
-    (map.getSource(ACCESS_SOURCE) as mapboxgl.GeoJSONSource).setData(cachedGeojson);
-  }
+  // Pre-filter in JS so the source only contains this river's points — no layer filter needed
+  const filteredGeojson: GeoJSON.FeatureCollection = {
+    type: "FeatureCollection",
+    features: cachedGeojson.features.filter(
+      (f) => f.properties?.river_id === selectedRiverUuid
+    ),
+  };
+
+  map.addSource(ACCESS_SOURCE, { type: "geojson", data: filteredGeojson });
 
   const pinColor = riverTier === "TOUGH" ? "#dc2626"
     : riverTier === "FAIR" ? "#d4900a"
     : "#2d5a1b";
 
-  if (map.getLayer(ACCESS_LAYER)) {
-    // Layer already exists — just update the filter and color in place
-    map.setFilter(ACCESS_LAYER, accessFilter);
-    map.setPaintProperty(ACCESS_LAYER, "circle-color", pinColor);
-  } else {
-    // First time — add the layer
-    map.addLayer({
-      id: ACCESS_LAYER,
-      type: "circle",
-      source: ACCESS_SOURCE,
-      minzoom: 7,
-      filter: accessFilter,
-      paint: {
-        "circle-color": pinColor,
-        "circle-radius": ["interpolate", ["linear"], ["zoom"], 7, 5, 10, 8, 13, 10],
-        "circle-stroke-color": "#ffffff",
-        "circle-stroke-width": 2.5,
-        "circle-opacity": 0.95,
-      },
-    });
-  }
+  map.addLayer({
+    id: ACCESS_LAYER,
+    type: "circle",
+    source: ACCESS_SOURCE,
+    minzoom: 7,
+    paint: {
+      "circle-color": pinColor,
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 7, 5, 10, 8, 13, 10],
+      "circle-stroke-color": "#ffffff",
+      "circle-stroke-width": 2.5,
+      "circle-opacity": 0.95,
+    },
+  });
 
   try {
     if (map.getLayer(UNCLUSTERED_LAYER)) {
