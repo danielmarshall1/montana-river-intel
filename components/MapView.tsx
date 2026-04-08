@@ -1007,6 +1007,7 @@ function syncActiveStationsLayer(
   const selectedTempSiteNo = selectedRiver?.temp_source_site_no ? String(selectedRiver.temp_source_site_no) : "";
   const selectedRiverName = selectedRiver?.river_name ?? null;
   const selectedRiverId = selectedRiver?.river_id ? String(selectedRiver.river_id) : null;
+  console.log('[render] selectedRiverId:', selectedRiverId);
 
   const annotatedStations: GeoJSON.FeatureCollection<GeoJSON.Point, Record<string, unknown>> = {
     type: "FeatureCollection",
@@ -1695,6 +1696,7 @@ export function MapView({
   }, [basemap, mapReady]);
 
   useEffect(() => {
+    console.log('[access-effect] fired, selectedRiverId:', selectedRiverId, 'mapReady:', mapReady);
     const map = mapRef.current;
     if (!map || !mapReady) return;
     if (typeof map.isStyleLoaded === "function" && !map.isStyleLoaded()) return;
@@ -1729,7 +1731,7 @@ export function MapView({
     effectiveLayerState.hydro_temp_stress,
     effectiveLayerState.mri_labels,
     activeStationsGeojson,
-    selectedRiver?.river_id,
+    selectedRiverId,
     selectedRiver?.bite_tier,
     selectedRiver?.flow_source_site_no,
     selectedRiver?.temp_source_site_no,
