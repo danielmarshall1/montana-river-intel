@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
-import { Plus, Minus, Maximize2, Crosshair, Layers, List, X } from "lucide-react";
+import { Layers, Plus, Minus, Maximize2, Crosshair, ChevronLeft, X } from "lucide-react";
 import { MapView } from "@/components/MapView";
 import { fetchRiverGeom } from "@/lib/supabase";
 import { fetchRiverGeojsonBrowser } from "@/lib/supabaseBrowser";
@@ -39,29 +39,22 @@ import type {
 
 type River = FishabilityRow;
 
-function TierPill({ tier }: { tier?: string }) {
-  const dotColor =
-    tier === "Good" || tier === "HOT" || tier === "GOOD"
-      ? MRI_COLORS.good
-      : tier === "Fair" || tier === "FAIR"
-      ? MRI_COLORS.fair
-      : MRI_COLORS.tough;
-  const label =
-    tier === "HOT" || tier === "GOOD"
-      ? "Good"
-      : tier === "FAIR"
-      ? "Fair"
-      : tier === "TOUGH"
-      ? "Tough"
-      : tier ?? "—";
+// ─── Tier helpers ───────────────────────────────────────────────────────────
 
-  return (
-    <span className="inline-flex items-center gap-2 text-xs font-semibold text-white/90">
-      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: dotColor }} />
-      {label}
-    </span>
-  );
+function getTierColors(tier?: string | null) {
+  if (tier === "HOT" || tier === "GOOD") {
+    return { bg: "#dcf0d4", text: "#2d5a1b", dot: "#2d5a1b", label: "Good" };
+  }
+  if (tier === "FAIR") {
+    return { bg: "#fef3c7", text: "#92400e", dot: "#d4900a", label: "Fair" };
+  }
+  if (tier === "TOUGH") {
+    return { bg: "#fee2e2", text: "#991b1b", dot: "#dc2626", label: "Tough" };
+  }
+  return { bg: "#f3f4f6", text: "#6b7280", dot: "#9ca3af", label: "—" };
 }
+
+// ─── Formatters ─────────────────────────────────────────────────────────────
 
 function formatNum(value: number | null | undefined, digits = 0): string {
   if (value == null || Number.isNaN(value)) return "—";
@@ -88,7 +81,7 @@ function formatUpdatedAgo(value: string | null | undefined): string {
   if (Number.isNaN(ms)) return "Updated recently";
   const diffMin = Math.max(0, Math.floor((Date.now() - ms) / 60000));
   if (diffMin < 1) return "Updated just now";
-  if (diffMin < 60) return `Updated ${diffMin} min ago`;
+  if (diffMin < 60) return `Updated ${diffMin}m ago`;
   const h = Math.floor(diffMin / 60);
   if (h < 24) return `Updated ${h}h ago`;
   const d = Math.floor(h / 24);
@@ -102,13 +95,7 @@ function getFishabilityIndex(score: number | null | undefined) {
   const normalized = Math.max(0, Math.min(10, Number(score) / 10));
   const percent = Math.max(0, Math.min(100, normalized * 10));
   const band = normalized >= 8.5 ? "Excellent" : normalized >= 6.5 ? "Good" : normalized >= 4 ? "Fair" : "Poor";
-  return {
-    value: normalized.toFixed(1),
-    normalized,
-    percent,
-    band,
-    optimal: normalized >= 7.5 && normalized <= 9.2,
-  };
+  return { value: normalized.toFixed(1), normalized, percent, band, optimal: normalized >= 7.5 && normalized <= 9.2 };
 }
 
 function getTempStatusLabel(river: River | null | undefined): string {
@@ -121,18 +108,8 @@ function getTempStatusLabel(river: River | null | undefined): string {
     }
     return "Temp stale";
   }
-  if (river.temp_status === "unavailable_at_gauge") {
-    return "Temp not available at this gauge";
-  }
+  if (river.temp_status === "unavailable_at_gauge") return "Temp unavailable at gauge";
   return "Temp fresh";
-}
-
-function getTempSourceLabel(river: River | null | undefined): string {
-  if (!river) return "—";
-  const kind = river.temp_source_kind ?? "NONE";
-  const site = river.temp_source_site_no ?? "—";
-  if (kind === "NONE") return "No temp source";
-  return `${kind} • Site ${site}`;
 }
 
 function getConfidenceBadgeLabel(river: River | null | undefined): string {
@@ -140,28 +117,20 @@ function getConfidenceBadgeLabel(river: River | null | undefined): string {
   return `${river.confidence_level} confidence`;
 }
 
-function getConfidenceBadgeClass(level: River["confidence_level"]): string {
-  if (level === "High") {
-    return "border-[rgba(110,150,125,0.34)] bg-[rgba(79,103,87,0.18)] text-[#c2d5c6]";
-  }
-  if (level === "Moderate") {
-    return "border-[rgba(173,126,78,0.34)] bg-[rgba(134,97,57,0.18)] text-[#d8be97]";
-  }
-  return "border-[var(--mri-border)] bg-[rgba(21,31,35,0.7)] text-[var(--mri-text-dim)]";
-}
-
 function formatDetailedTime(value: string | null | undefined): string {
   if (!value) return "Unavailable";
   const dt = new Date(value);
   if (Number.isNaN(dt.getTime())) return "Unavailable";
-  return dt.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-    timeZone: "America/Denver",
-  }) + " MT";
+  return (
+    dt.toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZone: "America/Denver",
+    }) + " MT"
+  );
 }
 
 function formatMetricNumber(
@@ -214,48 +183,32 @@ function formatSourceSite(siteNo: string | null | undefined, siteName: string | 
   return siteNo ?? siteName ?? "Unavailable";
 }
 
-function MetricRow({
-  label,
-  value,
-  note,
-}: {
-  label: string;
-  value: string;
-  note?: string | null;
-}) {
+// ─── MetricRow / MetricsSection / DetailedMetricsContent ────────────────────
+
+function MetricRow({ label, value, note }: { label: string; value: string; note?: string | null }) {
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1 border-b border-white/6 py-2 last:border-b-0">
+    <div className="mri-metric-row">
       <div className="min-w-0">
-        <div className="text-[11px] font-medium text-white/76">{label}</div>
-        {note ? <div className="mt-0.5 text-[10px] leading-4 text-white/40">{note}</div> : null}
+        <div className="mri-metric-label">{label}</div>
+        {note ? <div className="mri-metric-note">{note}</div> : null}
       </div>
-      <div className="max-w-[180px] text-right text-[11px] font-semibold text-white/92">{value}</div>
+      <div className="mri-metric-value">{value}</div>
     </div>
   );
 }
 
-function MetricsSection({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
+function MetricsSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-[18px] border border-[rgba(180,198,209,0.1)] bg-[rgba(16,24,27,0.58)] p-3.5">
-      <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-white/42">{title}</div>
+    <section className="mri-metrics-section">
+      <div className="mri-metrics-section-title">{title}</div>
       <div className="mt-2">{children}</div>
     </section>
   );
 }
 
-function DetailedMetricsContent({
-  analytics,
-}: {
-  analytics: RiverDetailAnalytics | null;
-}) {
+function DetailedMetricsContent({ analytics }: { analytics: RiverDetailAnalytics | null }) {
   if (!analytics) {
-    return <div className="text-[11px] text-[var(--mri-text-dim)]">No metrics available.</div>;
+    return <div className="text-[11px] text-[var(--mri-text-muted)]">No metrics available.</div>;
   }
 
   return (
@@ -297,22 +250,13 @@ function DetailedMetricsContent({
       </MetricsSection>
 
       <MetricsSection title="Thermal">
-        <MetricRow
-          label="Current Water Temperature"
-          value={formatMetricNumber(analytics.thermal.currentWaterTempF, { digits: 1, suffix: "°F" })}
-        />
+        <MetricRow label="Current Water Temperature" value={formatMetricNumber(analytics.thermal.currentWaterTempF, { digits: 1, suffix: "°F" })} />
         <MetricRow label="Temperature Source Type" value={analytics.thermal.tempSourceKind ?? "Unknown"} />
         <MetricRow label="Temperature Observed At" value={formatDetailedTime(analytics.thermal.tempObservedAt)} />
         <MetricRow label="Temperature Confidence" value={analytics.thermal.tempConfidence ?? "Unavailable"} />
-        <MetricRow
-          label="Thermal Trend"
-          value={formatTempTrend(analytics.thermal.thermalTrendLabel, analytics.thermal.thermalTrendDelta24hF)}
-        />
+        <MetricRow label="Thermal Trend" value={formatTempTrend(analytics.thermal.thermalTrendLabel, analytics.thermal.thermalTrendDelta24hF)} />
         <MetricRow label="Thermal Status" value={analytics.thermal.thermalStatus ?? "Unavailable"} />
-        <MetricRow
-          label="3-Day Water Temp Direction"
-          value={analytics.thermal.direction3Day ?? "Forecast not yet enabled"}
-        />
+        <MetricRow label="3-Day Water Temp Direction" value={analytics.thermal.direction3Day ?? "Forecast not yet enabled"} />
       </MetricsSection>
 
       <MetricsSection title="Weather">
@@ -324,14 +268,8 @@ function DetailedMetricsContent({
         />
         <MetricRow label="Wind Direction" value={analytics.weather.windDirection ?? "Unavailable"} />
         <MetricRow label="Gusts" value={formatMetricNumber(analytics.weather.gustMph, { digits: 0, suffix: " mph" })} />
-        <MetricRow
-          label="Precipitation Probability"
-          value={formatMetricNumber(analytics.weather.precipChancePct, { digits: 0, suffix: "%" })}
-        />
-        <MetricRow
-          label="Cloud Cover"
-          value={formatMetricNumber(analytics.weather.cloudCoverPct, { digits: 0, suffix: "%" })}
-        />
+        <MetricRow label="Precipitation Probability" value={formatMetricNumber(analytics.weather.precipChancePct, { digits: 0, suffix: "%" })} />
+        <MetricRow label="Cloud Cover" value={formatMetricNumber(analytics.weather.cloudCoverPct, { digits: 0, suffix: "%" })} />
         <MetricRow
           label="Daily High / Low"
           value={
@@ -345,86 +283,40 @@ function DetailedMetricsContent({
       </MetricsSection>
 
       <MetricsSection title="Forecast">
-        <MetricRow
-          label="Tomorrow Air Temp"
-          value={analytics.forecast.day1.available ? formatMetricNumber(analytics.forecast.day1.airTempF, { digits: 0, suffix: "°F" }) : "Forecast not yet enabled"}
-        />
-        <MetricRow
-          label="Tomorrow Wind"
-          value={analytics.forecast.day1.available ? formatMetricNumber(analytics.forecast.day1.windMph, { digits: 0, suffix: " mph" }) : "Forecast not yet enabled"}
-        />
-        <MetricRow
-          label="Tomorrow Precip Chance"
-          value={analytics.forecast.day1.available ? formatMetricNumber(analytics.forecast.day1.precipChancePct, { digits: 0, suffix: "%" }) : "Forecast not yet enabled"}
-        />
-        <MetricRow
-          label="Day 2 Air Temp"
-          value={analytics.forecast.day2.available ? formatMetricNumber(analytics.forecast.day2.airTempF, { digits: 0, suffix: "°F" }) : "Forecast not yet enabled"}
-        />
-        <MetricRow
-          label="Day 2 Wind"
-          value={analytics.forecast.day2.available ? formatMetricNumber(analytics.forecast.day2.windMph, { digits: 0, suffix: " mph" }) : "Forecast not yet enabled"}
-        />
-        <MetricRow
-          label="Day 2 Precip Chance"
-          value={analytics.forecast.day2.available ? formatMetricNumber(analytics.forecast.day2.precipChancePct, { digits: 0, suffix: "%" }) : "Forecast not yet enabled"}
-        />
-        <MetricRow
-          label="Day 3 Air Temp"
-          value={analytics.forecast.day3.available ? formatMetricNumber(analytics.forecast.day3.airTempF, { digits: 0, suffix: "°F" }) : "Forecast not yet enabled"}
-        />
-        <MetricRow
-          label="Day 3 Wind"
-          value={analytics.forecast.day3.available ? formatMetricNumber(analytics.forecast.day3.windMph, { digits: 0, suffix: " mph" }) : "Forecast not yet enabled"}
-        />
-        <MetricRow
-          label="Day 3 Precip Chance"
-          value={analytics.forecast.day3.available ? formatMetricNumber(analytics.forecast.day3.precipChancePct, { digits: 0, suffix: "%" }) : "Forecast not yet enabled"}
-        />
+        <MetricRow label="Tomorrow Air Temp" value={analytics.forecast.day1.available ? formatMetricNumber(analytics.forecast.day1.airTempF, { digits: 0, suffix: "°F" }) : "Forecast not yet enabled"} />
+        <MetricRow label="Tomorrow Wind" value={analytics.forecast.day1.available ? formatMetricNumber(analytics.forecast.day1.windMph, { digits: 0, suffix: " mph" }) : "Forecast not yet enabled"} />
+        <MetricRow label="Tomorrow Precip Chance" value={analytics.forecast.day1.available ? formatMetricNumber(analytics.forecast.day1.precipChancePct, { digits: 0, suffix: "%" }) : "Forecast not yet enabled"} />
+        <MetricRow label="Day 2 Air Temp" value={analytics.forecast.day2.available ? formatMetricNumber(analytics.forecast.day2.airTempF, { digits: 0, suffix: "°F" }) : "Forecast not yet enabled"} />
+        <MetricRow label="Day 2 Wind" value={analytics.forecast.day2.available ? formatMetricNumber(analytics.forecast.day2.windMph, { digits: 0, suffix: " mph" }) : "Forecast not yet enabled"} />
+        <MetricRow label="Day 2 Precip Chance" value={analytics.forecast.day2.available ? formatMetricNumber(analytics.forecast.day2.precipChancePct, { digits: 0, suffix: "%" }) : "Forecast not yet enabled"} />
+        <MetricRow label="Day 3 Air Temp" value={analytics.forecast.day3.available ? formatMetricNumber(analytics.forecast.day3.airTempF, { digits: 0, suffix: "°F" }) : "Forecast not yet enabled"} />
+        <MetricRow label="Day 3 Wind" value={analytics.forecast.day3.available ? formatMetricNumber(analytics.forecast.day3.windMph, { digits: 0, suffix: " mph" }) : "Forecast not yet enabled"} />
+        <MetricRow label="Day 3 Precip Chance" value={analytics.forecast.day3.available ? formatMetricNumber(analytics.forecast.day3.precipChancePct, { digits: 0, suffix: "%" }) : "Forecast not yet enabled"} />
         <MetricRow label="3-Day Wind Outlook" value={analytics.forecast.windOutlook ?? "Forecast not yet enabled"} />
         <MetricRow label="3-Day Fishing Outlook" value={analytics.forecast.fishingOutlook ?? "Forecast model not yet enabled"} />
         <MetricRow label="3-Day Flow Outlook" value={analytics.forecast.flowOutlook ?? "Flow forecast not yet enabled"} />
       </MetricsSection>
 
       <MetricsSection title="Biology">
-        <MetricRow
-          label="Hatch Likelihood"
-          value={analytics.biology.hatchLikelihood ?? "Unavailable"}
-          note="Derived from season, temperature, and stability"
-        />
+        <MetricRow label="Hatch Likelihood" value={analytics.biology.hatchLikelihood ?? "Unavailable"} note="Derived from season, temperature, and stability" />
         <MetricRow label="Dry Fly Viability" value={analytics.biology.dryFlyViability ?? "Unavailable"} />
         <MetricRow label="Tactical Read" value={analytics.biology.tacticalRead ?? "Unavailable"} />
       </MetricsSection>
 
       <MetricsSection title="Data Quality / Source Trust">
-        <MetricRow
-          label="Flow Source Site"
-          value={formatSourceSite(analytics.sourceTrust.flowSourceSiteNo, analytics.sourceTrust.flowSourceSiteName)}
-        />
-        <MetricRow
-          label="Temperature Source Site"
-          value={formatSourceSite(analytics.sourceTrust.tempSourceSiteNo, analytics.sourceTrust.tempSourceSiteName)}
-        />
+        <MetricRow label="Flow Source Site" value={formatSourceSite(analytics.sourceTrust.flowSourceSiteNo, analytics.sourceTrust.flowSourceSiteName)} />
+        <MetricRow label="Temperature Source Site" value={formatSourceSite(analytics.sourceTrust.tempSourceSiteNo, analytics.sourceTrust.tempSourceSiteName)} />
         <MetricRow label="Temp Source Kind" value={analytics.sourceTrust.tempSourceKind ?? "Unknown"} />
-        <MetricRow
-          label="Observation Timestamp"
-          value={analytics.sourceTrust.observationTimestamp ? formatDetailedTime(analytics.sourceTrust.observationTimestamp) : "Unavailable"}
-        />
-        <MetricRow
-          label="Last Hydrology Pull"
-          value={analytics.sourceTrust.lastHydrologyPullAt ? formatDetailedTime(analytics.sourceTrust.lastHydrologyPullAt) : "Unavailable"}
-        />
+        <MetricRow label="Observation Timestamp" value={analytics.sourceTrust.observationTimestamp ? formatDetailedTime(analytics.sourceTrust.observationTimestamp) : "Unavailable"} />
+        <MetricRow label="Last Hydrology Pull" value={analytics.sourceTrust.lastHydrologyPullAt ? formatDetailedTime(analytics.sourceTrust.lastHydrologyPullAt) : "Unavailable"} />
         <MetricRow label="Data Confidence" value={analytics.sourceTrust.overallConfidence ?? "Unavailable"} />
-        <MetricRow
-          label="Missing Inputs"
-          value={analytics.sourceTrust.missingInputs.length ? analytics.sourceTrust.missingInputs.join(", ") : "None"}
-        />
+        <MetricRow label="Missing Inputs" value={analytics.sourceTrust.missingInputs.length ? analytics.sourceTrust.missingInputs.join(", ") : "None"} />
       </MetricsSection>
     </div>
   );
 }
 
-// ─── TrendChart ────────────────────────────────────────────────────────────
+// ─── TrendChart ─────────────────────────────────────────────────────────────
 
 type HistoryRow = {
   obs_date: string;
@@ -433,9 +325,8 @@ type HistoryRow = {
   fishability_score: number | null;
 };
 
-const TC_VB_W = 300; // SVG viewBox coordinate width
+const TC_VB_W = 300;
 
-/** Smooth cubic bezier through the given points (horizontal control handles). */
 function buildSmoothPath(pts: [number, number][]): string {
   if (pts.length < 2) return "";
   let d = `M${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)}`;
@@ -446,7 +337,6 @@ function buildSmoothPath(pts: [number, number][]): string {
   return d;
 }
 
-/** Map data rows onto SVG coordinate space, skipping null values. */
 function toChartPts(
   rows: HistoryRow[],
   key: "fishability_score" | "flow_cfs" | "water_temp_f",
@@ -473,14 +363,10 @@ function toChartPts(
   return { pts, min: lo, max: hi };
 }
 
-/** Parse a YYYY-MM-DD date string without timezone shift. */
 function fmtShortDate(d: string | undefined): string {
   if (!d) return "";
   const [y, m, day] = d.split("-").map(Number);
-  return new Date(y, m - 1, day).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
+  return new Date(y, m - 1, day).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 function TrendChart({ historyRows }: { historyRows: HistoryRow[] }) {
@@ -491,8 +377,8 @@ function TrendChart({ historyRows }: { historyRows: HistoryRow[] }) {
 
   if (rows.length < 2) return null;
 
-  const H1 = 44; // score sparkline viewBox height
-  const H2 = 52; // flow/temp viewBox height
+  const H1 = 44;
+  const H2 = 52;
   const PX = 4;
   const PY = 4;
 
@@ -516,143 +402,63 @@ function TrendChart({ historyRows }: { historyRows: HistoryRow[] }) {
       : "";
 
   return (
-    <div className="rounded-[18px] border border-[rgba(180,198,209,0.07)] bg-[rgba(12,19,22,0.72)] p-3 space-y-3.5">
-      <div className="text-[9px] font-semibold uppercase tracking-[0.14em] text-white/32">14-Day Trends</div>
+    <div className="mri-card p-3 space-y-3">
+      <div className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--mri-text-dim)]">14-Day Trends</div>
 
-      {/* Fishability score sparkline */}
       {hasScore && (
         <div>
           <div className="mb-1 flex items-baseline justify-between">
-            <span className="text-[10px] text-white/46">Fishability</span>
+            <span className="text-[10px] text-[var(--mri-text-muted)]">Fishability</span>
             {lastRow?.fishability_score != null && (
-              <span className="text-[10px] font-semibold" style={{ color: MRI_COLORS.riverSelected }}>
+              <span className="text-[10px] font-semibold" style={{ color: "#2d5a1b" }}>
                 {Math.round(lastRow.fishability_score)} today
               </span>
             )}
           </div>
-          <svg
-            viewBox={`0 0 ${TC_VB_W} ${H1}`}
-            width="100%"
-            height={H1}
-            preserveAspectRatio="none"
-            style={{ display: "block" }}
-          >
-            {/* Area fill */}
-            {scoreAreaPath && (
-              <path d={scoreAreaPath} fill={MRI_COLORS.riverSelected} fillOpacity="0.09" />
-            )}
-            {/* Line */}
-            <path
-              d={buildSmoothPath(scorePts)}
-              fill="none"
-              stroke={MRI_COLORS.riverSelected}
-              strokeWidth="1.5"
-              vectorEffect="non-scaling-stroke"
-            />
-            {/* End dot */}
+          <svg viewBox={`0 0 ${TC_VB_W} ${H1}`} width="100%" height={H1} preserveAspectRatio="none" style={{ display: "block" }}>
+            {scoreAreaPath && <path d={scoreAreaPath} fill="#2d5a1b" fillOpacity="0.08" />}
+            <path d={buildSmoothPath(scorePts)} fill="none" stroke="#2d5a1b" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
             {scorePts.at(-1) && (
-              <circle
-                cx={scorePts.at(-1)![0]}
-                cy={scorePts.at(-1)![1]}
-                r="3"
-                fill={MRI_COLORS.riverSelected}
-                vectorEffect="non-scaling-stroke"
-              />
+              <circle cx={scorePts.at(-1)![0]} cy={scorePts.at(-1)![1]} r="3" fill="#2d5a1b" vectorEffect="non-scaling-stroke" />
             )}
           </svg>
-          <div className="mt-0.5 flex justify-between text-[9px] text-white/24">
+          <div className="mt-0.5 flex justify-between text-[9px] text-[var(--mri-text-dim)]">
             <span>{firstDate}</span>
-            {scoreMin !== scoreMax && (
-              <span>
-                {Math.round(scoreMin)}–{Math.round(scoreMax)}
-              </span>
-            )}
+            {scoreMin !== scoreMax && <span>{Math.round(scoreMin)}–{Math.round(scoreMax)}</span>}
             <span>{lastDate}</span>
           </div>
         </div>
       )}
 
-      {/* Flow + Temp dual-line, each on its own normalized Y scale */}
       {(hasFlow || hasTemp) && (
         <div>
           <div className="mb-1 flex items-baseline justify-between">
-            <span className="text-[10px] text-white/46">Flow &amp; Temp</span>
+            <span className="text-[10px] text-[var(--mri-text-muted)]">Flow &amp; Temp</span>
             <div className="flex items-center gap-3 text-[10px] font-semibold">
               {hasFlow && lastRow?.flow_cfs != null && (
-                <span style={{ color: "#4aa3ff" }}>
-                  {Math.round(lastRow.flow_cfs).toLocaleString()} cfs
-                </span>
+                <span style={{ color: "#5b9bd5" }}>{Math.round(lastRow.flow_cfs).toLocaleString()} cfs</span>
               )}
               {hasTemp && lastRow?.water_temp_f != null && (
-                <span style={{ color: MRI_COLORS.warning }}>
-                  {lastRow.water_temp_f.toFixed(1)}°F
-                </span>
+                <span style={{ color: MRI_COLORS.warning }}>{lastRow.water_temp_f.toFixed(1)}°F</span>
               )}
             </div>
           </div>
-          <svg
-            viewBox={`0 0 ${TC_VB_W} ${H2}`}
-            width="100%"
-            height={H2}
-            preserveAspectRatio="none"
-            style={{ display: "block" }}
-          >
-            {hasFlow && (
-              <path
-                d={buildSmoothPath(flowPts)}
-                fill="none"
-                stroke="#4aa3ff"
-                strokeWidth="1.5"
-                strokeOpacity="0.72"
-                vectorEffect="non-scaling-stroke"
-              />
-            )}
-            {hasTemp && (
-              <path
-                d={buildSmoothPath(tempPts)}
-                fill="none"
-                stroke={MRI_COLORS.warning}
-                strokeWidth="1.5"
-                strokeOpacity="0.72"
-                vectorEffect="non-scaling-stroke"
-              />
-            )}
+          <svg viewBox={`0 0 ${TC_VB_W} ${H2}`} width="100%" height={H2} preserveAspectRatio="none" style={{ display: "block" }}>
+            {hasFlow && <path d={buildSmoothPath(flowPts)} fill="none" stroke="#5b9bd5" strokeWidth="1.5" strokeOpacity="0.8" vectorEffect="non-scaling-stroke" />}
+            {hasTemp && <path d={buildSmoothPath(tempPts)} fill="none" stroke={MRI_COLORS.warning} strokeWidth="1.5" strokeOpacity="0.8" vectorEffect="non-scaling-stroke" />}
             {hasFlow && flowPts.at(-1) && (
-              <circle
-                cx={flowPts.at(-1)![0]}
-                cy={flowPts.at(-1)![1]}
-                r="2.5"
-                fill="#4aa3ff"
-                fillOpacity="0.9"
-                vectorEffect="non-scaling-stroke"
-              />
+              <circle cx={flowPts.at(-1)![0]} cy={flowPts.at(-1)![1]} r="2.5" fill="#5b9bd5" vectorEffect="non-scaling-stroke" />
             )}
             {hasTemp && tempPts.at(-1) && (
-              <circle
-                cx={tempPts.at(-1)![0]}
-                cy={tempPts.at(-1)![1]}
-                r="2.5"
-                fill={MRI_COLORS.warning}
-                fillOpacity="0.9"
-                vectorEffect="non-scaling-stroke"
-              />
+              <circle cx={tempPts.at(-1)![0]} cy={tempPts.at(-1)![1]} r="2.5" fill={MRI_COLORS.warning} vectorEffect="non-scaling-stroke" />
             )}
           </svg>
-          {/* Range labels (left) + date range (right) */}
           <div className="mt-0.5 flex items-start justify-between text-[9px]">
             <div className="flex flex-col gap-0.5">
-              {hasFlow && (
-                <span style={{ color: "#4aa3ff55" }}>
-                  {Math.round(flowMin).toLocaleString()}–{Math.round(flowMax).toLocaleString()} cfs
-                </span>
-              )}
-              {hasTemp && (
-                <span style={{ color: `${MRI_COLORS.warning}66` }}>
-                  {tempMin.toFixed(0)}–{tempMax.toFixed(0)}°F
-                </span>
-              )}
+              {hasFlow && <span style={{ color: "#5b9bd5aa" }}>{Math.round(flowMin).toLocaleString()}–{Math.round(flowMax).toLocaleString()} cfs</span>}
+              {hasTemp && <span style={{ color: `${MRI_COLORS.warning}99` }}>{tempMin.toFixed(0)}–{tempMax.toFixed(0)}°F</span>}
             </div>
-            <div className="flex flex-col items-end text-white/24">
+            <div className="flex flex-col items-end text-[var(--mri-text-dim)]">
               <span>{firstDate}</span>
               <span>{lastDate}</span>
             </div>
@@ -663,9 +469,9 @@ function TrendChart({ historyRows }: { historyRows: HistoryRow[] }) {
   );
 }
 
-// ─── River tray card ────────────────────────────────────────────────────────
+// ─── RiverRow ────────────────────────────────────────────────────────────────
 
-function DesktopTrayCard({
+function RiverRow({
   river,
   selected,
   onSelect,
@@ -674,59 +480,310 @@ function DesktopTrayCard({
   selected: boolean;
   onSelect: () => void;
 }) {
+  const tc = getTierColors(river.bite_tier);
+  const score = river.fishability_score_calc;
+
   return (
     <button
       onClick={onSelect}
-      className={`mri-drawer-card mri-tray-card shrink-0 text-left active:translate-y-[1px] ${
-        selected ? "mri-drawer-card-selected" : ""
-      }`}
+      className={`mri-river-row ${selected ? "mri-river-row-selected" : ""}`}
     >
-      <div className="p-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="truncate text-[13px] font-semibold text-white">{river.river_name}</div>
-            <div className="mt-0.5 truncate text-[11px] text-white/50">{river.gauge_label ?? ""}</div>
-          </div>
-          <div className="text-right">
-            <div className="text-[24px] font-semibold leading-none tracking-[-0.02em] text-white">
-              {river.fishability_score_calc ?? "—"}
-            </div>
-            <div className="mt-1 text-[10px] uppercase tracking-[0.12em] text-white/40">Score</div>
-          </div>
-        </div>
-        <div className="mt-2.5 flex items-center justify-between gap-3">
-          <TierPill
-            tier={
-              river.bite_tier === "HOT" || river.bite_tier === "GOOD"
-                ? "Good"
-                : river.bite_tier === "FAIR"
-                ? "Fair"
-                : river.bite_tier === "TOUGH"
-                ? "Tough"
-                : undefined
-            }
-          />
-          <div className="flex items-center gap-3 text-[11px] text-white/72">
-            <span>
-              {river.flow_cfs ?? "—"}
-              <span className="ml-1 text-white/38">{getFlowTrendArrow(river.change_48h_pct_calc)}</span>
-            </span>
-            <span>{river.water_temp_f != null ? `${Number(river.water_temp_f).toFixed(1)}°` : "—"}</span>
-          </div>
-        </div>
-        <div className="mt-2 text-[10px] font-medium tracking-[0.01em] text-white/58">{getRiverTrustLine(river)}</div>
+      <div className="mri-score-badge" style={{ background: tc.bg, color: tc.text }}>
+        {score != null ? Math.round(score) : "—"}
       </div>
+      <div className="flex-1 min-w-0">
+        <div className="text-[13px] font-semibold text-[var(--mri-text)] truncate leading-tight">{river.river_name}</div>
+        <div className="text-[10px] text-[var(--mri-text-dim)] truncate mt-0.5">{river.gauge_label ?? ""}</div>
+      </div>
+      <div className="text-right text-[11px] text-[var(--mri-text-muted)] flex-shrink-0">
+        <div>{river.flow_cfs != null ? `${Number(river.flow_cfs).toLocaleString()} cfs` : "—"}</div>
+        <div>{river.water_temp_f != null ? `${Number(river.water_temp_f).toFixed(1)}°F` : "—"}</div>
+      </div>
+      <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: tc.dot }} />
     </button>
   );
 }
+
+// ─── LayersPanel ─────────────────────────────────────────────────────────────
+
+function LayersPanel({
+  basemap,
+  layerState,
+  advancedOpen,
+  onBasemap,
+  onLayer,
+  onReset,
+  onClose,
+  onToggleAdvanced,
+}: {
+  basemap: BasemapId;
+  layerState: Record<LayerId, boolean>;
+  advancedOpen: boolean;
+  onBasemap: (id: BasemapId) => void;
+  onLayer: (id: LayerId, v: boolean) => void;
+  onReset: () => void;
+  onClose: () => void;
+  onToggleAdvanced: () => void;
+}) {
+  const groupedLayers = useMemo(
+    () => LAYER_GROUP_ORDER.map((group) => ({ group, layers: LAYER_REGISTRY.filter((l) => l.group === group) })),
+    []
+  );
+
+  return (
+    <div className="mri-layers-panel w-[300px] p-4">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <div className="text-[13px] font-semibold text-[var(--mri-text)]">Map Layers</div>
+          <div className="text-[11px] text-[var(--mri-text-muted)]">Display controls</div>
+        </div>
+        <div className="flex items-center gap-3">
+          <button className="text-[11px] text-[var(--mri-text-muted)] hover:text-[var(--mri-text)]" onClick={onReset}>Reset</button>
+          <button className="mri-rail-btn" onClick={onClose}><X size={14} /></button>
+        </div>
+      </div>
+
+      <div className="mri-scroll max-h-[65vh] overflow-auto space-y-4">
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)] mb-2">Basemap</div>
+          <div className="grid grid-cols-2 gap-1.5">
+            {BASEMAP_OPTIONS.map((opt) => (
+              <button
+                key={opt.id}
+                disabled={!opt.enabled}
+                className={[
+                  "rounded-lg border px-2 py-1.5 text-[12px] font-medium transition-colors",
+                  basemap === opt.id
+                    ? "border-[#2d5a1b] bg-[#dcf0d4] text-[#2d5a1b]"
+                    : "border-[var(--mri-border)] bg-white text-[var(--mri-text-muted)] hover:bg-stone-50",
+                  !opt.enabled ? "opacity-40 cursor-not-allowed" : "",
+                ].join(" ")}
+                onClick={() => onBasemap(opt.id)}
+              >
+                {opt.label}
+                {!opt.enabled && opt.comingSoon ? (
+                  <div className="text-[9px] text-[var(--mri-text-dim)]">Soon</div>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)] mb-2">Core Layers</div>
+          <div className="mri-card p-2.5 space-y-2">
+            {groupedLayers
+              .flatMap((g) => g.layers)
+              .filter((l) => l.id === "mri_river_lines" || l.id === "mri_selected_highlight")
+              .map((layer) => (
+                <label key={layer.id} className="flex items-center justify-between text-[12px] text-[var(--mri-text-muted)] cursor-pointer">
+                  <span>{layer.label}</span>
+                  <input
+                    type="checkbox"
+                    checked={layerState[layer.id]}
+                    onChange={(e) => onLayer(layer.id, e.target.checked)}
+                    className="ml-2 accent-[#2d5a1b]"
+                  />
+                </label>
+              ))}
+          </div>
+        </div>
+
+        <div>
+          <button
+            className="w-full text-left text-[12px] font-medium text-[var(--mri-text-muted)] hover:text-[var(--mri-text)] py-1"
+            onClick={onToggleAdvanced}
+          >
+            {advancedOpen ? "Hide Advanced Layers ↑" : "Advanced Layers ↓"}
+          </button>
+        </div>
+
+        {advancedOpen &&
+          groupedLayers.map(({ group, layers }) => (
+            <div key={group}>
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)] mb-2">{group}</div>
+              <div className="mri-card p-2.5 space-y-2">
+                {layers
+                  .filter((l) => !l.locked && l.id !== "mri_river_lines" && l.id !== "mri_selected_highlight")
+                  .map((layer) => (
+                    <label key={layer.id} className="flex items-start justify-between gap-2 text-[12px] text-[var(--mri-text-muted)] cursor-pointer">
+                      <span className="leading-tight">
+                        {layer.label}
+                        {layer.minZoomNote && <span className="block text-[10px] text-[var(--mri-text-dim)]">{layer.minZoomNote}</span>}
+                        {layer.comingSoon && <span className="block text-[10px] text-[var(--mri-text-dim)]">Coming soon</span>}
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={layerState[layer.id]}
+                        disabled={Boolean(layer.comingSoon)}
+                        onChange={(e) => onLayer(layer.id, e.target.checked)}
+                        className="mt-0.5 accent-[#2d5a1b]"
+                      />
+                    </label>
+                  ))}
+              </div>
+            </div>
+          ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── RiverDetailContent ───────────────────────────────────────────────────────
+
+function RiverDetailContent({
+  selected,
+  selectedFishIndex,
+  todaysRead,
+  historyRows,
+  detailedAnalytics,
+  breakdown,
+  detailMetricsOpen,
+  transparencyOpen,
+  onToggleMetrics,
+  onToggleTransparency,
+}: {
+  selected: River;
+  selectedFishIndex: ReturnType<typeof getFishabilityIndex>;
+  todaysRead: string;
+  historyRows: HistoryRow[];
+  detailedAnalytics: RiverDetailAnalytics | null;
+  breakdown: ReturnType<typeof deriveScoreBreakdown> | null;
+  detailMetricsOpen: boolean;
+  transparencyOpen: boolean;
+  onToggleMetrics: () => void;
+  onToggleTransparency: () => void;
+}) {
+  const tc = getTierColors(selected.bite_tier);
+  const score = selected.fishability_score_calc;
+
+  return (
+    <div className="space-y-3">
+      {/* Score + tier */}
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <div className="text-[52px] font-bold leading-none tracking-tight" style={{ color: tc.text }}>
+            {score != null ? Math.round(score) : "—"}
+          </div>
+          <div className="text-[11px] text-[var(--mri-text-dim)] mt-1">{formatUpdatedAgo(selected.updated_at)}</div>
+        </div>
+        <div className="flex-shrink-0 text-right">
+          <span
+            className="inline-flex items-center gap-1.5 text-[12px] font-semibold px-2.5 py-1 rounded-full"
+            style={{ background: tc.bg, color: tc.text }}
+          >
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: tc.dot }} />
+            {tc.label}
+          </span>
+          <div className="mt-1 text-[10px] text-[var(--mri-text-dim)]">{selectedFishIndex.band}</div>
+        </div>
+      </div>
+
+      {/* Score bar */}
+      <div className="mri-score-bar-track">
+        <div className="mri-score-bar-fill" style={{ width: `${score ?? 0}%`, background: tc.dot }} />
+      </div>
+
+      {/* 2x2 metric grid */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className="mri-card p-3">
+          <div className="text-[10px] font-medium text-[var(--mri-text-dim)] uppercase tracking-wide">Flow</div>
+          <div className="text-[15px] font-semibold text-[var(--mri-text)] mt-1 leading-tight">
+            {selected.flow_cfs != null ? `${Number(selected.flow_cfs).toLocaleString()} cfs` : "—"}
+            {selected.flow_cfs != null && (
+              <span className="ml-1 text-[12px] text-[var(--mri-text-muted)]">{getFlowTrendArrow(selected.change_48h_pct_calc)}</span>
+            )}
+          </div>
+        </div>
+        <div className="mri-card p-3">
+          <div className="text-[10px] font-medium text-[var(--mri-text-dim)] uppercase tracking-wide">Temp</div>
+          <div className="text-[15px] font-semibold text-[var(--mri-text)] mt-1 leading-tight">
+            {selected.water_temp_f != null ? `${Number(selected.water_temp_f).toFixed(1)}°F` : "—"}
+          </div>
+          {selected.temp_status && (
+            <div className="text-[10px] text-[var(--mri-text-dim)] mt-0.5">{getTempStatusLabel(selected)}</div>
+          )}
+        </div>
+        <div className="mri-card p-3">
+          <div className="text-[10px] font-medium text-[var(--mri-text-dim)] uppercase tracking-wide">Wind</div>
+          <div className="text-[15px] font-semibold text-[var(--mri-text)] mt-1 leading-tight">
+            {detailedAnalytics?.weather.windSpeedMph != null
+              ? `${detailedAnalytics.weather.windSpeedMph.toFixed(0)} mph`
+              : "—"}
+          </div>
+          {detailedAnalytics?.weather.windDirection && (
+            <div className="text-[10px] text-[var(--mri-text-dim)] mt-0.5">{detailedAnalytics.weather.windDirection}</div>
+          )}
+        </div>
+        <div className="mri-card p-3">
+          <div className="text-[10px] font-medium text-[var(--mri-text-dim)] uppercase tracking-wide">Hatch</div>
+          <div className="text-[13px] font-semibold text-[var(--mri-text)] mt-1 leading-tight">
+            {detailedAnalytics?.biology.hatchLikelihood ?? "—"}
+          </div>
+        </div>
+      </div>
+
+      {/* Tactical read */}
+      <div
+        className="mri-card p-3"
+        style={{ borderLeft: "3px solid #2d5a1b" }}
+      >
+        <div className="text-[10px] font-semibold text-[#2d5a1b] uppercase tracking-wide mb-1">Today&apos;s Read</div>
+        <div className="text-[13px] text-[var(--mri-text-muted)] leading-relaxed">{todaysRead}</div>
+      </div>
+
+      {/* 14-day trend chart */}
+      <TrendChart historyRows={historyRows} />
+
+      {/* Detailed metrics toggle */}
+      <button
+        className="w-full text-left text-[12px] font-medium text-[var(--mri-text-muted)] hover:text-[var(--mri-text)] py-2 border-t border-[var(--mri-border)] transition-colors"
+        onClick={onToggleMetrics}
+      >
+        {detailMetricsOpen ? "Hide Detailed Metrics ↑" : "Detailed Metrics ↓"}
+      </button>
+
+      {detailMetricsOpen && (
+        <div className="space-y-3">
+          <DetailedMetricsContent analytics={detailedAnalytics} />
+          <button
+            className="w-full text-left text-[12px] font-medium text-[var(--mri-text-muted)] hover:text-[var(--mri-text)] py-1 transition-colors"
+            onClick={onToggleTransparency}
+          >
+            {transparencyOpen ? "Hide score breakdown ↑" : "How this score is calculated ↓"}
+          </button>
+          {transparencyOpen && breakdown && (
+            <div className="mri-card p-3 text-[11px]">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                <div className="text-[var(--mri-text-muted)]">Flow Score</div>
+                <div className="text-right font-semibold text-[var(--mri-text)]">{formatNum(breakdown.flowScore)}</div>
+                <div className="text-[var(--mri-text-muted)]">Stability Score</div>
+                <div className="text-right font-semibold text-[var(--mri-text)]">{formatNum(breakdown.stabilityScore)}</div>
+                <div className="text-[var(--mri-text-muted)]">Thermal Score</div>
+                <div className="text-right font-semibold text-[var(--mri-text)]">
+                  {breakdown.thermalScore == null ? "Unavailable" : formatNum(breakdown.thermalScore)}
+                </div>
+                <div className="text-[var(--mri-text-muted)]">Wind Penalty</div>
+                <div className="text-right font-semibold text-[var(--mri-text)]">{formatNum(breakdown.windPenalty)}</div>
+                <div className="border-t border-[var(--mri-border)] pt-1.5 font-semibold text-[var(--mri-text)]">Total Score</div>
+                <div className="border-t border-[var(--mri-border)] pt-1.5 text-right font-semibold text-[var(--mri-text)]">{formatNum(breakdown.totalScore)}</div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main Shell ───────────────────────────────────────────────────────────────
 
 export default function OnxShell({
   rivers,
   stationGeojson,
   riverLinesGeojson: initialRiverLinesGeojson,
   dateLabel = new Date().toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "long",
+    month: "short",
     day: "numeric",
     year: "numeric",
   }),
@@ -736,49 +793,47 @@ export default function OnxShell({
   riverLinesGeojson?: GeoJSON.FeatureCollection<GeoJSON.Geometry, Record<string, unknown>> | null;
   dateLabel?: string;
 }) {
-  type TopPanel = "none" | "layers" | "detail";
-  type DrawerSnap = "collapsed" | "mid" | "expanded";
-  type MobileSurface = "map" | "list" | "detail" | "tools";
   type MobileListSnap = "peek" | "mid" | "full";
-  const DRAWER_SNAP_Y: Record<DrawerSnap, number> = {
-    collapsed: 0.94,
-    mid: 0.76,
-    expanded: 0.46,
-  };
-  const MOBILE_LIST_SNAP_Y: Record<MobileListSnap, number> = {
-    peek: 0.78,
-    mid: 0.46,
-    full: 0.08,
-  };
-  const SNAP_TRANSITION = "transform 260ms ease-in-out";
 
+  const SHEET_SNAPS: Record<MobileListSnap, number> = {
+    peek: 0.72,
+    mid: 0.40,
+    full: 0.0,
+  };
+  const SNAP_TRANSITION = "transform 260ms cubic-bezier(0.32, 0.72, 0, 1)";
+
+  // ── Core UI state
   const [search, setSearch] = useState("");
   const [tier, setTier] = useState<"All" | "Good" | "Fair" | "Tough">("All");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectionSeq, setSelectionSeq] = useState(0);
-  const [drawerSnap, setDrawerSnap] = useState<DrawerSnap>("collapsed");
-  const [sheetY, setSheetY] = useState<number>(DRAWER_SNAP_Y.collapsed);
+
+  // ── Mobile bottom sheet
+  const [sheetSnap, setSheetSnap] = useState<MobileListSnap>("peek");
+  const [sheetY, setSheetY] = useState<number>(SHEET_SNAPS.peek);
   const [isDragging, setIsDragging] = useState(false);
-  const dragRef = useRef<{ startY: number; startSheetY: number } | null>(null);
-  const [isMobile, setIsMobile] = useState(false);
-  const [mobileSurface, setMobileSurface] = useState<MobileSurface>("map");
-  const [mobileListSnap, setMobileListSnap] = useState<MobileListSnap>("peek");
-  const [mobileSheetY, setMobileSheetY] = useState<number>(MOBILE_LIST_SNAP_Y.peek);
-  const [isMobileDragging, setIsMobileDragging] = useState(false);
-  const mobileDragRef = useRef<{ startY: number; startSheetY: number } | null>(null);
+  const sheetDragRef = useRef<{ startY: number; startFraction: number } | null>(null);
+
+  // ── Mobile detail sheet
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const mobileDetailDragRef = useRef<{ startY: number } | null>(null);
 
+  // ── Desktop panels
+  const [layersOpen, setLayersOpen] = useState(false);
+  const [advancedLayersOpen, setAdvancedLayersOpen] = useState(false);
+
+  // ── Detail panel expandables
+  const [detailMetricsOpen, setDetailMetricsOpen] = useState(false);
+  const [transparencyOpen, setTransparencyOpen] = useState(false);
+  const [mobileDetailMetricsOpen, setMobileDetailMetricsOpen] = useState(false);
+  const [mobileTransparencyOpen, setMobileTransparencyOpen] = useState(false);
+
+  // ── Map / data state
+  const [isMobile, setIsMobile] = useState(false);
   const [selectedGeojson, setSelectedGeojson] = useState<GeoJSON.GeoJSON | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
 
-  const [openTopPanel, setOpenTopPanel] = useState<TopPanel>("none");
-  const [transparencyOpen, setTransparencyOpen] = useState(false);
-  const [detailMetricsOpen, setDetailMetricsOpen] = useState(false);
-  const [mobileDetailMetricsOpen, setMobileDetailMetricsOpen] = useState(false);
-  const [advancedLayersOpen, setAdvancedLayersOpen] = useState(false);
-  const [historyRows, setHistoryRows] = useState<
-    Array<{ obs_date: string; flow_cfs: number | null; water_temp_f: number | null; fishability_score: number | null }>
-  >([]);
+  const [historyRows, setHistoryRows] = useState<HistoryRow[]>([]);
   const [, setHistoryLoading] = useState(false);
   const [intradayRows, setIntradayRows] = useState<
     Array<{ observed_at: string; flow_cfs: number | null; water_temp_f: number | null; gage_height_ft: number | null }>
@@ -789,10 +844,9 @@ export default function OnxShell({
   const [backendAnalytics, setBackendAnalytics] = useState<RiverDetailAnalyticsBackendRow | null>(null);
 
   const [basemap, setBasemap] = useState<BasemapId>("hybrid");
-  const [layerState, setLayerState] = useState<Record<LayerId, boolean>>(
-    createDefaultLayerState()
-  );
+  const [layerState, setLayerState] = useState<Record<LayerId, boolean>>(createDefaultLayerState());
 
+  // ── Derived state
   const basemapById = useMemo(
     () => Object.fromEntries(BASEMAP_OPTIONS.map((b) => [b.id, b])) as Record<BasemapId, (typeof BASEMAP_OPTIONS)[number]>,
     []
@@ -802,43 +856,26 @@ export default function OnxShell({
     const s = search.trim().toLowerCase();
     return (rivers ?? [])
       .filter((r) => {
-        const matchesSearch =
-          !s ||
-          (r.river_name ?? "").toLowerCase().includes(s) ||
-          (r.gauge_label ?? "").toLowerCase().includes(s);
-
+        const matchesSearch = !s || (r.river_name ?? "").toLowerCase().includes(s) || (r.gauge_label ?? "").toLowerCase().includes(s);
         const displayTier =
-          r.bite_tier === "HOT" || r.bite_tier === "GOOD"
-            ? "Good"
-            : r.bite_tier === "FAIR"
-            ? "Fair"
-            : r.bite_tier === "TOUGH"
-            ? "Tough"
-            : "";
-
+          r.bite_tier === "HOT" || r.bite_tier === "GOOD" ? "Good"
+          : r.bite_tier === "FAIR" ? "Fair"
+          : r.bite_tier === "TOUGH" ? "Tough"
+          : "";
         return matchesSearch && (tier === "All" || displayTier === tier);
       })
-      .sort(
-        (a, b) =>
-          (b.fishability_score_calc ?? -999) - (a.fishability_score_calc ?? -999)
-      );
+      .sort((a, b) => (b.fishability_score_calc ?? -999) - (a.fishability_score_calc ?? -999));
   }, [rivers, search, tier]);
 
   const selected = useMemo(() => {
     if (!selectedId) return null;
-    return (
-      filtered.find((r) => r.river_id === selectedId) ??
-      rivers.find((r) => r.river_id === selectedId) ??
-      null
-    );
+    return filtered.find((r) => r.river_id === selectedId) ?? rivers.find((r) => r.river_id === selectedId) ?? null;
   }, [filtered, rivers, selectedId]);
 
   const breakdown = useMemo(() => (selected ? deriveScoreBreakdown(selected) : null), [selected]);
-  const selectedFishIndex = useMemo(
-    () => getFishabilityIndex(selected?.fishability_score_calc ?? null),
-    [selected]
-  );
+  const selectedFishIndex = useMemo(() => getFishabilityIndex(selected?.fishability_score_calc ?? null), [selected]);
   const todaysRead = useMemo(() => generateTodaysRead(selected), [selected]);
+
   const detailedAnalytics = useMemo(
     () =>
       buildRiverDetailAnalytics({
@@ -852,13 +889,7 @@ export default function OnxShell({
       }),
     [selected, historyRows, intradayRows, weatherRows, sourceSites, backendAnalytics]
   );
-  const topRivers = useMemo(
-    () => filtered.filter((r) => (r.fishability_score_calc ?? null) != null).slice(0, 5),
-    [filtered]
-  );
-  // Use updated_at (when MRI wrote to river_daily) rather than
-  // source_flow_observed_at (USGS observation clock, which is not the same
-  // as when MRI ran). updated_at reflects the actual ingest write time.
+
   const latestPullAt = useMemo(() => {
     let latestMs = 0;
     for (const r of rivers) {
@@ -870,342 +901,145 @@ export default function OnxShell({
     return latestMs > 0 ? new Date(latestMs).toISOString() : null;
   }, [rivers]);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function run() {
-      if (!selectedId) {
-        setSelectedGeojson(null);
-        return;
-      }
-      const river =
-        filtered.find((r) => r.river_id === selectedId) ??
-        rivers.find((r) => r.river_id === selectedId);
-      const key = river?.slug ?? river?.river_id ?? selectedId;
-
-      const gj = await fetchRiverGeojsonBrowser(key);
-      if (cancelled) return;
-      if (gj) {
-        setSelectedGeojson(gj);
-        return;
-      }
-
-      const geom = await fetchRiverGeom(selectedId);
-      if (cancelled) return;
-      setSelectedGeojson(
-        geom
-          ? ({
-              type: "Feature",
-              geometry: geom,
-              properties: { river_id: selectedId },
-            } as GeoJSON.Feature)
-          : null
-      );
-    }
-
-    run().catch(() => {
-      if (!cancelled) setSelectedGeojson(null);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedId, filtered, rivers]);
-
-  function setMobileSurfaceState(next: MobileSurface, opts?: { listSnap?: MobileListSnap }) {
-    setOpenTopPanel("none");
-    setTransparencyOpen(false);
-    if (next === "list" && opts?.listSnap) {
-      setMobileListSnap(opts.listSnap);
-      setMobileSheetY(MOBILE_LIST_SNAP_Y[opts.listSnap]);
-    }
-    setMobileSurface(next);
-  }
-
+  // ── Responsive detection
   useEffect(() => {
     if (typeof window === "undefined") return;
     const media = window.matchMedia("(max-width: 639px)");
-    const sync = () => {
-      const mobile = media.matches;
-      setIsMobile(mobile);
-      if (mobile) {
-        setMobileSurface((prev) => {
-          if (prev === "map") {
-            setMobileListSnap("peek");
-            setMobileSheetY(MOBILE_LIST_SNAP_Y.peek);
-            return "list";
-          }
-          return prev;
-        });
-      }
-    };
+    const sync = () => setIsMobile(media.matches);
     sync();
     media.addEventListener("change", sync);
     return () => media.removeEventListener("change", sync);
   }, []);
 
-  useEffect(() => {
-    if (selected) {
-      setDetailMetricsOpen(false);
-      setMobileDetailMetricsOpen(false);
-      if (isMobile) {
-        setMobileSurfaceState("detail");
-        return;
-      }
-      setOpenTopPanel((prev) => (prev === "layers" ? prev : "detail"));
-      return;
-    }
-    if (isMobile && mobileSurface === "detail") {
-      setMobileSurfaceState("list", { listSnap: "peek" });
-    }
-    if (openTopPanel === "detail") {
-      setOpenTopPanel("none");
-    }
-    setTransparencyOpen(false);
-  }, [selected, openTopPanel, isMobile, mobileSurface]);
-
+  // ── River geometry fetch
   useEffect(() => {
     let cancelled = false;
-    async function loadBackendAnalytics() {
-      if (!selected?.river_id) {
-        setBackendAnalytics(null);
-        return;
-      }
+    async function run() {
+      if (!selectedId) { setSelectedGeojson(null); return; }
+      const river = filtered.find((r) => r.river_id === selectedId) ?? rivers.find((r) => r.river_id === selectedId);
+      const key = river?.slug ?? river?.river_id ?? selectedId;
+      const gj = await fetchRiverGeojsonBrowser(key);
+      if (cancelled) return;
+      if (gj) { setSelectedGeojson(gj); return; }
+      const geom = await fetchRiverGeom(selectedId);
+      if (cancelled) return;
+      setSelectedGeojson(geom ? ({ type: "Feature", geometry: geom, properties: { river_id: selectedId } } as GeoJSON.Feature) : null);
+    }
+    run().catch(() => { if (!cancelled) setSelectedGeojson(null); });
+    return () => { cancelled = true; };
+  }, [selectedId, filtered, rivers]);
+
+  // ── Data fetching effects
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (!selected?.river_id) { setBackendAnalytics(null); return; }
       const data =
         (await fetchRiverDetailAnalyticsByIdOrSlug(selected.river_id)) ??
         (selected.slug ? await fetchRiverDetailAnalyticsByIdOrSlug(selected.slug) : null);
-      if (!cancelled) {
-        setBackendAnalytics(data);
-      }
+      if (!cancelled) setBackendAnalytics(data);
     }
-    loadBackendAnalytics().catch(() => {
-      if (!cancelled) {
-        setBackendAnalytics(null);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
+    load().catch(() => { if (!cancelled) setBackendAnalytics(null); });
+    return () => { cancelled = true; };
   }, [selected?.river_id, selected?.slug]);
 
   useEffect(() => {
     let cancelled = false;
-    async function loadHistory() {
-      if (!selected?.river_id) {
-        setHistoryRows([]);
-        return;
-      }
+    async function load() {
+      if (!selected?.river_id) { setHistoryRows([]); return; }
       setHistoryLoading(true);
       const data = await fetchRiverHistory14d(selected.river_id);
-      if (!cancelled) {
-        setHistoryRows(data);
-        setHistoryLoading(false);
-      }
+      if (!cancelled) { setHistoryRows(data); setHistoryLoading(false); }
     }
-    loadHistory().catch(() => {
-      if (!cancelled) {
-        setHistoryRows([]);
-        setHistoryLoading(false);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
+    load().catch(() => { if (!cancelled) { setHistoryRows([]); setHistoryLoading(false); } });
+    return () => { cancelled = true; };
   }, [selected?.river_id]);
 
   useEffect(() => {
     let cancelled = false;
-    async function loadIntraday() {
-      if (!selected?.river_id) {
-        setIntradayRows([]);
-        return;
-      }
+    async function load() {
+      if (!selected?.river_id) { setIntradayRows([]); return; }
       setIntradayLoading(true);
       const data = await fetchRiverIntraday24h(selected.river_id);
-      if (!cancelled) {
-        setIntradayRows(data);
-        setIntradayLoading(false);
-      }
+      if (!cancelled) { setIntradayRows(data); setIntradayLoading(false); }
     }
-    loadIntraday().catch(() => {
-      if (!cancelled) {
-        setIntradayRows([]);
-        setIntradayLoading(false);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
+    load().catch(() => { if (!cancelled) { setIntradayRows([]); setIntradayLoading(false); } });
+    return () => { cancelled = true; };
   }, [selected?.river_id]);
 
   useEffect(() => {
     let cancelled = false;
-    async function loadWeatherAndSites() {
-      if (!selected?.river_id) {
-        setWeatherRows([]);
-        setSourceSites({});
-        return;
-      }
-
+    async function load() {
+      if (!selected?.river_id) { setWeatherRows([]); setSourceSites({}); return; }
       const [weather, sites] = await Promise.all([
         fetchRiverWeatherWindow(selected.river_id),
         fetchUsgsSiteSummaries(
-          [selected.flow_source_site_no, selected.temp_source_site_no].filter(
-            (value): value is string => Boolean(value)
-          )
+          [selected.flow_source_site_no, selected.temp_source_site_no].filter((v): v is string => Boolean(v))
         ),
       ]);
-
-      if (!cancelled) {
-        setWeatherRows(weather);
-        setSourceSites(sites);
-      }
+      if (!cancelled) { setWeatherRows(weather); setSourceSites(sites); }
     }
-
-    loadWeatherAndSites().catch(() => {
-      if (!cancelled) {
-        setWeatherRows([]);
-        setSourceSites({});
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
+    load().catch(() => { if (!cancelled) { setWeatherRows([]); setSourceSites({}); } });
+    return () => { cancelled = true; };
   }, [selected?.river_id, selected?.flow_source_site_no, selected?.temp_source_site_no]);
 
+  // ── localStorage layer persistence
   useEffect(() => {
     try {
       const raw = localStorage.getItem(LAYERS_STORAGE_KEY);
       if (!raw) return;
-
-      const parsed = JSON.parse(raw) as Partial<{
-        basemap: BasemapId;
-        layerState: Record<LayerId, boolean>;
-      }>;
-
-      if (parsed.basemap && basemapById[parsed.basemap]) {
-        setBasemap(parsed.basemap);
-      }
-
+      const parsed = JSON.parse(raw) as Partial<{ basemap: BasemapId; layerState: Record<LayerId, boolean> }>;
+      if (parsed.basemap && basemapById[parsed.basemap]) setBasemap(parsed.basemap);
       if (parsed.layerState) {
         const defaults = createDefaultLayerState();
         const merged: Record<LayerId, boolean> = { ...defaults };
         for (const layer of LAYER_REGISTRY) {
-          if (typeof parsed.layerState[layer.id] === "boolean") {
-            merged[layer.id] = parsed.layerState[layer.id];
-          }
+          if (typeof parsed.layerState[layer.id] === "boolean") merged[layer.id] = parsed.layerState[layer.id];
         }
         setLayerState(merged);
       }
-    } catch {
-      /* ignore localStorage parse issues */
-    }
+    } catch { /* ignore */ }
   }, [basemapById]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(
-        LAYERS_STORAGE_KEY,
-        JSON.stringify({ basemap, layerState })
-      );
-    } catch {
-      /* ignore write issues */
-    }
+    try { localStorage.setItem(LAYERS_STORAGE_KEY, JSON.stringify({ basemap, layerState })); } catch { /* ignore */ }
   }, [basemap, layerState]);
 
-  function clamp(n: number, lo: number, hi: number) {
-    return Math.max(lo, Math.min(hi, n));
-  }
+  // ── When river selected on mobile, open detail sheet; reset metrics state
+  useEffect(() => {
+    if (selected) {
+      setDetailMetricsOpen(false);
+      setMobileDetailMetricsOpen(false);
+      setTransparencyOpen(false);
+      setMobileTransparencyOpen(false);
+      if (isMobile) setMobileDetailOpen(true);
+    } else {
+      setMobileDetailOpen(false);
+    }
+  }, [selected?.river_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function onSheetPointerDown(e: React.PointerEvent | React.TouchEvent) {
-    const y = "touches" in e ? e.touches[0]?.clientY : (e as React.PointerEvent).clientY;
-    if (y == null) return;
-
-    dragRef.current = { startY: y, startSheetY: sheetY };
-    setIsDragging(true);
-    document.body.style.userSelect = "none";
-
-    const onMove = (e2: PointerEvent | TouchEvent) => {
-      const y2 =
-        "touches" in e2
-          ? (e2 as TouchEvent).touches[0]?.clientY
-          : (e2 as PointerEvent).clientY;
-      if (y2 == null || !dragRef.current) return;
-      const dy = y2 - dragRef.current.startY;
-      setSheetY(clamp(dragRef.current.startSheetY + dy / 320, 0, 1));
-    };
-
-    const onUp = () => {
-      if (!dragRef.current) return;
-      dragRef.current = null;
-      setIsDragging(false);
-      document.body.style.userSelect = "";
-      setSheetY((current) => {
-        const snaps: DrawerSnap[] = ["expanded", "mid", "collapsed"];
-        const nearest = snaps.reduce(
-          (best, next) =>
-            Math.abs(current - DRAWER_SNAP_Y[next]) < Math.abs(current - DRAWER_SNAP_Y[best])
-              ? next
-              : best,
-          "mid" as DrawerSnap
-        );
-        setDrawerSnap(nearest);
-        return DRAWER_SNAP_Y[nearest];
-      });
-
-      document.removeEventListener("pointermove", onMove);
-      document.removeEventListener("pointerup", onUp);
-      document.removeEventListener("touchmove", onMove);
-      document.removeEventListener("touchend", onUp);
-    };
-
-    document.addEventListener("pointermove", onMove);
-    document.addEventListener("pointerup", onUp);
-    document.addEventListener("touchmove", onMove, { passive: true });
-    document.addEventListener("touchend", onUp);
-  }
-
-  function zoomIn() {
-    mapRef.current?.zoomIn?.({ duration: 180 });
-  }
-
-  function zoomOut() {
-    mapRef.current?.zoomOut?.({ duration: 180 });
-  }
+  // ── Map controls
+  function zoomIn() { mapRef.current?.zoomIn?.({ duration: 180 }); }
+  function zoomOut() { mapRef.current?.zoomOut?.({ duration: 180 }); }
 
   function recenter() {
-    mapRef.current?.flyTo?.({
-      center: [-109.75, 47.05],
-      zoom: 6.15,
-      duration: 450,
-      pitch: 14,
-      bearing: 0,
-      essential: true,
-    });
+    mapRef.current?.flyTo?.({ center: [-109.75, 47.05], zoom: 6.15, duration: 450, pitch: 14, bearing: 0, essential: true });
   }
 
   function fitToRivers() {
     const map = mapRef.current;
     if (!map || !filtered.length) return;
-
     const bounds = new mapboxgl.LngLatBounds();
     let hasAny = false;
-
     for (const r of filtered) {
       const lat = r.lat ?? (r as { latitude?: number }).latitude;
       const lng = r.lng ?? (r as { longitude?: number }).longitude;
-      const coords: [number, number] | undefined =
-        lat != null && lng != null ? [lng, lat] : RIVER_FOCUS_POINTS[r.river_id];
-
+      const coords: [number, number] | undefined = lat != null && lng != null ? [lng, lat] : RIVER_FOCUS_POINTS[r.river_id];
       if (!coords) continue;
       bounds.extend(coords);
       hasAny = true;
     }
-
-    if (hasAny && !bounds.isEmpty()) {
-      map.fitBounds(bounds, { padding: 60, duration: 450, essential: true });
-    }
+    if (hasAny && !bounds.isEmpty()) map.fitBounds(bounds, { padding: 60, duration: 450, essential: true });
   }
 
   function setBasemapStyle(next: BasemapId) {
@@ -1223,65 +1057,48 @@ export default function OnxShell({
     setBasemap(DEFAULT_BASEMAP);
   }
 
-  function toggleTopPanel(panel: TopPanel) {
-    if (isMobile) {
-      setMobileSurfaceState(panel === "layers" ? "tools" : panel === "detail" ? "detail" : "list");
-      return;
-    }
-    setOpenTopPanel((prev) => (prev === panel ? "none" : panel));
-  }
-
   function selectRiver(riverId: string | null) {
     setSelectedId(riverId);
-    if (riverId) {
-      setSelectionSeq((prev) => prev + 1);
-      if (isMobile) {
-        setMobileSurfaceState("detail");
-      } else {
-        setOpenTopPanel("detail");
-      }
-    }
+    if (riverId) setSelectionSeq((prev) => prev + 1);
   }
 
-  function onMobileListPointerDown(e: React.PointerEvent | React.TouchEvent) {
-    const y = "touches" in e ? e.touches[0]?.clientY : (e as React.PointerEvent).clientY;
-    if (y == null) return;
-    mobileDragRef.current = { startY: y, startSheetY: mobileSheetY };
-    setIsMobileDragging(true);
+  // ── Mobile bottom sheet drag
+  function clamp(n: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, n)); }
+
+  function onSheetPointerDown(e: React.PointerEvent | React.TouchEvent) {
+    const clientY = "touches" in e ? e.touches[0]?.clientY : (e as React.PointerEvent).clientY;
+    if (clientY == null) return;
+    sheetDragRef.current = { startY: clientY, startFraction: sheetY };
+    setIsDragging(true);
     document.body.style.userSelect = "none";
 
-    const onMove = (e2: PointerEvent | TouchEvent) => {
-      const y2 =
-        "touches" in e2
-          ? (e2 as TouchEvent).touches[0]?.clientY
-          : (e2 as PointerEvent).clientY;
-      if (y2 == null || !mobileDragRef.current) return;
-      const dy = y2 - mobileDragRef.current.startY;
-      setMobileSheetY(clamp(mobileDragRef.current.startSheetY + dy / 420, 0, 1));
-    };
+    const h = window.innerHeight;
 
-    const onUp = () => {
-      mobileDragRef.current = null;
-      setIsMobileDragging(false);
+    function onMove(ev: PointerEvent | TouchEvent) {
+      const y = "touches" in ev ? (ev as TouchEvent).touches[0]?.clientY : (ev as PointerEvent).clientY;
+      if (y == null || !sheetDragRef.current) return;
+      const dy = y - sheetDragRef.current.startY;
+      setSheetY(clamp(sheetDragRef.current.startFraction + dy / h, 0, 0.80));
+    }
+
+    function onUp() {
+      sheetDragRef.current = null;
+      setIsDragging(false);
       document.body.style.userSelect = "";
-      setMobileSheetY((current) => {
-        const snaps: MobileListSnap[] = ["full", "mid", "peek"];
+      setSheetY((current) => {
+        const snaps = Object.entries(SHEET_SNAPS) as [MobileListSnap, number][];
         const nearest = snaps.reduce(
-          (best, next) =>
-            Math.abs(current - MOBILE_LIST_SNAP_Y[next]) < Math.abs(current - MOBILE_LIST_SNAP_Y[best])
-              ? next
-              : best,
+          (best, [k, v]) => Math.abs(current - v) < Math.abs(current - SHEET_SNAPS[best]) ? k : best,
           "mid" as MobileListSnap
         );
-        setMobileListSnap(nearest);
-        return MOBILE_LIST_SNAP_Y[nearest];
+        setSheetSnap(nearest);
+        return SHEET_SNAPS[nearest];
       });
-
       document.removeEventListener("pointermove", onMove);
       document.removeEventListener("pointerup", onUp);
       document.removeEventListener("touchmove", onMove);
       document.removeEventListener("touchend", onUp);
-    };
+    }
 
     document.addEventListener("pointermove", onMove);
     document.addEventListener("pointerup", onUp);
@@ -1289,61 +1106,34 @@ export default function OnxShell({
     document.addEventListener("touchend", onUp);
   }
 
+  // ── Mobile detail sheet drag-to-dismiss
   function onMobileDetailPointerDown(e: React.PointerEvent | React.TouchEvent) {
-    const y = "touches" in e ? e.touches[0]?.clientY : (e as React.PointerEvent).clientY;
-    if (y == null) return;
-    mobileDetailDragRef.current = { startY: y };
+    const clientY = "touches" in e ? e.touches[0]?.clientY : (e as React.PointerEvent).clientY;
+    if (clientY == null) return;
+    mobileDetailDragRef.current = { startY: clientY };
     document.body.style.userSelect = "none";
 
-    const onMove = (_: PointerEvent | TouchEvent) => {
-      // no-op; we only need swipe distance on release
-    };
-
-    const onUp = (e2: PointerEvent | TouchEvent) => {
-      const y2 =
-        "changedTouches" in e2
-          ? (e2 as TouchEvent).changedTouches[0]?.clientY
-          : (e2 as PointerEvent).clientY;
+    function onUp(ev: PointerEvent | TouchEvent) {
+      const y = "changedTouches" in ev ? (ev as TouchEvent).changedTouches[0]?.clientY : (ev as PointerEvent).clientY;
       const start = mobileDetailDragRef.current?.startY ?? 0;
-      const dy = (y2 ?? start) - start;
+      const dy = (y ?? start) - start;
       mobileDetailDragRef.current = null;
       document.body.style.userSelect = "";
-      if (dy > 90) {
-        setMobileSurfaceState("list", { listSnap: "peek" });
-      }
-      document.removeEventListener("pointermove", onMove);
+      if (dy > 80) { setMobileDetailOpen(false); setSelectedId(null); }
       document.removeEventListener("pointerup", onUp);
-      document.removeEventListener("touchmove", onMove);
       document.removeEventListener("touchend", onUp);
-    };
+    }
 
-    document.addEventListener("pointermove", onMove);
     document.addEventListener("pointerup", onUp);
-    document.addEventListener("touchmove", onMove, { passive: true });
     document.addEventListener("touchend", onUp);
   }
 
-  const layersOpen = !isMobile && openTopPanel === "layers";
-  const detailsOpen = !isMobile && openTopPanel === "detail";
-
-  useEffect(() => {
-    if (!isMobile && detailsOpen && drawerSnap !== "collapsed") {
-      setDrawerSnap("collapsed");
-      setSheetY(DRAWER_SNAP_Y.collapsed);
-    }
-  }, [detailsOpen, drawerSnap, isMobile]);
-
-  const groupedLayers = useMemo(
-    () =>
-      LAYER_GROUP_ORDER.map((group) => ({
-        group,
-        layers: LAYER_REGISTRY.filter((layer) => layer.group === group),
-      })),
-    []
-  );
+  // ─────────────────────────────────────────────────────────────────────────────
 
   return (
-    <div className="relative h-[100dvh] w-full overflow-hidden">
+    <div className="relative h-[100dvh] w-full overflow-hidden" style={{ background: "#f2f0eb" }}>
+
+      {/* ── Map layer (always behind) ── */}
       <div className="absolute inset-0 z-0">
         <MapView
           rivers={filtered}
@@ -1355,830 +1145,283 @@ export default function OnxShell({
           activeStationsGeojson={stationGeojson ?? null}
           basemap={basemap}
           layerState={layerState}
-          rightPanelOpen={detailsOpen}
-          drawerState={isMobile ? "collapsed" : drawerSnap}
+          rightPanelOpen={!isMobile && !!selected}
+          drawerState="collapsed"
           selectionSeq={selectionSeq}
           onSelectRiver={(r) => selectRiver(r.river_id)}
           className="absolute inset-0"
-          onMapReady={(m) => {
-            mapRef.current = m;
-          }}
+          onMapReady={(m) => { mapRef.current = m; }}
         />
       </div>
 
-      <aside className="absolute left-4 top-4 z-20 hidden w-[68px] sm:block">
-        <div className="mri-control-strip overflow-hidden rounded-[20px]">
-          <div className="border-b border-white/8 px-3 py-2.5">
-            <div className="text-[15px] font-semibold leading-tight text-white">MRI</div>
-            <div className="text-[9px] uppercase tracking-[0.18em] text-white/56">Montana</div>
-          </div>
-          <div className="flex flex-col gap-1.5 p-2">
-            <button className="onx-iconbtn mri-railbtn" title="Layers" onClick={() => toggleTopPanel("layers")}>
-              <Layers size={18} strokeWidth={2.5} />
-            </button>
-            <button className="onx-iconbtn mri-railbtn" title="Zoom in" onClick={zoomIn}>
-              <Plus size={16} strokeWidth={2.5} />
-            </button>
-            <button className="onx-iconbtn mri-railbtn" title="Zoom out" onClick={zoomOut}>
-              <Minus size={16} strokeWidth={2.5} />
-            </button>
-            <button className="onx-iconbtn mri-railbtn" title="Fit to rivers" onClick={fitToRivers}>
-              <Maximize2 size={16} strokeWidth={2.5} />
-            </button>
-            <button className="onx-iconbtn mri-railbtn" title="Recenter Montana" onClick={recenter}>
-              <Crosshair size={16} strokeWidth={2.5} />
-            </button>
-            <button
-              className="onx-iconbtn mri-railbtn"
-              title="Toggle list"
-              onClick={() => {
-                const next = drawerSnap === "collapsed" ? "mid" : "collapsed";
-                setDrawerSnap(next);
-                setSheetY(DRAWER_SNAP_Y[next]);
-              }}
-            >
-              <List size={16} strokeWidth={2.5} />
-            </button>
-          </div>
-        </div>
-      </aside>
+      {/* ══════════════════════════════════════════════════════════════════════════
+          MOBILE LAYOUT (< 640px)
+      ══════════════════════════════════════════════════════════════════════════ */}
 
-      <header className="absolute left-4 right-4 top-4 z-20 sm:hidden">
-        <div className="onx-glass rounded-xl px-3 py-2">
-          <div className="text-[11px] font-medium text-white/84">{dateLabel}</div>
-          <div className="text-[10px] text-white/52">Last pull {formatPullTime(latestPullAt)} MT</div>
-        </div>
-      </header>
-
-      <header className="absolute left-4 right-4 top-4 z-20 hidden sm:block sm:left-[96px] sm:right-[394px]">
-        <div className="mri-control-strip rounded-[22px] px-3 py-2.5">
-          <div className="flex items-center gap-3">
-            <div className="hidden min-w-[184px] shrink-0 lg:block">
-              <div className="text-[9px] font-semibold uppercase tracking-[0.18em] text-white/42">Montana River Intelligence</div>
-              <div className="mt-0.5 text-[12px] text-white/72">{dateLabel} • {filtered.length} rivers • Last pull {formatPullTime(latestPullAt)} MT</div>
-            </div>
-            <div className="flex-1 rounded-2xl border border-white/8 bg-black/12 px-3 py-2">
-              <div className="text-[9px] font-semibold uppercase tracking-[0.16em] text-white/34">River Search</div>
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search Montana rivers..."
-                className="mt-0.5 mri-topbar-input"
-              />
-            </div>
-            <div className="hidden shrink-0 sm:block">
-              <div className="text-right text-[10px] leading-tight text-white/45">Status</div>
-              <div className="mt-0.5 text-right text-[11px] font-medium text-white/76">Focused on Montana</div>
-            </div>
-            <div className="shrink-0">
-              <button
-                className="rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-[11px] font-medium text-white/62 transition hover:border-white/18 hover:text-white/88"
-                onClick={() => {
-                  setSearch("");
-                  setTier("All");
-                  selectRiver(null);
-                }}
-              >
-                Reset
-              </button>
-            </div>
+      {/* Mobile header */}
+      <header className="absolute top-0 left-0 right-0 z-20 sm:hidden px-3 pt-[max(12px,env(safe-area-inset-top))]">
+        <div className="mri-card flex items-center gap-3 px-3 py-2.5">
+          <div className="flex-shrink-0">
+            <div className="text-[14px] font-bold text-[#2d5a1b] tracking-tight">MRI</div>
           </div>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search rivers…"
+            className="flex-1 bg-transparent text-[13px] text-[var(--mri-text)] placeholder:text-[var(--mri-text-dim)] outline-none"
+          />
+          {search && (
+            <button onClick={() => setSearch("")} className="flex-shrink-0 text-[var(--mri-text-dim)]">
+              <X size={14} />
+            </button>
+          )}
         </div>
-
-        <div className="mt-2 flex flex-wrap gap-1.5">
+        {/* Filter chips */}
+        <div className="flex gap-1.5 mt-2 px-0.5">
           {(["All", "Good", "Fair", "Tough"] as const).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTier(t)}
-              className={`mri-chip ${tier === t ? "mri-chip-active" : ""}`}
-            >
+            <button key={t} onClick={() => setTier(t)} className={`mri-chip ${tier === t ? "mri-chip-active" : ""}`}>
               {t}
             </button>
           ))}
         </div>
       </header>
 
-      <div className="absolute right-4 top-4 z-30 hidden items-start gap-2 sm:flex">
+      {/* Mobile bottom sheet — always visible, slides to snap points */}
+      <section
+        className="absolute bottom-0 left-0 right-0 z-20 sm:hidden"
+        style={{
+          height: "90dvh",
+          transform: `translateY(${sheetY * 100}dvh)`,
+          transition: isDragging ? "none" : SNAP_TRANSITION,
+        }}
+      >
+        <div className="mri-sheet h-full rounded-t-2xl flex flex-col">
+          {/* Handle */}
+          <div
+            className="flex-shrink-0 pt-2.5 pb-1 flex flex-col items-center cursor-grab active:cursor-grabbing"
+            onPointerDown={onSheetPointerDown}
+            onTouchStart={onSheetPointerDown}
+            style={{ touchAction: "none" }}
+          >
+            <div className="mri-handle" />
+          </div>
+
+          {/* Sheet header */}
+          <div className="flex-shrink-0 flex items-center justify-between px-4 pt-1 pb-2">
+            <div className="text-[13px] font-semibold text-[var(--mri-text)]">
+              {filtered.length} rivers · {dateLabel}
+            </div>
+            <div className="text-[11px] text-[var(--mri-text-dim)]">{formatPullTime(latestPullAt)} MT</div>
+          </div>
+
+          {/* River list */}
+          <div className="mri-scroll flex-1 overflow-auto px-3 pb-[max(8px,env(safe-area-inset-bottom))]">
+            {filtered.length === 0 ? (
+              <div className="text-[13px] text-[var(--mri-text-muted)] text-center mt-8">No rivers match your filters</div>
+            ) : (
+              <div className="space-y-0.5">
+                {filtered.map((r) => (
+                  <RiverRow
+                    key={r.river_id}
+                    river={r}
+                    selected={r.river_id === selectedId}
+                    onSelect={() => {
+                      selectRiver(r.river_id);
+                      setSheetSnap("peek");
+                      setSheetY(SHEET_SNAPS.peek);
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* Mobile detail sheet — slides up over list */}
+      {mobileDetailOpen && selected && (
+        <section className="absolute inset-0 z-30 sm:hidden" style={{ background: "#f2f0eb" }}>
+          {/* Back bar */}
+          <div
+            className="flex-shrink-0 px-4 pt-[max(16px,env(safe-area-inset-top))] pb-3 flex items-center justify-between border-b border-[var(--mri-border)] bg-[#f2f0eb]"
+            onPointerDown={onMobileDetailPointerDown}
+            onTouchStart={onMobileDetailPointerDown}
+            style={{ touchAction: "none" }}
+          >
+            <button
+              className="flex items-center gap-1.5 text-[13px] font-medium text-[#2d5a1b]"
+              onClick={() => { setMobileDetailOpen(false); setSelectedId(null); }}
+            >
+              <ChevronLeft size={16} strokeWidth={2.5} />
+              Rivers
+            </button>
+            <div className="mri-handle" style={{ width: 28 }} />
+            <div className="text-[11px] text-[var(--mri-text-dim)] w-16 text-right">{formatUpdatedAgo(selected.updated_at)}</div>
+          </div>
+
+          {/* Detail content */}
+          <div className="mri-scroll overflow-auto h-[calc(100dvh-80px)] px-4 pt-4 pb-[max(24px,env(safe-area-inset-bottom))]">
+            {/* River name */}
+            <div className="mb-4">
+              <div className="text-[22px] font-bold text-[var(--mri-text)] leading-tight">{selected.river_name}</div>
+              <div className="text-[13px] text-[var(--mri-text-muted)] mt-0.5">{selected.gauge_label ?? ""}</div>
+            </div>
+
+            <RiverDetailContent
+              selected={selected}
+              selectedFishIndex={selectedFishIndex}
+              todaysRead={todaysRead}
+              historyRows={historyRows}
+              detailedAnalytics={detailedAnalytics}
+              breakdown={breakdown}
+              detailMetricsOpen={mobileDetailMetricsOpen}
+              transparencyOpen={mobileTransparencyOpen}
+              onToggleMetrics={() => setMobileDetailMetricsOpen((v) => !v)}
+              onToggleTransparency={() => setMobileTransparencyOpen((v) => !v)}
+            />
+          </div>
+        </section>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════════
+          DESKTOP LAYOUT (≥ 640px)
+      ══════════════════════════════════════════════════════════════════════════ */}
+
+      {/* Desktop left rail */}
+      <aside className="absolute left-0 top-0 bottom-0 z-20 w-12 hidden sm:flex flex-col items-center py-4 gap-2 mri-rail">
+        {/* Logo */}
+        <div className="mb-1 text-center">
+          <div className="text-[11px] font-bold text-[#2d5a1b] leading-tight">MRI</div>
+        </div>
+
         <button
-          className={`onx-iconbtn mri-railbtn ${layersOpen ? "ring-2 ring-white/20" : ""}`}
-          title="Layers"
-          onClick={() => toggleTopPanel("layers")}
+          className={`mri-rail-btn ${layersOpen ? "mri-rail-btn-active" : ""}`}
+          title="Map layers"
+          onClick={() => setLayersOpen((v) => !v)}
         >
           <Layers size={16} strokeWidth={2.5} />
         </button>
 
-        <div
-          className={[
-            "mri-fade w-[min(360px,calc(100vw-1.5rem))]",
-            layersOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
-          ].join(" ")}
-        >
-          <div className="onx-card rounded-2xl p-4">
-            <div className="mri-scroll max-h-[70vh] overflow-auto pr-1">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-sm font-semibold text-slate-900">Layers</div>
-                  <div className="text-[11px] text-slate-500">Map display controls</div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <button
-                    className="text-[11px] font-medium text-[var(--mri-text-dim)] hover:text-[var(--mri-text-muted)]"
-                    onClick={resetLayers}
-                  >
-                    Reset
-                  </button>
-                  <button
-                    className="text-[11px] font-medium text-[var(--mri-text-dim)] hover:text-[var(--mri-text-muted)]"
-                    onClick={() => setOpenTopPanel("none")}
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-
-              <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)]">
-                Basemap
-              </div>
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                {BASEMAP_OPTIONS.map((option) => {
-                  const selectedBasemap = basemap === option.id;
-                  return (
-                    <button
-                      key={option.id}
-                      disabled={!option.enabled}
-                      className={[
-                        "rounded-lg border px-2 py-1.5 text-xs font-medium",
-                        selectedBasemap
-                          ? "border-[var(--mri-border-strong)] bg-[rgba(78,122,146,0.3)] text-[var(--mri-text)]"
-                          : "border-[var(--mri-border)] bg-[rgba(20,29,32,0.74)] text-[var(--mri-text-muted)]",
-                        !option.enabled ? "cursor-not-allowed opacity-55" : "hover:bg-[rgba(26,37,43,0.82)]",
-                      ].join(" ")}
-                      onClick={() => setBasemapStyle(option.id)}
-                    >
-                      <div>{option.label}</div>
-                      {!option.enabled && option.comingSoon ? (
-                        <div className="text-[10px] text-[var(--mri-text-dim)]">Coming soon</div>
-                      ) : null}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="mt-4">
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)]">
-                  Core Layers
-                </div>
-                <div className="mt-2 space-y-2 rounded-xl border border-[var(--mri-border)] bg-[rgba(20,29,32,0.74)] p-2.5 text-xs text-[var(--mri-text-muted)]">
-                  {groupedLayers
-                    .flatMap((g) => g.layers)
-                    .filter((layer) => layer.id === "mri_river_lines" || layer.id === "mri_selected_highlight")
-                    .map((layer) => (
-                      <label key={layer.id} className="flex items-start justify-between gap-3">
-                        <span>{layer.label}</span>
-                        <input
-                          type="checkbox"
-                          checked={layerState[layer.id]}
-                          onChange={(e) => setLayerEnabled(layer.id, e.target.checked)}
-                        />
-                      </label>
-                    ))}
-                </div>
-              </div>
-
-              <div className="mt-4">
-                <button
-                  className="w-full rounded-lg border border-[var(--mri-border)] bg-[rgba(20,29,32,0.72)] px-2.5 py-2 text-left text-xs font-medium text-[var(--mri-text)] hover:bg-[rgba(26,37,43,0.82)]"
-                  onClick={() => setAdvancedLayersOpen((v) => !v)}
-                >
-                  {advancedLayersOpen ? "Hide Advanced Layers" : "Advanced Layers"}
-                </button>
-              </div>
-
-              {advancedLayersOpen
-                ? groupedLayers.map(({ group, layers }) => (
-                    <div key={group} className="mt-4">
-                      <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)]">
-                        {group}
-                      </div>
-                      <div className="mt-2 space-y-2 rounded-xl border border-[var(--mri-border)] bg-[rgba(20,29,32,0.74)] p-2.5 text-xs text-[var(--mri-text-muted)]">
-                        {layers
-                          .filter(
-                            (layer) =>
-                              !layer.locked &&
-                              layer.id !== "mri_river_lines" &&
-                              layer.id !== "mri_selected_highlight"
-                          )
-                          .map((layer) => (
-                            <label key={layer.id} className="flex items-start justify-between gap-3">
-                              <span className="leading-tight">
-                                <span className="block">{layer.label}</span>
-                                {layer.minZoomNote ? (
-                                  <span className="text-[10px] text-[var(--mri-text-dim)]">{layer.minZoomNote}</span>
-                                ) : null}
-                                {layer.comingSoon ? (
-                                  <span className="text-[10px] text-[var(--mri-text-dim)]">Coming soon</span>
-                                ) : null}
-                              </span>
-                              <input
-                                type="checkbox"
-                                checked={layerState[layer.id]}
-                                disabled={Boolean(layer.comingSoon)}
-                                onChange={(e) => setLayerEnabled(layer.id, e.target.checked)}
-                              />
-                            </label>
-                          ))}
-                      </div>
-                    </div>
-                  ))
-                : null}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div
-        className={[
-          "absolute bottom-6 right-4 z-20 flex flex-col gap-2 sm:hidden",
-          mobileSurface === "detail" || mobileSurface === "tools" ? "pointer-events-none opacity-0" : "opacity-100",
-        ].join(" ")}
-      >
-        <button
-          className="onx-glass min-h-11 rounded-xl px-3 text-xs font-semibold text-white active:translate-y-[1px]"
-          onClick={() => setMobileSurfaceState(mobileSurface === "tools" ? "list" : "tools")}
-        >
-          Map Tools
+        <button className="mri-rail-btn" title="Zoom in" onClick={zoomIn}>
+          <Plus size={16} strokeWidth={2.5} />
         </button>
-        <button
-          className="onx-glass min-h-11 rounded-xl px-3 text-xs font-semibold text-white active:translate-y-[1px]"
-          onClick={() => setMobileSurfaceState(mobileSurface === "list" ? "map" : "list", { listSnap: "mid" })}
-        >
-          Rivers
+
+        <button className="mri-rail-btn" title="Zoom out" onClick={zoomOut}>
+          <Minus size={16} strokeWidth={2.5} />
         </button>
-      </div>
 
-      <section className="absolute right-4 top-[108px] z-20 hidden w-[360px] sm:block">
-        {detailsOpen ? (
-          <div className="onx-card max-h-[calc(100vh-132px)] overflow-hidden rounded-[28px] p-5 transition-all duration-150 ease-in-out">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="mri-surface-label">Instrument Panel</div>
-                <div className="mt-1 text-[13px] font-medium text-white/76">Selected river intelligence</div>
-              </div>
-              <button
-                className="text-[11px] text-[var(--mri-text-dim)] hover:text-[var(--mri-text-muted)]"
-                onClick={() => setOpenTopPanel("none")}
-              >
-                Collapse
-              </button>
-            </div>
+        <button className="mri-rail-btn" title="Fit to rivers" onClick={fitToRivers}>
+          <Maximize2 size={15} strokeWidth={2.5} />
+        </button>
 
-            {selected ? (
-              <>
-                <div className="mri-scroll mt-3 max-h-[calc(100vh-220px)] overflow-auto pr-1">
-                <div className="space-y-5">
-                  <div>
-                    <div className="text-[24px] font-semibold tracking-[-0.02em] text-[var(--mri-text)]">{selected.river_name}</div>
-                    <div className="mt-1 text-[12px] text-[var(--mri-text-muted)]">{selected.gauge_label ?? ""}</div>
-                    <div className="mt-2 text-[11px] text-[var(--mri-text-dim)]">
-                      {formatUpdatedAgo(selected.source_flow_observed_at ?? selected.source_temp_observed_at ?? selected.updated_at)}
-                    </div>
-                  </div>
+        <button className="mri-rail-btn" title="Recenter Montana" onClick={recenter}>
+          <Crosshair size={15} strokeWidth={2.5} />
+        </button>
+      </aside>
 
-                  <div className="rounded-[22px] border border-[rgba(180,198,209,0.12)] bg-[rgba(18,27,31,0.72)] p-4">
-                    <div className="flex items-end justify-between gap-4">
-                      <div>
-                        <div className="mri-surface-label">Fishability Score</div>
-                        <div className="mt-2 text-[64px] font-semibold leading-none tracking-[-0.03em] text-[var(--mri-text)]">
-                          {selected.fishability_score_calc ?? "—"}
-                        </div>
-                      </div>
-                      <TierPill
-                        tier={
-                          selected.bite_tier === "HOT" || selected.bite_tier === "GOOD"
-                            ? "Good"
-                            : selected.bite_tier === "FAIR"
-                            ? "Fair"
-                            : selected.bite_tier === "TOUGH"
-                            ? "Tough"
-                            : undefined
-                        }
-                      />
-                    </div>
-                  </div>
-
-                  <div className="rounded-[20px] border border-[rgba(180,198,209,0.1)] bg-[rgba(17,25,28,0.62)] px-4 py-3 text-[12px] leading-5 text-[var(--mri-text-muted)]">
-                    <span className="font-medium text-[var(--mri-text)]">Today&apos;s Read</span>
-                    <div className="mt-1">{todaysRead}</div>
-                  </div>
-
-                  <div className="rounded-xl border border-[var(--mri-border)] bg-[rgba(23,34,40,0.64)] p-3">
-                    <div className="flex items-end justify-between">
-                      <div className="text-[36px] font-semibold leading-none tracking-[-0.02em] text-[var(--mri-text)]">
-                        {selectedFishIndex.value}
-                        <span className="ml-1 text-[26px] font-medium text-[var(--mri-text-dim)]">/ 10.0</span>
-                      </div>
-                      {selectedFishIndex.optimal ? (
-                        <span className="rounded border border-[rgba(173,190,202,0.32)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--mri-text-muted)]">
-                          Optimal
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="mt-3">
-                      <div className="mri-fish-scale-track">
-                        <div className="mri-fish-scale-fill" style={{ width: `${selectedFishIndex.percent}%` }} />
-                        {selectedFishIndex.normalized != null ? (
-                          <div className="mri-fish-scale-marker" style={{ left: `${selectedFishIndex.percent}%` }} />
-                        ) : null}
-                      </div>
-                      <div className="mt-2 grid grid-cols-4 text-[10px] uppercase tracking-[0.1em] text-[var(--mri-text-dim)]">
-                        <span>Poor</span>
-                        <span className="text-center">Fair</span>
-                        <span className="text-center">Good</span>
-                        <span className="text-right">Excellent</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 border-t border-[var(--mri-border)] pt-4">
-                    <div className="rounded-[18px] border border-[rgba(180,198,209,0.08)] bg-[rgba(16,24,27,0.56)] p-3">
-                      <div className="text-[10px] uppercase tracking-[0.1em] text-[var(--mri-text-dim)]">Flow</div>
-                      <div className="mt-1 text-[17px] font-medium text-[var(--mri-text)]">
-                        {selected.flow_cfs ?? "Flow not available at this gauge"}
-                        <span className="ml-1 text-xs text-[var(--mri-text-dim)]">
-                          {getFlowTrendArrow(selected.change_48h_pct_calc)}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="rounded-[18px] border border-[rgba(180,198,209,0.08)] bg-[rgba(16,24,27,0.56)] p-3">
-                      <div className="text-[10px] uppercase tracking-[0.1em] text-[var(--mri-text-dim)]">Temp</div>
-                      <div className="mt-1 text-[17px] font-medium text-[var(--mri-text)]">
-                        {selected.water_temp_f != null
-                          ? `${Number(selected.water_temp_f).toFixed(1)}°F`
-                          : "Temp not available at this gauge"}
-                      </div>
-                      <div className="mt-1 text-[10px] leading-4 text-[var(--mri-text-dim)]">
-                        {selected.temp_observed_at
-                          ? `Observed ${formatPullTime(selected.temp_observed_at)} MT`
-                          : selected.temp_reason ?? "No observed water temperature"}
-                      </div>
-                    </div>
-                  </div>
-
-                  <TrendChart historyRows={historyRows} />
-
-                  <button
-                    className="w-full rounded-xl border border-[var(--mri-border)] bg-[rgba(20,29,32,0.72)] px-3 py-2 text-left text-xs font-medium text-[var(--mri-text-muted)] hover:bg-[rgba(26,37,43,0.82)]"
-                    onClick={() => setDetailMetricsOpen((v) => !v)}
-                  >
-                    {detailMetricsOpen ? "Hide Detailed Metrics" : "Detailed Metrics"}
-                  </button>
-
-                  {detailMetricsOpen ? (
-                    <div className="space-y-4 border-t border-[var(--mri-border)] pt-4 text-xs text-[var(--mri-text-muted)]">
-                      <DetailedMetricsContent analytics={detailedAnalytics} />
-
-                      <button
-                        className="w-full rounded-lg border border-[var(--mri-border)] bg-[rgba(21,31,35,0.74)] px-2 py-1.5 text-left text-xs font-medium text-[var(--mri-text)] hover:bg-[rgba(26,37,43,0.82)]"
-                        onClick={() => setTransparencyOpen((v) => !v)}
-                      >
-                        How this score is calculated
-                      </button>
-
-                      {transparencyOpen && breakdown ? (
-                        <div className="rounded-lg bg-[rgba(21,31,35,0.66)] p-2 text-[11px] text-[var(--mri-text-muted)]">
-                          <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-                            <div>Flow Score</div>
-                            <div className="text-right font-semibold">{formatNum(breakdown.flowScore)}</div>
-                            <div>Stability Score</div>
-                            <div className="text-right font-semibold">{formatNum(breakdown.stabilityScore)}</div>
-                            <div>Thermal Score</div>
-                            <div className="text-right font-semibold">
-                              {breakdown.thermalScore == null ? "Unavailable" : formatNum(breakdown.thermalScore)}
-                            </div>
-                            <div>Wind Penalty</div>
-                            <div className="text-right font-semibold">{formatNum(breakdown.windPenalty)}</div>
-                            <div className="border-t border-[var(--mri-border)] pt-1 font-semibold text-[var(--mri-text)]">Total Score</div>
-                            <div className="border-t border-[var(--mri-border)] pt-1 text-right font-semibold text-[var(--mri-text)]">
-                              {formatNum(breakdown.totalScore)}
-                            </div>
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="mt-2 text-sm font-semibold text-[var(--mri-text)]">Montana River Intel</div>
-                <div className="text-xs text-[var(--mri-text-muted)]">
-                  Tap a river in the list to preview details here.
-                </div>
-              </>
-            )}
-          </div>
-        ) : (
-          <button
-            className="mri-control-strip rounded-full px-3.5 py-2 text-[11px] font-medium text-white/86 transition-colors duration-150 ease-in-out hover:text-white active:translate-y-[1px]"
-            onClick={() => setOpenTopPanel("detail")}
-          >
-            Open Detail Panel
-          </button>
-        )}
-      </section>
-
-      {isMobile && mobileSurface === "tools" ? (
-        <section className="absolute inset-0 z-30 sm:hidden">
-          <button
-            className="absolute inset-0 bg-black/45"
-            aria-label="Close map tools"
-            onClick={() => setMobileSurfaceState("list", { listSnap: "peek" })}
+      {/* Desktop layers panel — floats next to left rail */}
+      {layersOpen && (
+        <div className="absolute left-14 top-4 z-30 hidden sm:block">
+          <LayersPanel
+            basemap={basemap}
+            layerState={layerState}
+            advancedOpen={advancedLayersOpen}
+            onBasemap={setBasemapStyle}
+            onLayer={setLayerEnabled}
+            onReset={resetLayers}
+            onClose={() => setLayersOpen(false)}
+            onToggleAdvanced={() => setAdvancedLayersOpen((v) => !v)}
           />
-          <div className="onx-card absolute inset-x-0 bottom-0 rounded-t-3xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] transition-all duration-150 ease-in-out">
-            <div className="mx-auto mb-3 h-1.5 w-14 cursor-grab rounded-full bg-white/45 ring-1 ring-white/35" style={{ touchAction: "none" }} />
-            <div className="mb-3 flex items-center justify-between">
-              <div className="text-sm font-semibold text-[var(--mri-text)]">Map Tools</div>
-              <button className="rounded-md p-2 text-[var(--mri-text-muted)]" onClick={() => setMobileSurfaceState("list", { listSnap: "peek" })}>
-                <X size={18} />
-              </button>
-            </div>
+        </div>
+      )}
 
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)]">Basemap</div>
-            <div className="mt-2 grid grid-cols-2 gap-2">
-              {BASEMAP_OPTIONS.map((option) => (
-                <button
-                  key={`m-${option.id}`}
-                  disabled={!option.enabled}
-                  className={[
-                    "min-h-11 rounded-lg border px-2 py-1.5 text-xs font-medium",
-                    basemap === option.id
-                      ? "border-[var(--mri-border-strong)] bg-[rgba(78,122,146,0.3)] text-[var(--mri-text)]"
-                      : "border-[var(--mri-border)] bg-[rgba(20,29,32,0.72)] text-[var(--mri-text-muted)]",
-                    !option.enabled ? "cursor-not-allowed opacity-55" : "",
-                  ].join(" ")}
-                  onClick={() => setBasemapStyle(option.id)}
-                >
-                  {option.label}
-                </button>
+      {/* Desktop right sidebar */}
+      <aside className="absolute top-0 right-0 bottom-0 z-20 w-[280px] hidden sm:flex flex-col mri-sidebar-right">
+
+        {/* Sidebar header */}
+        <div className="flex-shrink-0 px-3 pt-4 pb-3 border-b border-[var(--mri-border)]">
+          <div className="flex items-baseline justify-between mb-2">
+            <div className="text-[12px] font-semibold text-[var(--mri-text)]">{filtered.length} rivers</div>
+            <div className="text-[10px] text-[var(--mri-text-dim)]">{dateLabel}</div>
+          </div>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search rivers…"
+            className="mri-input"
+          />
+          <div className="flex gap-1.5 mt-2 flex-wrap">
+            {(["All", "Good", "Fair", "Tough"] as const).map((t) => (
+              <button key={t} onClick={() => setTier(t)} className={`mri-chip ${tier === t ? "mri-chip-active" : ""}`}>
+                {t}
+              </button>
+            ))}
+          </div>
+          {latestPullAt && (
+            <div className="mt-2 text-[10px] text-[var(--mri-text-dim)]">
+              Last pull {formatPullTime(latestPullAt)} MT
+            </div>
+          )}
+        </div>
+
+        {/* River list — fills remaining space above detail panel */}
+        <div
+          className="mri-scroll overflow-auto px-2 py-2"
+          style={{ flex: selected ? "0 1 auto" : "1 1 0", minHeight: selected ? 80 : undefined }}
+        >
+          {filtered.length === 0 ? (
+            <div className="text-[12px] text-[var(--mri-text-muted)] text-center mt-6">No rivers match</div>
+          ) : (
+            <div className="space-y-0.5">
+              {filtered.map((r) => (
+                <RiverRow
+                  key={r.river_id}
+                  river={r}
+                  selected={r.river_id === selectedId}
+                  onSelect={() => selectRiver(r.river_id === selectedId ? null : r.river_id)}
+                />
               ))}
             </div>
-
-            <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)]">Core Layers</div>
-            <div className="mt-2 space-y-2 rounded-xl border border-[var(--mri-border)] bg-[rgba(20,29,32,0.74)] p-3 text-xs text-[var(--mri-text-muted)]">
-              {groupedLayers
-                .flatMap((g) => g.layers)
-                .filter((layer) => layer.id === "mri_river_lines" || layer.id === "mri_selected_highlight")
-                .map((layer) => (
-                  <label key={`ml-${layer.id}`} className="flex items-center justify-between">
-                    <span>{layer.label}</span>
-                    <input
-                      type="checkbox"
-                      checked={layerState[layer.id]}
-                      onChange={(e) => setLayerEnabled(layer.id, e.target.checked)}
-                    />
-                  </label>
-                ))}
-            </div>
-          </div>
-        </section>
-      ) : null}
-
-      {isMobile && mobileSurface === "detail" ? (
-        <section className="absolute inset-0 z-20 bg-black/45 sm:hidden">
-          <div className="onx-card absolute inset-x-0 bottom-0 max-h-[92vh] overflow-auto rounded-t-3xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] transition-all duration-150 ease-in-out">
-            <div
-              className="mx-auto mb-2 h-1.5 w-14 cursor-grab rounded-full bg-white/45 ring-1 ring-white/35"
-              onPointerDown={onMobileDetailPointerDown}
-              onTouchStart={onMobileDetailPointerDown}
-              style={{ touchAction: "none" }}
-            />
-            <div className="mb-3 flex items-center justify-between">
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)]">River Detail</div>
-              <button
-                className="min-h-11 rounded-md px-3 text-xs font-semibold text-slate-600"
-                onClick={() => setMobileSurfaceState("list", { listSnap: "peek" })}
-              >
-                Close
-              </button>
-            </div>
-            {selected ? (
-              <>
-                <div className="text-xl font-semibold text-[var(--mri-text)]">{selected.river_name}</div>
-                <div className="text-sm text-[var(--mri-text-muted)]">{selected.gauge_label ?? ""}</div>
-                <div className="mt-1 text-xs text-[var(--mri-text-dim)]">
-                  {formatUpdatedAgo(selected.source_flow_observed_at ?? selected.source_temp_observed_at ?? selected.updated_at)}
-                </div>
-                <div className="mt-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span
-                      className={[
-                        "inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium",
-                        selected.temp_status === "available_fresh"
-                          ? "border-[rgba(110,150,125,0.4)] bg-[rgba(79,103,87,0.2)] text-[#b4ccb9]"
-                          : selected.temp_status === "available_stale"
-                          ? "border-[rgba(176,112,63,0.42)] bg-[rgba(176,112,63,0.2)] text-[#d7b089]"
-                          : "border-[var(--mri-border)] bg-[rgba(21,31,35,0.7)] text-[var(--mri-text-dim)]",
-                      ].join(" ")}
-                    >
-                      {getTempStatusLabel(selected)}
-                    </span>
-                    <span
-                      className={[
-                        "inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium",
-                        getConfidenceBadgeClass(selected.confidence_level ?? null),
-                      ].join(" ")}
-                    >
-                      {getConfidenceBadgeLabel(selected)}
-                    </span>
-                  </div>
-                </div>
-                <div className="mt-4 text-[56px] font-semibold leading-none tracking-[-0.02em] text-[var(--mri-text)]">
-                  {selected.fishability_score_calc ?? "—"}
-                </div>
-                <div className="mt-2">
-                  <TierPill
-                    tier={
-                      selected.bite_tier === "HOT" || selected.bite_tier === "GOOD"
-                        ? "Good"
-                        : selected.bite_tier === "FAIR"
-                        ? "Fair"
-                        : selected.bite_tier === "TOUGH"
-                        ? "Tough"
-                        : undefined
-                    }
-                  />
-                </div>
-                <div className="mt-2 text-xs text-[var(--mri-text-muted)]">{todaysRead}</div>
-
-                <div className="mt-3 rounded-xl border border-[var(--mri-border)] bg-[rgba(23,34,40,0.64)] p-3">
-                  <div className="flex items-end justify-between">
-                    <div className="text-[34px] font-semibold leading-none tracking-[-0.02em] text-[var(--mri-text)]">
-                      {selectedFishIndex.value}
-                      <span className="ml-1 text-[22px] font-medium text-[var(--mri-text-dim)]">/ 10.0</span>
-                    </div>
-                    {selectedFishIndex.optimal ? (
-                      <span className="rounded border border-[rgba(173,190,202,0.32)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--mri-text-muted)]">
-                        Optimal
-                      </span>
-                    ) : null}
-                  </div>
-                  <div className="mt-3">
-                    <div className="mri-fish-scale-track">
-                      <div className="mri-fish-scale-fill" style={{ width: `${selectedFishIndex.percent}%` }} />
-                      {selectedFishIndex.normalized != null ? (
-                        <div className="mri-fish-scale-marker" style={{ left: `${selectedFishIndex.percent}%` }} />
-                      ) : null}
-                    </div>
-                    <div className="mt-2 grid grid-cols-4 text-[10px] uppercase tracking-[0.1em] text-[var(--mri-text-dim)]">
-                      <span>Poor</span>
-                      <span className="text-center">Fair</span>
-                      <span className="text-center">Good</span>
-                      <span className="text-right">Excellent</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="my-4 h-px bg-[var(--mri-border)]" />
-                <div className="space-y-3 text-xs">
-                  <div>
-                    <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--mri-text-dim)]">Flow</div>
-                    <div className="font-medium text-[var(--mri-text)]">
-                      {selected.flow_cfs ?? "Flow not available at this gauge"}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--mri-text-dim)]">Temp</div>
-                    <div className="font-medium text-[var(--mri-text)]">
-                      {selected.water_temp_f != null
-                        ? `${Number(selected.water_temp_f).toFixed(1)}°F`
-                        : "Temp not available at this gauge"}
-                    </div>
-                    <div className="mt-1 text-[10px] text-[var(--mri-text-dim)]">
-                      {selected.temp_observed_at
-                        ? `Observed ${formatPullTime(selected.temp_observed_at)} MT`
-                        : selected.temp_reason ?? "No observed water temperature"}
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  className="mt-4 w-full rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-left text-xs font-medium text-white/85"
-                  onClick={() => setMobileDetailMetricsOpen((v) => !v)}
-                >
-                  {mobileDetailMetricsOpen ? "Hide Detailed Metrics" : "Detailed Metrics"}
-                </button>
-
-                {mobileDetailMetricsOpen ? (
-                  <div className="mt-4 space-y-3 border-t border-[var(--mri-border)] pt-4 text-xs text-[var(--mri-text-muted)]">
-                    <DetailedMetricsContent analytics={detailedAnalytics} />
-                  </div>
-                ) : null}
-              </>
-            ) : (
-              <div className="text-sm text-[var(--mri-text-muted)]">Select a river to view details.</div>
-            )}
-          </div>
-        </section>
-      ) : null}
-
-      {isMobile && mobileSurface === "list" ? (
-        <section
-          className="absolute inset-x-0 bottom-0 z-10 sm:hidden"
-          style={{
-            transform: `translateY(${mobileSheetY * 92}%)`,
-            transition: isMobileDragging ? "none" : SNAP_TRANSITION,
-          }}
-        >
-          <div className="rounded-t-3xl border border-white/10 bg-[#0b1220]/94 backdrop-blur-md">
-            <div
-              className={`mx-auto mt-2 h-1.5 w-14 cursor-grab rounded-full bg-white/45 ring-1 ring-white/35 ${isMobileDragging ? "select-none" : ""}`}
-              onPointerDown={onMobileListPointerDown}
-              onTouchStart={onMobileListPointerDown}
-              style={{ touchAction: "none" }}
-            />
-            <div className="flex items-center justify-between px-4 pt-3">
-              <div className="text-sm font-semibold text-white">Rivers ({filtered.length})</div>
-              <button
-                className="min-h-11 rounded-md px-3 text-xs font-semibold text-white/80"
-                onClick={() => {
-                  if (mobileListSnap === "peek") {
-                    setMobileListSnap("mid");
-                    setMobileSheetY(MOBILE_LIST_SNAP_Y.mid);
-                  } else {
-                    setMobileListSnap("peek");
-                    setMobileSheetY(MOBILE_LIST_SNAP_Y.peek);
-                  }
-                }}
-              >
-                {mobileListSnap === "peek" ? "Expand" : "Peek"}
-              </button>
-            </div>
-            <div className="px-4 pt-2">
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search rivers..."
-                className="mri-topbar-input"
-              />
-              <div className="mt-2 flex flex-wrap gap-2">
-                {(["All", "Good", "Fair", "Tough"] as const).map((t) => (
-                  <button key={`m-tier-${t}`} onClick={() => setTier(t)} className={`mri-chip min-h-11 ${tier === t ? "mri-chip-active" : ""}`}>
-                    {t}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div
-              className={`mri-scroll max-h-[65vh] px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 ${
-                mobileListSnap === "full" ? "overflow-auto" : "overflow-hidden"
-              }`}
-            >
-              {topRivers.length > 0 ? (
-                <>
-                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/60">Top Rivers Today</div>
-                  <div className="mb-3 flex gap-2 overflow-auto">
-                    {topRivers.map((r) => (
-                      <button
-                        key={`m-top-${r.river_id}`}
-                        onClick={() => selectRiver(r.river_id)}
-                        className={[
-                          "min-h-11 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs active:translate-y-[1px]",
-                          r.river_id === selectedId
-                            ? "border-white/50 bg-white/20 text-white"
-                            : "border-white/20 bg-white/10 text-white/85",
-                        ].join(" ")}
-                      >
-                        #{r.fishability_rank ?? "—"} {r.river_name}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              ) : null}
-              <div className="space-y-2">
-                {filtered.map((r) => (
-                  <button
-                    key={`m-r-${r.river_id}`}
-                    onClick={() => selectRiver(r.river_id)}
-                    className={`mri-drawer-card w-full text-left active:translate-y-[1px] ${r.river_id === selectedId ? "mri-drawer-card-selected" : ""}`}
-                  >
-                    <div className="p-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="text-sm font-semibold text-white">{r.river_name}</div>
-                          <div className="text-xs text-white/60">{r.gauge_label ?? ""}</div>
-                        </div>
-                        <TierPill
-                          tier={
-                            r.bite_tier === "HOT" || r.bite_tier === "GOOD"
-                              ? "Good"
-                              : r.bite_tier === "FAIR"
-                              ? "Fair"
-                              : r.bite_tier === "TOUGH"
-                              ? "Tough"
-                              : undefined
-                          }
-                        />
-                      </div>
-                      <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-white/88">
-                        <div><div className="mri-kv-label">Score</div><div className="font-semibold">{r.fishability_score_calc ?? "—"}</div></div>
-                        <div><div className="mri-kv-label">Flow</div><div className="font-semibold">{r.flow_cfs ?? "—"}</div></div>
-                        <div><div className="mri-kv-label">Temp</div><div className="font-semibold">{r.water_temp_f != null ? `${Number(r.water_temp_f).toFixed(1)}°` : "—"}</div></div>
-                      </div>
-                      <div className="mt-2 text-[10px] font-medium tracking-[0.01em] text-white/58">{getRiverTrustLine(r)}</div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </section>
-      ) : null}
-
-      <div
-        className="absolute bottom-0 left-0 right-0 z-10 hidden sm:block"
-        style={{
-          transform: `translateY(${sheetY * 92}%)`,
-          transition: isDragging ? "none" : SNAP_TRANSITION,
-        }}
-      >
-        <div className={`mx-auto max-w-6xl px-3 pb-3 ${detailsOpen ? "sm:pr-[384px]" : ""}`}>
-          <div className="mri-control-strip overflow-hidden rounded-[28px]">
-            <div
-              className={`mx-auto mt-2 h-1.5 w-14 flex-shrink-0 cursor-grab rounded-full bg-white/45 ring-1 ring-white/35 active:cursor-grabbing ${isDragging ? "select-none" : ""}`}
-              onPointerDown={onSheetPointerDown}
-              onTouchStart={onSheetPointerDown}
-              title="Drag to expand/collapse"
-              style={{ touchAction: "none" }}
-            />
-            <div className="flex items-center justify-between px-4 pt-3">
-              <div>
-                <div className="mri-surface-label">Top Rivers Today</div>
-                <div className="mt-1 text-[13px] font-medium text-white/82">Fast scan of Montana conditions</div>
-              </div>
-              <button
-                className="rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-[11px] font-medium text-white/72 transition hover:border-white/18 hover:text-white"
-                onClick={() => {
-                  const next = drawerSnap === "collapsed" ? "mid" : "collapsed";
-                  setDrawerSnap(next);
-                  setSheetY(DRAWER_SNAP_Y[next]);
-                }}
-              >
-                {drawerSnap === "collapsed" ? "Open Tray" : "Collapse"}
-              </button>
-            </div>
-
-            {topRivers.length > 0 ? (
-              <div className="px-4 pt-2">
-                <div className="flex gap-1.5 overflow-auto pb-1">
-                  {topRivers.map((r) => (
-                    <button
-                      key={`top-${r.river_id}`}
-                      onClick={() => selectRiver(r.river_id)}
-                      className={[
-                        "whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] transition active:translate-y-[1px]",
-                        r.river_id === selectedId
-                          ? "border-white/50 bg-white/20 text-white"
-                          : "border-white/20 bg-white/10 text-white/85 hover:bg-white/15",
-                      ].join(" ")}
-                    >
-                      #{r.fishability_rank ?? "—"} {r.river_name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            <div className="px-3 pb-3 pt-2">
-              <div
-                className={`mri-scroll pr-1 transition-[max-height] duration-200 ease-in-out ${
-                  drawerSnap === "expanded" ? "overflow-auto" : "overflow-hidden"
-                }`}
-                style={{
-                  maxHeight: drawerSnap === "expanded" ? "34vh" : drawerSnap === "mid" ? "17vh" : "96px",
-                }}
-              >
-                <div className="flex gap-2 overflow-auto pb-1">
-                  {filtered.map((r) => (
-                    <DesktopTrayCard
-                      key={r.river_id}
-                      river={r}
-                      selected={r.river_id === selectedId}
-                      onSelect={() => selectRiver(r.river_id)}
-                    />
-                  ))}
-                </div>
-
-                {filtered.length === 0 ? (
-                  <div className="px-2 py-6 text-center text-sm text-white/70">
-                    No rivers match your search/filter.
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          </div>
+          )}
         </div>
-      </div>
+
+        {/* Detail panel — pinned to bottom of sidebar */}
+        {selected && (
+          <div
+            className="mri-scroll flex-shrink-0 overflow-auto border-t border-[var(--mri-border)] bg-white px-3 pt-3 pb-4"
+            style={{ maxHeight: "62vh" }}
+          >
+            <div className="mb-3">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="text-[15px] font-bold text-[var(--mri-text)] leading-tight">{selected.river_name}</div>
+                  <div className="text-[11px] text-[var(--mri-text-muted)] mt-0.5">{selected.gauge_label ?? ""}</div>
+                </div>
+                <button
+                  className="flex-shrink-0 mri-rail-btn mt-0.5"
+                  onClick={() => { setSelectedId(null); }}
+                  title="Close detail"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            </div>
+
+            <RiverDetailContent
+              selected={selected}
+              selectedFishIndex={selectedFishIndex}
+              todaysRead={todaysRead}
+              historyRows={historyRows}
+              detailedAnalytics={detailedAnalytics}
+              breakdown={breakdown}
+              detailMetricsOpen={detailMetricsOpen}
+              transparencyOpen={transparencyOpen}
+              onToggleMetrics={() => setDetailMetricsOpen((v) => !v)}
+              onToggleTransparency={() => setTransparencyOpen((v) => !v)}
+            />
+          </div>
+        )}
+      </aside>
     </div>
   );
 }

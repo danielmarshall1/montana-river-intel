@@ -3,20 +3,24 @@
 @tailwind utilities;
 
 :root {
-  --mri-bg: #10181a;
-  --mri-bg-elevated: #141e20;
-  --mri-panel: rgba(20, 29, 32, 0.88);
-  --mri-panel-soft: rgba(23, 33, 36, 0.82);
-  --mri-panel-strong: rgba(17, 25, 28, 0.94);
-  --mri-card: rgba(21, 31, 35, 0.9);
-  --mri-border: rgba(154, 176, 191, 0.16);
-  --mri-border-strong: rgba(189, 208, 219, 0.24);
-  --mri-text: #e5ebef;
-  --mri-text-muted: #b2c0cb;
-  --mri-text-dim: #7f909d;
-  --mri-shadow-sm: 0 2px 8px rgba(5, 10, 13, 0.16);
-  --mri-shadow-md: 0 8px 20px rgba(5, 10, 13, 0.24);
-  --mri-shadow-lg: 0 14px 30px rgba(5, 10, 13, 0.28);
+  --mri-bg: #f2f0eb;
+  --mri-surface: #ffffff;
+  --mri-border: rgba(0, 0, 0, 0.08);
+  --mri-border-strong: rgba(0, 0, 0, 0.14);
+  --mri-text: #1c1c1e;
+  --mri-text-muted: #6b7280;
+  --mri-text-dim: #9ca3af;
+  --mri-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --mri-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.10), 0 2px 4px rgba(0, 0, 0, 0.06);
+  --mri-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12), 0 4px 8px rgba(0, 0, 0, 0.06);
+  /* Tier colors */
+  --mri-good: #2d5a1b;
+  --mri-good-bg: #dcf0d4;
+  --mri-fair: #92400e;
+  --mri-fair-bg: #fef3c7;
+  --mri-tough: #991b1b;
+  --mri-tough-bg: #fee2e2;
+  --mri-river: #5b9bd5;
 }
 
 html,
@@ -34,7 +38,7 @@ body {
   color: var(--mri-text);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  font-family: -apple-system, "SF Pro Display", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
 }
 
 * {
@@ -47,105 +51,69 @@ select {
   font: inherit;
 }
 
-.onx-glass {
-  background: var(--mri-panel);
-  border: 1px solid var(--mri-border);
-  backdrop-filter: blur(10px) saturate(98%);
-  -webkit-backdrop-filter: blur(10px) saturate(98%);
-  box-shadow: var(--mri-shadow-md);
+/* ─── Cards & Surfaces ─────────────────────────────────────────────────────── */
+
+.mri-card {
+  background: var(--mri-surface);
+  border: 0.5px solid var(--mri-border);
+  border-radius: 12px;
+  box-shadow: var(--mri-shadow-sm);
 }
 
-.onx-card {
-  background: linear-gradient(
-    140deg,
-    rgba(21, 31, 35, 0.95) 0%,
-    rgba(17, 25, 29, 0.94) 52%,
-    rgba(15, 22, 26, 0.96) 100%
-  );
-  color: var(--mri-text);
-  border: 1px solid var(--mri-border);
-  box-shadow: var(--mri-shadow-md);
-  backdrop-filter: blur(8px) saturate(96%);
-  -webkit-backdrop-filter: blur(8px) saturate(96%);
+.mri-sheet {
+  background: var(--mri-surface);
+  border-top: 0.5px solid var(--mri-border);
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.08);
 }
 
-.onx-card .text-slate-900,
-.onx-card .text-slate-800,
-.onx-card .text-slate-700 {
-  color: var(--mri-text) !important;
+.mri-sidebar {
+  background: var(--mri-bg);
+  border-left: 0.5px solid var(--mri-border);
 }
 
-.onx-card .text-slate-600,
-.onx-card .text-slate-500,
-.onx-card .text-slate-400 {
-  color: var(--mri-text-muted) !important;
+.mri-sidebar-right {
+  background: var(--mri-bg);
+  border-left: 0.5px solid var(--mri-border);
 }
 
-.onx-card .border-slate-300,
-.onx-card .border-slate-200,
-.onx-card .border-slate-200\/80 {
-  border-color: var(--mri-border) !important;
+.mri-rail {
+  background: var(--mri-surface);
+  border-right: 0.5px solid var(--mri-border);
 }
 
-.onx-card .bg-white,
-.onx-card .bg-white\/70,
-.onx-card .bg-slate-50,
-.onx-card .bg-slate-50\/70,
-.onx-card .bg-slate-50\/80,
-.onx-card .bg-slate-100 {
-  background: rgba(24, 35, 41, 0.72) !important;
-}
+/* ─── Inputs ───────────────────────────────────────────────────────────────── */
 
-.onx-iconbtn {
-  width: 40px;
-  height: 40px;
-  display: grid;
-  place-items: center;
-  border-radius: 11px;
-  color: var(--mri-text);
-  border: 1px solid var(--mri-border);
-  background: var(--mri-panel-soft);
-  transition: background-color 140ms ease, border-color 140ms ease, transform 120ms ease, color 120ms ease;
-}
-
-.mri-railbtn {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-}
-
-.onx-iconbtn:hover {
-  background: var(--mri-panel-strong);
-  border-color: var(--mri-border-strong);
-  color: #e9eff3;
-}
-
-.onx-iconbtn:active {
-  transform: translateY(1px);
-}
-
-.mri-topbar-input {
+.mri-input {
   width: 100%;
-  background: transparent;
+  background: var(--mri-surface);
   color: var(--mri-text);
-  border: 0;
+  border: 0.5px solid var(--mri-border);
+  border-radius: 8px;
   outline: none;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 400;
+  padding: 8px 12px;
+  transition: border-color 120ms ease;
 }
 
-.mri-topbar-input::placeholder {
+.mri-input:focus {
+  border-color: var(--mri-border-strong);
+}
+
+.mri-input::placeholder {
   color: var(--mri-text-dim);
 }
 
+/* ─── Filter Chips ─────────────────────────────────────────────────────────── */
+
 .mri-chip {
   border-radius: 999px;
-  border: 1px solid var(--mri-border);
+  border: 0.5px solid var(--mri-border);
   color: var(--mri-text-muted);
-  background: rgba(19, 28, 32, 0.66);
+  background: var(--mri-surface);
   font-size: 12px;
   font-weight: 500;
-  padding: 0.42rem 0.78rem;
+  padding: 0.32rem 0.72rem;
   transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 
@@ -154,122 +122,201 @@ select {
   color: var(--mri-text);
 }
 
-.mri-chip:active {
+.mri-chip-active {
+  background: var(--mri-good);
+  color: #ffffff;
+  border-color: var(--mri-good);
+}
+
+.mri-chip-active:hover {
+  color: #ffffff;
+}
+
+/* ─── Icon Buttons ─────────────────────────────────────────────────────────── */
+
+.mri-rail-btn {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  color: var(--mri-text-muted);
+  border: 0.5px solid var(--mri-border);
+  background: var(--mri-surface);
+  box-shadow: var(--mri-shadow-sm);
+  transition: background-color 140ms ease, color 120ms ease;
+  flex-shrink: 0;
+}
+
+.mri-rail-btn:hover {
+  color: var(--mri-text);
+  background: #f9f8f6;
+}
+
+.mri-rail-btn:active {
   transform: translateY(1px);
 }
 
-.mri-chip-active {
-  background: rgba(34, 48, 57, 0.82);
-  color: var(--mri-text);
-  border-color: var(--mri-border-strong);
+.mri-rail-btn-active {
+  background: var(--mri-good);
+  color: #ffffff;
+  border-color: var(--mri-good);
 }
 
-.mri-divider {
-  width: 100%;
-  height: 1px;
-  background: var(--mri-border);
+.mri-rail-btn-active:hover {
+  color: #ffffff;
+  background: #265018;
 }
+
+/* ─── River Row ────────────────────────────────────────────────────────────── */
+
+.mri-river-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  width: 100%;
+  text-align: left;
+  border-radius: 10px;
+  transition: background-color 120ms ease;
+  cursor: pointer;
+}
+
+.mri-river-row:hover {
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.mri-river-row:active {
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.mri-river-row-selected {
+  background: var(--mri-surface);
+  border-left: 3px solid var(--mri-good);
+  box-shadow: var(--mri-shadow-sm);
+}
+
+.mri-river-row-selected:hover {
+  background: var(--mri-surface);
+}
+
+/* ─── Score Badge ──────────────────────────────────────────────────────────── */
+
+.mri-score-badge {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+/* ─── Detail Panel Metric Row ──────────────────────────────────────────────── */
+
+.mri-metric-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 12px;
+  border-bottom: 0.5px solid var(--mri-border);
+  padding: 8px 0;
+}
+
+.mri-metric-row:last-child {
+  border-bottom: none;
+}
+
+.mri-metric-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--mri-text-muted);
+}
+
+.mri-metric-note {
+  font-size: 10px;
+  color: var(--mri-text-dim);
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+.mri-metric-value {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--mri-text);
+  text-align: right;
+  max-width: 180px;
+}
+
+.mri-metrics-section {
+  border-radius: 12px;
+  border: 0.5px solid var(--mri-border);
+  background: #faf9f7;
+  padding: 12px;
+}
+
+.mri-metrics-section-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  color: var(--mri-text-dim);
+}
+
+/* ─── Score Bar ────────────────────────────────────────────────────────────── */
+
+.mri-score-bar-track {
+  position: relative;
+  height: 4px;
+  border-radius: 999px;
+  background: #e5e7eb;
+}
+
+.mri-score-bar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 999px;
+  background: var(--mri-good);
+  transition: width 400ms ease;
+}
+
+/* ─── Scroll ───────────────────────────────────────────────────────────────── */
 
 .mri-scroll {
   scrollbar-width: thin;
-  scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+  scrollbar-color: rgba(0, 0, 0, 0.12) transparent;
 }
 
 .mri-scroll::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 4px;
+  height: 4px;
 }
 
 .mri-scroll::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: rgba(148, 163, 184, 0.45);
+  background: rgba(0, 0, 0, 0.12);
 }
 
 .mri-scroll::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.mri-drawer-card {
-  border-radius: 18px;
-  border: 1px solid rgba(165, 186, 200, 0.12);
-  background: linear-gradient(180deg, rgba(19, 28, 33, 0.84) 0%, rgba(15, 23, 28, 0.92) 100%);
-  transition: border-color 130ms ease, background-color 130ms ease, transform 120ms ease;
-}
+/* ─── Sheet Handle ─────────────────────────────────────────────────────────── */
 
-.mri-drawer-card:hover {
-  border-color: rgba(196, 213, 224, 0.28);
-  background: rgba(24, 35, 41, 0.92);
-}
-
-.mri-drawer-card:active {
-  transform: translateY(1px);
-}
-
-.mri-drawer-card-selected {
-  border-color: rgba(114, 152, 177, 0.62);
-  background: linear-gradient(180deg, rgba(28, 42, 50, 0.94) 0%, rgba(19, 31, 38, 0.98) 100%);
-  box-shadow: inset 0 0 0 1px rgba(114, 152, 177, 0.2);
-}
-
-.mri-kv-label {
-  font-size: 11px;
-  color: var(--mri-text-dim);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  font-weight: 500;
-}
-
-.mri-kv-value {
-  font-size: 14px;
-  color: var(--mri-text);
-  font-weight: 500;
-}
-
-.mri-fade {
-  transition: opacity 150ms ease;
-}
-
-.mri-control-strip {
-  background: linear-gradient(180deg, rgba(16, 24, 27, 0.88) 0%, rgba(13, 20, 24, 0.92) 100%);
-  border: 1px solid rgba(180, 198, 209, 0.15);
-  box-shadow: 0 16px 34px rgba(4, 9, 12, 0.22);
-  backdrop-filter: blur(14px) saturate(102%);
-  -webkit-backdrop-filter: blur(14px) saturate(102%);
-}
-
-.mri-tray-card {
-  min-width: 212px;
-  max-width: 228px;
-}
-
-.mri-surface-label {
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--mri-text-dim);
-  font-weight: 600;
-}
-
-.mri-fish-scale-track {
-  position: relative;
+.mri-handle {
+  width: 36px;
   height: 4px;
   border-radius: 999px;
-  background: rgba(128, 150, 167, 0.2);
+  background: rgba(0, 0, 0, 0.18);
+  margin: 0 auto;
 }
 
-.mri-fish-scale-fill {
-  position: absolute;
-  inset: 0 auto 0 0;
-  border-radius: 999px;
-  background: rgba(82, 124, 149, 0.62);
-}
+/* ─── Layers Panel ─────────────────────────────────────────────────────────── */
 
-.mri-fish-scale-marker {
-  position: absolute;
-  top: 50%;
-  width: 2px;
-  height: 10px;
-  border-radius: 999px;
-  background: rgba(206, 218, 227, 0.76);
-  transform: translate(-1px, -50%);
+.mri-layers-panel {
+  background: var(--mri-surface);
+  border: 0.5px solid var(--mri-border);
+  border-radius: 14px;
+  box-shadow: var(--mri-shadow-lg);
 }
