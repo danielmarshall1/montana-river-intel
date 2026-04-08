@@ -310,7 +310,12 @@ function DetailedMetricsContent({ analytics }: { analytics: RiverDetailAnalytics
         <MetricRow label="Observation Timestamp" value={analytics.sourceTrust.observationTimestamp ? formatDetailedTime(analytics.sourceTrust.observationTimestamp) : "Unavailable"} />
         <MetricRow label="Last Hydrology Pull" value={analytics.sourceTrust.lastHydrologyPullAt ? formatDetailedTime(analytics.sourceTrust.lastHydrologyPullAt) : "Unavailable"} />
         <MetricRow label="Data Confidence" value={analytics.sourceTrust.overallConfidence ?? "Unavailable"} />
-        <MetricRow label="Missing Inputs" value={analytics.sourceTrust.missingInputs.length ? analytics.sourceTrust.missingInputs.join(", ") : "None"} />
+        {(() => {
+          const significant = analytics.sourceTrust.missingInputs.filter(m => m !== "historical percentile");
+          return significant.length > 0
+            ? <MetricRow label="Missing Inputs" value={significant.join(", ")} />
+            : null;
+        })()}
       </MetricsSection>
     </div>
   );
@@ -893,7 +898,11 @@ export default function OnxShell({
   const latestPullAt = useMemo(() => {
     let latestMs = 0;
     for (const r of rivers) {
-      const candidate = r.updated_at ?? null;
+      // last_usgs_pull_at = coalesce(source_flow_observed_at, source_temp_observed_at, updated_at)
+      // updated_at alone can lag behind the actual observation time when the row was
+      // written in a prior session; prefer last_usgs_pull_at which always reflects the
+      // most recent USGS observation timestamp for the river.
+      const candidate = r.last_usgs_pull_at ?? r.updated_at ?? null;
       if (!candidate) continue;
       const ms = new Date(candidate).getTime();
       if (!Number.isNaN(ms) && ms > latestMs) latestMs = ms;

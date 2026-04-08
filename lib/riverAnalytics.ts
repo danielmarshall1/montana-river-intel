@@ -285,21 +285,79 @@ function deriveTacticalRead(params: {
   windImpact: string | null;
   thermalStatus: string | null;
   hatchLikelihood: string | null;
+  flowRatio: number | null;
+  tempF: number | null;
+  windMph: number | null;
 }): string | null {
-  const { stabilityLabel, windImpact, thermalStatus, hatchLikelihood } = params;
+  const { stabilityLabel, windImpact, thermalStatus, hatchLikelihood, flowRatio, tempF, windMph } = params;
+
+  // Best-case: stable and fishable
   if (stabilityLabel === "High Stability" && (windImpact === "Light" || windImpact === "Manageable")) {
-    return "Stable flows and manageable wind favor consistent presentations.";
+    if (hatchLikelihood === "High") {
+      return "Stable flows and light wind with active hatch signals — prime conditions for surface presentations.";
+    }
+    return tempF != null
+      ? `Stable flows and manageable wind at ${tempF.toFixed(1)}°F — consistent presentations should produce.`
+      : "Stable flows and manageable wind favor consistent presentations.";
   }
+
+  // Thermal and hatch window
   if (thermalStatus === "Safe" && hatchLikelihood === "High") {
-    return "Thermal window and seasonal signal support opportunistic surface activity.";
+    return tempF != null
+      ? `Water at ${tempF.toFixed(1)}°F with active hatch signal — opportunistic surface window is open.`
+      : "Thermal window and seasonal signal support opportunistic surface activity.";
   }
-  if (stabilityLabel === "Low Stability" || windImpact === "Severe") {
-    return "Rising volatility or wind creates mixed conditions and favors subsurface tactics.";
+
+  // Low stability or severe wind
+  if (windImpact === "Severe") {
+    return windMph != null
+      ? `${windMph.toFixed(0)} mph afternoon winds — difficult casting conditions, favor protected banks and subsurface rigs.`
+      : "Severe wind creates difficult casting conditions — subsurface tactics recommended.";
   }
+  if (stabilityLabel === "Low Stability") {
+    const flowNote = flowRatio != null
+      ? ` Flow at ${(flowRatio * 100).toFixed(0)}% of median.`
+      : "";
+    return `Rapid flow changes reduce holding-water predictability.${flowNote} Anchor on structure and fish slower.`;
+  }
+
+  // Thermal stress
   if (thermalStatus === "Critical") {
-    return "Thermal stress compresses the fishable window and demands a cautious approach.";
+    return tempF != null
+      ? `Water at ${tempF.toFixed(1)}°F — thermal stress narrows the fishable window to early morning and evening.`
+      : "Thermal stress compresses the fishable window — fish early or late.";
   }
-  return "Current signals are mixed, with no single metric dominating the read.";
+
+  // Moderate stability
+  if (stabilityLabel === "Moderate Stability") {
+    const parts: string[] = [];
+    if (flowRatio != null) {
+      if (flowRatio >= 0.85 && flowRatio <= 1.15) parts.push(`Flow near median (${(flowRatio * 100).toFixed(0)}%)`);
+      else if (flowRatio < 0.85) parts.push(`Below-median flow (${(flowRatio * 100).toFixed(0)}% of median)`);
+      else parts.push(`Above-median flow (${(flowRatio * 100).toFixed(0)}% of median)`);
+    }
+    if (tempF != null) parts.push(`${tempF.toFixed(1)}°F water temp`);
+    if (parts.length > 0) {
+      return `${parts.join(", ")} — conditions are fishable but not dialed-in; methodical searching is most productive.`;
+    }
+  }
+
+  // Generic fallback with available data
+  const fallbackParts: string[] = [];
+  if (flowRatio != null) {
+    fallbackParts.push(`flow at ${(flowRatio * 100).toFixed(0)}% of median`);
+  }
+  if (tempF != null) {
+    fallbackParts.push(`water temp ${tempF.toFixed(1)}°F`);
+  }
+  if (windMph != null && windMph > 5) {
+    fallbackParts.push(`${windMph.toFixed(0)} mph wind`);
+  }
+  if (fallbackParts.length > 0) {
+    return `Conditions show ${fallbackParts.join(", ")} — no single factor is dominant, standard searching tactics apply.`;
+  }
+
+  return "Limited telemetry available — check local reports before committing to a specific approach.";
 }
 
 export function buildRiverDetailAnalytics(params: {
@@ -497,6 +555,9 @@ export function buildRiverDetailAnalytics(params: {
         windImpact,
         thermalStatus,
         hatchLikelihood,
+        flowRatio: backendAnalytics?.flow_ratio ?? river.flow_ratio_calc ?? null,
+        tempF: backendAnalytics?.current_temp_f ?? river.water_temp_f ?? null,
+        windMph: backendAnalytics?.wind_speed_mph ?? river.wind_pm_mph ?? river.wind_am_mph ?? null,
       }),
     },
     sourceTrust: {
