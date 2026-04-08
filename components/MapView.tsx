@@ -943,88 +943,50 @@ function syncFishingAccessLayer(
   riverTier: string | null,
   cachedGeojson?: GeoJSON.FeatureCollection | null
 ) {
-  const cachedCount = cachedGeojson ? (cachedGeojson.features?.length ?? 0) : null;
-  const sourceExists = Boolean(map.getSource(ACCESS_SOURCE));
-  console.log("[access] syncFishingAccessLayer called — enabled:", enabled, "uuid:", selectedRiverUuid, "cachedFeatures:", cachedCount, "sourceExists:", sourceExists);
+  // Filter expression — matches nothing when no river selected
+  const accessFilter: mapboxgl.Expression = selectedRiverUuid
+    ? ["==", ["get", "river_id"], selectedRiverUuid]
+    : ["==", ["literal", false], ["literal", true]];
 
-  // Always remove the layer so we can re-add with the correct filter
-  if (map.getLayer(ACCESS_LAYER)) map.removeLayer(ACCESS_LAYER);
-
-  // Only show when the layer is enabled AND a river is selected
+  // Hide layer and exit when disabled or no river selected
   if (!enabled || !selectedRiverUuid) {
-    console.log("[access] hidden — enabled:", enabled, "uuid:", selectedRiverUuid);
+    if (map.getLayer(ACCESS_LAYER)) map.setFilter(ACCESS_LAYER, ["==", ["literal", false], ["literal", true]]);
     return;
   }
 
+  // Ensure source exists with the best available data
   const sourceData: GeoJSON.FeatureCollection | string = cachedGeojson ?? ACCESS_GEOJSON_URL;
-
-  // Ensure source exists; if it does and we have fresh cached data, update it
   if (!map.getSource(ACCESS_SOURCE)) {
-    console.log("[access] adding source, using:", cachedGeojson ? "FeatureCollection" : "URL");
-    map.addSource(ACCESS_SOURCE, {
-      type: "geojson",
-      data: sourceData,
-    });
+    map.addSource(ACCESS_SOURCE, { type: "geojson", data: sourceData });
   } else if (cachedGeojson) {
-    console.log("[access] source exists, calling setData with FeatureCollection");
     (map.getSource(ACCESS_SOURCE) as mapboxgl.GeoJSONSource).setData(cachedGeojson);
+  }
+
+  const pinColor = riverTier === "TOUGH" ? "#dc2626"
+    : riverTier === "FAIR" ? "#d4900a"
+    : "#2d5a1b";
+
+  if (map.getLayer(ACCESS_LAYER)) {
+    // Layer already exists — just update the filter and color in place
+    map.setFilter(ACCESS_LAYER, accessFilter);
+    map.setPaintProperty(ACCESS_LAYER, "circle-color", pinColor);
   } else {
-    console.log("[access] source exists, no cached data — leaving as-is");
+    // First time — add the layer
+    map.addLayer({
+      id: ACCESS_LAYER,
+      type: "circle",
+      source: ACCESS_SOURCE,
+      minzoom: 7,
+      filter: accessFilter,
+      paint: {
+        "circle-color": pinColor,
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 7, 5, 10, 8, 13, 10],
+        "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": 2.5,
+        "circle-opacity": 0.95,
+      },
+    });
   }
-
-  // Pre-count matching features from cached data for diagnostics
-  if (cachedGeojson) {
-    const matching = cachedGeojson.features.filter(
-      (f) => f.properties?.river_id === selectedRiverUuid
-    ).length;
-    console.log("[access] features matching uuid in cache:", matching, "uuid:", selectedRiverUuid);
-  }
-
-  const filter = [
-    "==",
-    ["get", "river_id"],
-    selectedRiverUuid,
-  ] as mapboxgl.Expression;
-
-  console.log("[access] adding layer, filter:", JSON.stringify(filter), "tier:", riverTier);
-
-  map.addLayer({
-    id: ACCESS_LAYER,
-    type: "circle",
-    source: ACCESS_SOURCE,
-    minzoom: 7,
-    filter,
-    paint: {
-      "circle-color": [
-        "case",
-        ["==", ["get", "river_id"], selectedRiverUuid],
-        riverTier === "TOUGH" ? "#dc2626"
-          : riverTier === "FAIR" ? "#d4900a"
-          : "#2d5a1b",
-        "#2d5a1b",
-      ],
-      "circle-radius": [
-        "interpolate", ["linear"], ["zoom"],
-        7, 5,
-        10, 8,
-        13, 10,
-      ],
-      "circle-stroke-color": "#ffffff",
-      "circle-stroke-width": 2.5,
-      "circle-opacity": 0.95,
-    },
-  });
-
-  // Log feature count from the source after a tick to confirm data loaded
-  setTimeout(() => {
-    const src = map.getSource(ACCESS_SOURCE) as mapboxgl.GeoJSONSource | undefined;
-    if (src) {
-      const features = map.querySourceFeatures(ACCESS_SOURCE, {
-        filter: ["==", ["get", "river_id"], selectedRiverUuid],
-      });
-      console.log("[access] features matching uuid:", features.length, "uuid:", selectedRiverUuid);
-    }
-  }, 1500);
 
   try {
     if (map.getLayer(UNCLUSTERED_LAYER)) {
@@ -1339,7 +1301,7 @@ export function MapView({
     syncFishingAccessLayer(
       map,
       layerStateRef.current.access_fishing_sites,
-      selectedRiverRef.current?.river_uuid ?? selectedRiverRef.current?.river_id ?? null,
+      selectedRiverRef.current?.river_id ?? null,
       selectedRiverRef.current?.bite_tier ?? null,
       accessGeojsonRef.current
     );
@@ -1754,7 +1716,7 @@ export function MapView({
     syncFishingAccessLayer(
       map,
       effectiveLayerState.access_fishing_sites,
-      selectedRiver?.river_uuid ?? selectedRiver?.river_id ?? null,
+      selectedRiver?.river_id ?? null,
       selectedRiver?.bite_tier ?? null,
       accessGeojsonRef.current
     );
@@ -1779,7 +1741,6 @@ export function MapView({
     effectiveLayerState.mri_labels,
     activeStationsGeojson,
     selectedRiver?.river_id,
-    selectedRiver?.river_uuid,
     selectedRiver?.bite_tier,
     selectedRiver?.flow_source_site_no,
     selectedRiver?.temp_source_site_no,

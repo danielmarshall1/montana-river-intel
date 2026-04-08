@@ -800,8 +800,7 @@ function RiverDetailContent({
 }) {
   const tc = getTierColors(selected.bite_tier);
   const score = selected.fishability_score_calc;
-  // Use the raw DB UUID for the access-weather lookup (river_id may be slug-based)
-  const riverId = selected.river_uuid ?? selected.river_id;
+  const riverId = selected.river_id;
 
   return (
     <div className="space-y-3">

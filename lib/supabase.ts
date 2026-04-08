@@ -182,8 +182,8 @@ export async function fetchLatestRiverScores(): Promise<RiverScoreRow[]> {
 
   if (!fromLatest.error && fromLatest.data && fromLatest.data.length > 0) {
     return (fromLatest.data as RiverLatestRow[]).map((r) => ({
-      river_id: String(r.slug ?? r.river_id ?? ""),
-      river_uuid: r.river_id ? String(r.river_id) : null,
+      river_id: String(r.river_id ?? ""),
+      slug: r.slug ?? undefined,
       river_name: r.river_name ?? undefined,
       gauge_label: r.gauge_label ?? undefined,
       usgs_site_no: r.usgs_site_no ?? undefined,
@@ -244,7 +244,6 @@ export async function fetchRiversWithLatest(): Promise<FishabilityRow[]> {
     const healthMap = await fetchHealthMap(supabase);
     const rows = (latestRes.data as RiverLatestRow[]).map((r) => ({
       river_id: String(r.river_id ?? ""),
-      river_uuid: r.river_id ? String(r.river_id) : null,
       slug: r.slug ?? undefined,
       river_name: r.river_name ?? formatSlug(String(r.slug ?? r.river_id ?? "")),
       gauge_label: r.gauge_label ?? "",
