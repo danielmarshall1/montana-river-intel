@@ -943,21 +943,28 @@ function syncFishingAccessLayer(
   riverTier: string | null,
   cachedGeojson?: GeoJSON.FeatureCollection | null
 ) {
+  console.log('[access-fn] called, uuid:', selectedRiverUuid, 'enabled:', enabled, 'cachedFeatures:', cachedGeojson?.features?.length ?? 'null');
+
   // Always tear down layer and source first — guarantees a clean slate
   if (map.getLayer(ACCESS_LAYER)) map.removeLayer(ACCESS_LAYER);
   if (map.getSource(ACCESS_SOURCE)) map.removeSource(ACCESS_SOURCE);
+  console.log('[access-fn] removed old layer/source');
 
   if (!enabled || !selectedRiverUuid || !cachedGeojson) return;
 
   // Pre-filter in JS so the source only contains this river's points — no layer filter needed
+  const filteredFeatures = cachedGeojson.features.filter(
+    (f) => f.properties?.river_id === selectedRiverUuid
+  );
+  console.log('[access-fn] filtered features for uuid:', filteredFeatures.length);
+
   const filteredGeojson: GeoJSON.FeatureCollection = {
     type: "FeatureCollection",
-    features: cachedGeojson.features.filter(
-      (f) => f.properties?.river_id === selectedRiverUuid
-    ),
+    features: filteredFeatures,
   };
 
   map.addSource(ACCESS_SOURCE, { type: "geojson", data: filteredGeojson });
+  console.log('[access-fn] source added');
 
   const pinColor = riverTier === "TOUGH" ? "#dc2626"
     : riverTier === "FAIR" ? "#d4900a"
@@ -976,6 +983,7 @@ function syncFishingAccessLayer(
       "circle-opacity": 0.95,
     },
   });
+  console.log('[access-fn] layer added');
 
   try {
     if (map.getLayer(UNCLUSTERED_LAYER)) {
@@ -1288,13 +1296,8 @@ export function MapView({
     syncStatewideHydrologyLayer(map, layerStateRef.current.statewide_hydrology);
     syncFederalLandsLayer(map, layerStateRef.current.public_federal);
     syncStateLandsLayer(map, layerStateRef.current.public_state);
-    syncFishingAccessLayer(
-      map,
-      layerStateRef.current.access_fishing_sites,
-      selectedRiverRef.current?.river_id ?? null,
-      selectedRiverRef.current?.bite_tier ?? null,
-      accessGeojsonRef.current
-    );
+    // Fishing access is handled exclusively by the dedicated useEffect which has
+    // reliable access to the current selectedRiverId via props — not refs.
     syncActiveStationsLayer(
       map,
       layerStateRef.current.mri_active_stations,
@@ -1696,7 +1699,6 @@ export function MapView({
   }, [basemap, mapReady]);
 
   useEffect(() => {
-    console.log('[access-effect] fired, selectedRiverId:', selectedRiverId, 'mapReady:', mapReady);
     const map = mapRef.current;
     if (!map || !mapReady) return;
     if (typeof map.isStyleLoaded === "function" && !map.isStyleLoaded()) return;
@@ -1704,13 +1706,6 @@ export function MapView({
     syncStatewideHydrologyLayer(map, effectiveLayerState.statewide_hydrology);
     syncFederalLandsLayer(map, effectiveLayerState.public_federal);
     syncStateLandsLayer(map, effectiveLayerState.public_state);
-    syncFishingAccessLayer(
-      map,
-      effectiveLayerState.access_fishing_sites,
-      selectedRiver?.river_id ?? null,
-      selectedRiver?.bite_tier ?? null,
-      accessGeojsonRef.current
-    );
     syncActiveStationsLayer(map, effectiveLayerState.mri_active_stations, activeStationsGeojson, selectedRiver);
     syncHydrologyOverlays(
       map,
@@ -1724,19 +1719,54 @@ export function MapView({
     effectiveLayerState.statewide_hydrology,
     effectiveLayerState.public_federal,
     effectiveLayerState.public_state,
-    effectiveLayerState.access_fishing_sites,
     effectiveLayerState.mri_active_stations,
     effectiveLayerState.hydro_flow_magnitude,
     effectiveLayerState.hydro_change_indicator,
     effectiveLayerState.hydro_temp_stress,
     effectiveLayerState.mri_labels,
     activeStationsGeojson,
-    selectedRiverId,
-    selectedRiver?.bite_tier,
-    selectedRiver?.flow_source_site_no,
-    selectedRiver?.temp_source_site_no,
-    selectedRiver?.river_name,
+    selectedRiver,
   ]);
+
+  // Dedicated fishing access effect — completely isolated so river switches are
+  // guaranteed to rebuild the layer with the correct UUID.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    const enabled = effectiveLayerState.access_fishing_sites;
+    const uuid = selectedRiverId;
+    const cached = accessGeojsonRef.current;
+
+    if (map.getLayer(ACCESS_LAYER)) map.removeLayer(ACCESS_LAYER);
+    if (map.getSource(ACCESS_SOURCE)) map.removeSource(ACCESS_SOURCE);
+
+    if (!enabled || !uuid || !cached) return;
+
+    const features = cached.features.filter(
+      (f) => String(f.properties?.river_id) === String(uuid)
+    );
+
+    if (!features.length) return;
+
+    map.addSource(ACCESS_SOURCE, {
+      type: "geojson",
+      data: { type: "FeatureCollection", features },
+    });
+
+    map.addLayer({
+      id: ACCESS_LAYER,
+      type: "circle",
+      source: ACCESS_SOURCE,
+      paint: {
+        "circle-color": "#2d5a1b",
+        "circle-radius": 10,
+        "circle-stroke-color": "white",
+        "circle-stroke-width": 3,
+        "circle-opacity": 0.95,
+      },
+    });
+  }, [mapReady, selectedRiverId, effectiveLayerState.access_fishing_sites]);
 
   // Re-apply custom sources/layers after every Mapbox style change.
   useEffect(() => {
