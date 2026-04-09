@@ -1760,12 +1760,19 @@ export function MapView({
       source: ACCESS_SOURCE,
       paint: {
         "circle-color": "#2d5a1b",
-        "circle-radius": 10,
+        "circle-radius": 6,
         "circle-stroke-color": "white",
-        "circle-stroke-width": 3,
+        "circle-stroke-width": 2,
         "circle-opacity": 0.95,
       },
     });
+
+    return () => {
+      const m = mapRef.current;
+      if (!m) return;
+      if (m.getLayer(ACCESS_LAYER)) m.removeLayer(ACCESS_LAYER);
+      if (m.getSource(ACCESS_SOURCE)) m.removeSource(ACCESS_SOURCE);
+    };
   }, [mapReady, selectedRiverId, effectiveLayerState.access_fishing_sites]);
 
   // Re-apply custom sources/layers after every Mapbox style change.

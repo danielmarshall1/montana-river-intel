@@ -1,0 +1,1322 @@
+USGS STATION GAP REPORT
+Generated: 2026-04-08
+Total active MT stations with flow or temp: 261
+Total stations in our usgs_sites table: 527
+Total role assignments in river_usgs_map_roles: 64
+Total unique rivers tracked: 17
+Total unique unassigned stations found near our rivers: 72
+Total gap instances (station x river): 86
+
+NOTE: 'Nearby' means the USGS station name contains the river name keywords.
+      Distance is from the river's primary gauge lat/lng to the station.
+      'Assigned to other river' means the station IS in river_usgs_map_roles but for a different river.
+
+STATIONS NEAR OUR RIVERS NOT IN river_usgs_map_roles (for that river)
+========================================================================
+
+Blackfoot River  [blackfoot-bonner]
+  Assigned stations in river_usgs_map_roles: 3
+  Unassigned nearby stations: 4
+
+  12338300 — NF Blackfoot R ab Dry Gulch nr Ovando MT
+    Distance: 51,202m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 46.9794944, -113.092186
+    In usgs_sites table: YES
+    ---
+  12335100 — Blackfoot R ab Nevada Cr nr Helmville MT
+    Distance: 56,355m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 46.9187944, -113.014986
+    In usgs_sites table: YES
+    ---
+  12324590 — Little Blackfoot River near Garrison MT
+    Distance: 84,720m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 46.5194833, -112.7931722
+    In usgs_sites table: YES
+    ---
+  12324400 — Clark Fork ab Little Blackfoot R nr Garrison MT
+    Distance: 85,433m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 46.5109111, -112.789686
+    In usgs_sites table: YES
+    ---
+
+Bitterroot River  [bitterroot-missoula]
+  Assigned stations in river_usgs_map_roles: 5
+  Unassigned nearby stations: 1
+
+  12342500 — West Fork Bitterroot River nr Conner MT
+    Distance: 124,318m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 45.72482778, -114.2822944
+    In usgs_sites table: YES
+    ---
+
+Clark Fork  [clark-fork-st-regis]
+  Assigned stations in river_usgs_map_roles: 5
+  Unassigned nearby stations: 10
+
+  12354700 — Clark Fork near Paradise, MT
+    Distance: 14,940m from river gauge
+    Parameters: 00010=temp
+    Lat/Lng: 47.32187569, -114.890966
+    In usgs_sites table: YES
+    ---
+  12353650 — Clark Fork at Superior, MT
+    Distance: 18,896m from river gauge
+    Parameters: 00010=temp
+    Lat/Lng: 47.19631608, -114.890409
+    In usgs_sites table: YES
+    ---
+  12389000 — Clark Fork near Plains MT
+    Distance: 22,408m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 47.4292, -114.8565333
+    In usgs_sites table: YES
+    ---
+  12391400 — Clark Fork bl Noxon Rapids Dam nr Noxon MT
+    Distance: 87,905m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 47.9612444, -115.7335056
+    In usgs_sites table: YES
+    ---
+  12340500 — Clark Fork above Missoula MT
+    Distance: 99,371m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 46.87676389, -113.9321194
+    In usgs_sites table: YES
+    ---
+  12334550 — Clark Fork at Turah Bridge nr Bonner MT
+    Distance: 109,967m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 46.8259111, -113.8140306
+    In usgs_sites table: YES
+    ---
+  12331800 — Clark Fork near Drummond MT
+    Distance: 148,422m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 46.71191389, -113.3307806
+    In usgs_sites table: YES
+    ---
+  12324680 — Clark Fork at Goldcreek MT
+    Distance: 181,930m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 46.58998889, -112.9287139
+    In usgs_sites table: YES
+    ---
+  12324400 — Clark Fork ab Little Blackfoot R nr Garrison MT
+    Distance: 195,399m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 46.5109111, -112.789686
+    In usgs_sites table: YES
+    ---
+  12323800 — Clark Fork near Galen MT
+    Distance: 214,476m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 46.20824167, -112.76735
+    In usgs_sites table: YES
+    ---
+
+Flathead River  [flathead-columbia-falls]
+  Assigned stations in river_usgs_map_roles: 3
+  Unassigned nearby stations: 6
+
+  12362500 — S F Flathead River nr Columbia Falls MT
+    Distance: 10,883m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 48.35657778, -114.0378583
+    In usgs_sites table: YES
+    ---
+  12355500 — N F Flathead River nr Columbia Falls MT [assigned to a different river]
+    Distance: 15,505m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 48.4957972, -114.1267639
+    In usgs_sites table: YES
+    ---
+  12358500 — M F Flathead River near West Glacier MT
+    Distance: 19,679m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 48.49551667, -114.0102083
+    In usgs_sites table: YES
+    ---
+  12359800 — S F Flathead R ab Twin C nr Hungry Horse MT
+    Distance: 62,882m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 47.9790972, -113.5606833
+    In usgs_sites table: YES
+    ---
+  12372000 — Flathead River near Polson MT
+    Distance: 75,921m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 47.6802861, -114.2467278
+    In usgs_sites table: YES
+    ---
+  12388700 — Flathead River at Perma MT
+    Distance: 114,595m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 47.36679167, -114.585
+    In usgs_sites table: YES
+    ---
+
+Kootenai River  [kootenai-below-libby-dam]
+  Assigned stations in river_usgs_map_roles: 5
+  No unassigned nearby stations found.
+
+Marias River  [marias-chester]
+  Assigned stations in river_usgs_map_roles: 3
+  Unassigned nearby stations: 3
+
+  06101630 — Marias River at Highway 223 bridge near Chester,MT
+    Distance: 14,880m from river gauge
+    Parameters: 00010=temp
+    Lat/Lng: 48.26, -110.8916667
+    In usgs_sites table: YES
+    ---
+  06102050 — Marias River near Loma MT
+    Distance: 54,575m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 47.94590278, -110.5808389
+    In usgs_sites table: YES
+    ---
+  06099500 — Marias River near Shelby MT
+    Distance: 61,287m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 48.4271972, -111.889836
+    In usgs_sites table: YES
+    ---
+
+Madison River  [madison-west-yellowstone]
+  Assigned stations in river_usgs_map_roles: 3
+  Unassigned nearby stations: 7
+
+  06038500 — Madison River bl Hebgen Lake nr Grayling MT
+    Distance: 31,606m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 44.86639167, -111.3387806
+    In usgs_sites table: YES
+    ---
+  06038800 — Madison River at Kirby Ranch nr Cameron MT
+    Distance: 47,984m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 44.88865556, -111.580886
+    In usgs_sites table: YES
+    ---
+  06040000 — Madison River near Cameron MT
+    Distance: 83,654m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 45.2331333, -111.7516333
+    In usgs_sites table: YES
+    ---
+  06040050 — Madison River at Ennis, MT
+    Distance: 92,428m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 45.34756389, -111.72246389
+    In usgs_sites table: YES
+    ---
+  06040800 — Madison River ab powerplant nr McAllister MT
+    Distance: 102,385m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 45.4865944, -111.6338583
+    In usgs_sites table: YES
+    ---
+  06041000 — Madison River bl Ennis Lake nr McAllister MT
+    Distance: 102,770m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 45.49023056, -111.6345056
+    In usgs_sites table: YES
+    ---
+  06041500 — Madison River near Norris MT
+    Distance: 112,877m from river gauge
+    Parameters: 00010=temp
+    Lat/Lng: 45.607611, -111.573056
+    In usgs_sites table: NO
+    ---
+
+Yellowstone River  [yellowstone-corwin-springs]
+  Assigned stations in river_usgs_map_roles: 4
+  Unassigned nearby stations: 11
+
+  06192500 — Yellowstone River near Livingston, MT [assigned to a different river]
+    Distance: 56,785m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 45.5972111, -110.5664972
+    In usgs_sites table: YES
+    ---
+  06195750 — Yellowstone River at Springdale, MT
+    Distance: 83,013m from river gauge
+    Parameters: 00010=temp
+    Lat/Lng: 45.74632347, -110.2324168
+    In usgs_sites table: YES
+    ---
+  06195950 — Yellowstone River at Big Timber, MT
+    Distance: 105,366m from river gauge
+    Parameters: 00010=temp
+    Lat/Lng: 45.84716219, -109.9407423
+    In usgs_sites table: YES
+    ---
+  06207500 — Clarks Fork Yellowstone River nr Belfry MT
+    Distance: 136,218m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 45.0099111, -109.0653667
+    In usgs_sites table: YES
+    ---
+  06208500 — Clarks Fork Yellowstone River at Edgar MT
+    Distance: 157,495m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 45.46571389, -108.8441056
+    In usgs_sites table: YES
+    ---
+  06214500 — Yellowstone River at Billings MT
+    Distance: 196,858m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 45.800119, -108.468031
+    In usgs_sites table: YES
+    ---
+  06295000 — Yellowstone River at Forsyth MT
+    Distance: 343,486m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 46.266636, -106.691303
+    In usgs_sites table: YES
+    ---
+  06309000 — Yellowstone River at Miles City, MT
+    Distance: 409,334m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 46.4207722, -105.8600333
+    In usgs_sites table: YES
+    ---
+  06327500 — Yellowstone River at Glendive, MT
+    Distance: 517,969m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 47.10588889, -104.7184306
+    In usgs_sites table: YES
+    ---
+  06328495 — Yellowstone River Fish Bypass Channel nr Intake MT
+    Distance: 537,382m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 47.2637222, -104.5396667
+    In usgs_sites table: YES
+    ---
+  06329500 — Yellowstone River near Sidney MT
+    Distance: 583,262m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 47.67741389, -104.1554111
+    In usgs_sites table: YES
+    ---
+
+Rock Creek  [rock-creek-clinton]
+  Assigned stations in river_usgs_map_roles: 3
+  Unassigned nearby stations: 4
+
+  12332000 — Middle Fork Rock Cr nr Philipsburg MT
+    Distance: 61,392m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 46.1845694, -113.5015694
+    In usgs_sites table: YES
+    ---
+  06006000 — Red Rock Cr ab Lakes, nr Lakeview, MT
+    Distance: 283,568m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 44.615792, -111.625669
+    In usgs_sites table: YES
+    ---
+  06209500 — Rock Creek near Red Lodge MT
+    Distance: 382,795m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 45.0861472, -109.3291889
+    In usgs_sites table: YES
+    ---
+  06169500 — Rock Creek bl Horse Creek nr int'l boundary
+    Distance: 568,242m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 48.969375, -106.8398417
+    In usgs_sites table: YES
+    ---
+
+North Fork Flathead River  [nf-flathead-columbia-falls]
+  Assigned stations in river_usgs_map_roles: 3
+  Unassigned nearby stations: 3
+
+  12358500 — M F Flathead River near West Glacier MT
+    Distance: 8,589m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 48.49551667, -114.0102083
+    In usgs_sites table: YES
+    ---
+  12362500 — S F Flathead River nr Columbia Falls MT
+    Distance: 16,813m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 48.35657778, -114.0378583
+    In usgs_sites table: YES
+    ---
+  12359800 — S F Flathead R ab Twin C nr Hungry Horse MT
+    Distance: 71,124m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 47.9790972, -113.5606833
+    In usgs_sites table: YES
+    ---
+
+Kootenai River  [kootenai-libby]
+  Assigned stations in river_usgs_map_roles: 5
+  No unassigned nearby stations found.
+
+Gallatin River  [gallatin-gateway]
+  Assigned stations in river_usgs_map_roles: 3
+  Unassigned nearby stations: 3
+
+  06043120 — Gallatin River above Deer Creek, near Big Sky, MT
+    Distance: 22,719m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 45.29727778, -111.2113917
+    In usgs_sites table: YES
+    ---
+  06048650 — E Gallatin R ab Water Reclamation Fa nr Bozeman MT
+    Distance: 29,964m from river gauge
+    Parameters: 00060=flow
+    Lat/Lng: 45.72566667, -111.0661944
+    In usgs_sites table: YES
+    ---
+  06052500 — Gallatin River at Logan MT
+    Distance: 45,249m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 45.8862472, -111.4420083
+    In usgs_sites table: YES
+    ---
+
+Missouri River  [missouri-toston]
+  Assigned stations in river_usgs_map_roles: 3
+  Unassigned nearby stations: 11
+
+  06065500 — Missouri River bl Hauser Dam near Helena MT
+    Distance: 77,685m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 46.76619167, -111.8887944
+    In usgs_sites table: YES
+    ---
+  06066500 — Missouri River bl Holter Dam nr Wolf Cr MT
+    Distance: 104,553m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 46.99473889, -112.0106667
+    In usgs_sites table: YES
+    ---
+  06074000 — Missouri River at Cascade MT
+    Distance: 126,610m from river gauge
+    Parameters: 00060=flow
+    Lat/Lng: 47.2694861, -111.6952306
+    In usgs_sites table: YES
+    ---
+  06078200 — Missouri River near Ulm MT
+    Distance: 143,283m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 47.43496667, -111.3884444
+    In usgs_sites table: YES
+    ---
+  06090300 — Missouri River near Great Falls MT
+    Distance: 162,205m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 47.5844444, -111.0605806
+    In usgs_sites table: YES
+    ---
+  06090800 — Missouri River at Fort Benton MT
+    Distance: 194,342m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 47.8169111, -110.6661417
+    In usgs_sites table: YES
+    ---
+  06109500 — Missouri River at Virgelle MT
+    Distance: 224,455m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 48.0037833, -110.2588222
+    In usgs_sites table: YES
+    ---
+  06115200 — Missouri River near Landusky MT
+    Distance: 265,264m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 47.631431, -108.687744
+    In usgs_sites table: YES
+    ---
+  06175510 — Missouri R at E Frazer Pump Plant nr Frazer MT
+    Distance: 460,689m from river gauge
+    Parameters: 00010=temp
+    Lat/Lng: 48.0333506, -106.0005722
+    In usgs_sites table: YES
+    ---
+  06177000 — Missouri River near Wolf Point MT
+    Distance: 493,924m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 48.067325, -105.5330972
+    In usgs_sites table: YES
+    ---
+  06185500 — Missouri River near Culbertson MT
+    Distance: 569,348m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 48.1235, -104.4733
+    In usgs_sites table: YES
+    ---
+
+Big Hole River  [big-hole-melrose]
+  Assigned stations in river_usgs_map_roles: 3
+  Unassigned nearby stations: 6
+
+  06026210 — Big Hole River near Glen MT
+    Distance: 14,879m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 45.4400944, -112.5560917
+    In usgs_sites table: YES
+    ---
+  06025250 — Big Hole River at Maiden Rock nr Divide MT
+    Distance: 19,606m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 45.7012694, -112.7359694
+    In usgs_sites table: YES
+    ---
+  06026420 — Big Hole R bl Hamilton Ditch nr Twin Bridges, MT
+    Distance: 26,690m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 45.5500222, -112.360675
+    In usgs_sites table: YES
+    ---
+  06024580 — Big Hole River near Wise River MT
+    Distance: 45,945m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 45.8508222, -113.068361
+    In usgs_sites table: YES
+    ---
+  06024540 — Big Hole River bl Mudd Cr nr Wisdom MT
+    Distance: 56,870m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 45.80754167, -113.3132694
+    In usgs_sites table: YES
+    ---
+  06024450 — Big Hole River bl Big Lake Cr at Wisdom MT
+    Distance: 59,656m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 45.61796667, -113.4569417
+    In usgs_sites table: YES
+    ---
+
+Yellowstone River  [yellowstone-livingston]
+  Assigned stations in river_usgs_map_roles: 4
+  Unassigned nearby stations: 10
+
+  06195750 — Yellowstone River at Springdale, MT
+    Distance: 30,801m from river gauge
+    Parameters: 00010=temp
+    Lat/Lng: 45.74632347, -110.2324168
+    In usgs_sites table: YES
+    ---
+  06195950 — Yellowstone River at Big Timber, MT
+    Distance: 55,966m from river gauge
+    Parameters: 00010=temp
+    Lat/Lng: 45.84716219, -109.9407423
+    In usgs_sites table: YES
+    ---
+  06207500 — Clarks Fork Yellowstone River nr Belfry MT
+    Distance: 134,339m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 45.0099111, -109.0653667
+    In usgs_sites table: YES
+    ---
+  06208500 — Clarks Fork Yellowstone River at Edgar MT
+    Distance: 134,956m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 45.46571389, -108.8441056
+    In usgs_sites table: YES
+    ---
+  06214500 — Yellowstone River at Billings MT
+    Distance: 164,521m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 45.800119, -108.468031
+    In usgs_sites table: YES
+    ---
+  06295000 — Yellowstone River at Forsyth MT
+    Distance: 308,768m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 46.266636, -106.691303
+    In usgs_sites table: YES
+    ---
+  06309000 — Yellowstone River at Miles City, MT
+    Distance: 374,774m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 46.4207722, -105.8600333
+    In usgs_sites table: YES
+    ---
+  06327500 — Yellowstone River at Glendive, MT
+    Distance: 479,019m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 47.10588889, -104.7184306
+    In usgs_sites table: YES
+    ---
+  06328495 — Yellowstone River Fish Bypass Channel nr Intake MT
+    Distance: 497,509m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 47.2637222, -104.5396667
+    In usgs_sites table: YES
+    ---
+  06329500 — Yellowstone River near Sidney MT
+    Distance: 541,148m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 47.67741389, -104.1554111
+    In usgs_sites table: YES
+    ---
+
+Bighorn River  [bighorn-st-xavier]
+  Assigned stations in river_usgs_map_roles: 4
+  Unassigned nearby stations: 7
+
+  06287000 — Bighorn R bl Yellowtail Afterbay Dam nr St. Xavier
+    Distance: 20,765m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 45.31690278, -107.9188889
+    In usgs_sites table: YES
+    ---
+  06288400 — Bighorn River at Two Leggins Bridge, near Hardin
+    Distance: 21,585m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 45.6440863, -107.6582164
+    In usgs_sites table: YES
+    ---
+  06293500 — Little Bighorn River nr Crow Agency MT
+    Distance: 26,020m from river gauge
+    Parameters: 00060=flow
+    Lat/Lng: 45.56833889, -107.45276944
+    In usgs_sites table: YES
+    ---
+  06294000 — Little Bighorn River near Hardin MT
+    Distance: 34,021m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 45.7356861, -107.5574694
+    In usgs_sites table: YES
+    ---
+  06290500 — Little Bighorn R bl Pass Cr nr Wyola MT
+    Distance: 42,001m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 45.177133, -107.39455
+    In usgs_sites table: NO
+    ---
+  06289000 — Little Bighorn River at State Line nr Wyola MT
+    Distance: 51,521m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 45.0071111, -107.6154083
+    In usgs_sites table: YES
+    ---
+  06294500 — Bighorn River ab Tullock Cr nr Bighorn MT
+    Distance: 76,940m from river gauge
+    Parameters: 00060=flow, 00010=temp
+    Lat/Lng: 46.1244722, -107.4687917
+    In usgs_sites table: YES
+    ---
+
+Jefferson River  [jefferson-river-three-forks]
+  Assigned stations in river_usgs_map_roles: 5
+  No unassigned nearby stations found.
+
+
+SUMMARY BY RIVER
+========================================================================
+
+River                                    Assigned  Nearby Unassigned  Has Flow  Has Temp
+------------------------------------------------------------------------------------------
+Blackfoot River (blackfoot-bonner)              3                  4       YES       YES
+Bitterroot River (bitterroot-missoula)          5                  1       YES       YES
+Clark Fork (clark-fork-st-regis)                5                 10       YES       YES
+Flathead River (flathead-columbia-falls)        3                  6       YES       YES
+Kootenai River (kootenai-below-libby-dam)        5                  0       YES       YES
+Marias River (marias-chester)                   3                  3       YES       YES
+Madison River (madison-west-yellowstone)        3                  7       YES       YES
+Yellowstone River (yellowstone-corwin-springs)        4                 11       YES       YES
+Rock Creek (rock-creek-clinton)                 3                  4       YES       YES
+North Fork Flathead River (nf-flathead-columbia-falls)        3                  3       YES       YES
+Kootenai River (kootenai-libby)                 5                  0       YES       YES
+Gallatin River (gallatin-gateway)               3                  3       YES       YES
+Missouri River (missouri-toston)                3                 11       YES       YES
+Big Hole River (big-hole-melrose)               3                  6       YES       YES
+Yellowstone River (yellowstone-livingston)        4                 10       YES       YES
+Bighorn River (bighorn-st-xavier)               4                  7       YES       YES
+Jefferson River (jefferson-river-three-forks)        5                  0       YES       YES
+
+========================================================================
+
+UNASSIGNED STATIONS NOT NEAR ANY OF OUR RIVERS (sample of active MT stations)
+========================================================================
+
+The following active MT stations have flow or temp data but were not name-matched
+to any of our tracked rivers:
+
+Total unmatched active MT stations: 168
+
+  05014500 — Swiftcurrent Creek at Many Glacier MT
+    Lat/Lng: 48.7988333, -113.6567306
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  05017500 — St. Mary River near Babb MT
+    Lat/Lng: 48.83303718, -113.4206533
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  05018500 — St. Mary Canal at St. Mary Crossing near Babb MT
+    Lat/Lng: 48.94696667, -113.3753306
+    Parameters: 00060=flow
+    In usgs_sites table: YES
+  06012500 — Red Rock R bl Lima Reservoir nr Monida MT
+    Lat/Lng: 44.65588056, -112.3712222
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06016000 — Beaverhead River at Barretts MT
+    Lat/Lng: 45.11612778, -112.7504944
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06017000 — Beaverhead River at Dillon MT
+    Lat/Lng: 45.2183833, -112.6553333
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06018500 — Beaverhead River near Twin Bridges MT
+    Lat/Lng: 45.38338889, -112.4528306
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06019500 — Ruby River above reservoir near Alder, MT
+    Lat/Lng: 45.1923194, -112.1428167
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06020600 — Ruby River below reservoir near Alder, MT
+    Lat/Lng: 45.2418694, -112.1112389
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06023000 — Ruby River near Twin Bridges MT
+    Lat/Lng: 45.50691389, -112.3308889
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06023100 — Beaverhead River at Twin Bridges, MT
+    Lat/Lng: 45.54688889, -112.338111
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06025100 — Quartz Hill Gulch near Wise River MT
+    Lat/Lng: 45.7763722, -112.8619306
+    Parameters: 00010=temp
+    In usgs_sites table: YES
+  06033000 — Boulder River near Boulder, MT
+    Lat/Lng: 46.21103056, -112.09165
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06035000 — Willow Creek near Harrison MT
+    Lat/Lng: 45.723058, -111.741025
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06038550 — Cabin Creek near West Yellowstone MT
+    Lat/Lng: 44.87144167, -111.343461
+    Parameters: 00010=temp
+    In usgs_sites table: YES
+  06050000 — Hyalite C at Hyalite R S nr Bozeman MT
+    Lat/Lng: 45.56332778, -111.0718889
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06061500 — Prickly Pear Creek near Clancy MT
+    Lat/Lng: 46.5190972, -111.946786
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06062500 — Tenmile Creek near Rimini MT
+    Lat/Lng: 46.5238972, -112.2566472
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06063000 — Tenmile Creek near Helena MT
+    Lat/Lng: 46.60500556, -112.0882639
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06071300 — Little Prickly Pear Cr at Wolf Cr MT
+    Lat/Lng: 47.0054361, -112.070311
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06073500 — Dearborn River near Craig MT
+    Lat/Lng: 47.199025, -112.0959056
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06076690 — Smith River near Ft Logan MT
+    Lat/Lng: 46.7958, -111.1785556
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06077200 — Smith River bl Eagle Cr nr Fort Logan MT
+    Lat/Lng: 46.82798056, -111.1922389
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06077500 — Smith River near Eden MT
+    Lat/Lng: 47.18929167, -111.3862389
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06078500 — North Fork Sun River near Augusta MT
+    Lat/Lng: 47.6398611, -112.8593333
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06079000 — South Fork Sun River near Augusta MT
+    Lat/Lng: 47.6286083, -112.865761
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06080900 — Sun River bl Diversion Dam nr Augusta MT
+    Lat/Lng: 47.61850556, -112.6920556
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06082200 — Sun River bl Willow Cr nr Augusta MT
+    Lat/Lng: 47.5471361, -112.3674306
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06085800 — Sun River at Simms MT
+    Lat/Lng: 47.50162778, -111.9319139
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06088500 — Muddy Creek at Vaughn MT
+    Lat/Lng: 47.56126667, -111.54176944
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06089000 — Sun River near Vaughn MT
+    Lat/Lng: 47.52577778, -111.511036
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06090500 — Belt Creek near Monarch MT
+    Lat/Lng: 47.20859444, -110.93174722
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06091700 — Two Medicine River bl South Fork nr Browning MT
+    Lat/Lng: 48.42695278, -112.9899833
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06092020 — Two Medicine River ab Badger Cr, nr Piegan, MT
+    Lat/Lng: 48.5077222, -112.6122694
+    Parameters: 00060=flow
+    In usgs_sites table: YES
+  06093200 — Badger Cr bl Four Horns Canal nr Browning MT
+    Lat/Lng: 48.36945, -112.8017806
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06094900 — Birch Cr bl Heart Butte Road, nr Heart Butte, MT
+    Lat/Lng: 48.24466667, -112.6979167
+    Parameters: 00060=flow
+    In usgs_sites table: YES
+  06096001 — Birch Cr Main Canal at diversion, nr Dupuyer, MT
+    Lat/Lng: 48.25175, -112.6254444
+    Parameters: 00060=flow
+    In usgs_sites table: YES
+  06097000 — Birch Creek at Robare, MT
+    Lat/Lng: 48.31985278, -112.5657806
+    Parameters: 00060=flow
+    In usgs_sites table: YES
+  06098120 — Birch Creek at Bullhead Bridge, nr Valier, MT
+    Lat/Lng: 48.39110278, -112.319661
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06098800 — Cut Bank Cr ab Gillam Coulee, nr Sundance, MT
+    Lat/Lng: 48.67847778, -112.5940056
+    Parameters: 00060=flow
+    In usgs_sites table: YES
+  06099000 — Cut Bank Creek at Cut Bank MT
+    Lat/Lng: 48.63340278, -112.3464806
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06101200 — Willow Creek near Galata, MT
+    Lat/Lng: 48.44865556, -111.3453056
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06102500 — Teton River bl South Fork nr Choteau MT
+    Lat/Lng: 47.8830833, -112.6119833
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06108800 — Teton River at Loma MT
+    Lat/Lng: 47.9327194, -110.5144333
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06110020 — Judith River above Carr Creek near Utica MT
+    Lat/Lng: 46.9177222, -110.1889444
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06111800 — Big Spring Cr at R&B Trading Post nr Lewistown MT
+    Lat/Lng: 47.0878333, -109.4575
+    Parameters: 00060=flow
+    In usgs_sites table: YES
+  06114700 — Judith River nr mouth, nr Winifred MT
+    Lat/Lng: 47.6651583, -109.6520139
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06119600 — Musselshell River nr Martinsdale, MT
+    Lat/Lng: 46.4769583, -110.2489667
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06120500 — Musselshell River at Harlowton MT
+    Lat/Lng: 46.4288, -109.8411944
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06123030 — Musselshell River ab Mud Cr nr Shawmut MT
+    Lat/Lng: 46.31899167, -109.4605472
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06125600 — Musselshell River ab Big Coulee Creek at Lavina MT
+    Lat/Lng: 46.28905556, -108.9376111
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06126500 — Musselshell River near Roundup MT
+    Lat/Lng: 46.4277194, -108.5701028
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06127500 — Musselshell River at Musselshell MT
+    Lat/Lng: 46.522425, -108.1088722
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06130000 — Flatwillow Creek near Mosby MT
+    Lat/Lng: 46.9286611, -107.9328417
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06130500 — Musselshell River at Mosby MT
+    Lat/Lng: 46.99469167, -107.8891639
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06131200 — Nelson Creek near Van Norman MT
+    Lat/Lng: 47.5365944, -106.1534528
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06133500 — N F Milk River ab St. Mary canal nr Browning MT
+    Lat/Lng: 48.96352778, -113.0623556
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06135000 — Milk River at Eastern Crossing of Int Bndry
+    Lat/Lng: 48.9748194, -110.4217778
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06137570 — Boxelder Creek near Rocky Boy, MT
+    Lat/Lng: 48.2988333, -109.8354167
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06137574 — Boxelder Cr bl Brown's Res Div, nr Box Elder, MT
+    Lat/Lng: 48.3047694, -109.9240306
+    Parameters: 00060=flow
+    In usgs_sites table: YES
+  06137575 — Boxelder Creek at Box Elder, MT
+    Lat/Lng: 48.31035278, -110.019575
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06138580 — Big Sandy Cr ab Spring Coulee, nr Laredo, MT
+    Lat/Lng: 48.45269167, -109.9208278
+    Parameters: 00060=flow
+    In usgs_sites table: YES
+  06139500 — Big Sandy Creek near Havre MT
+    Lat/Lng: 48.52671389, -109.8415778
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06139800 — West Fork Beaver Creek nr Rocky Boy, MT
+    Lat/Lng: 48.1761472, -109.6421333
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06139850 — Beaver Creek ab Elk Creek, nr Rocky Boy, MT
+    Lat/Lng: 48.17931667, -109.6435694
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06139900 — Beaver Cr at Res Bndry nr Rocky Boy MT
+    Lat/Lng: 48.22408056, -109.6522667
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06140500 — Milk River at Havre MT
+    Lat/Lng: 48.5636861, -109.6959556
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06142400 — Clear Creek near Chinook MT
+    Lat/Lng: 48.5788694, -109.3911306
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06146980 — Lodge Creek near Chinook, MT
+    Lat/Lng: 48.6753611, -109.275
+    Parameters: 00060=flow
+    In usgs_sites table: YES
+  06151500 — Battle Creek near Chinook MT
+    Lat/Lng: 48.64949167, -109.2316944
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06153800 — Milk River at Merrill Rd, nr Harlem, MT
+    Lat/Lng: 48.52430556, -108.8551667
+    Parameters: 00060=flow
+    In usgs_sites table: YES
+  06154100 — Milk River near Harlem MT
+    Lat/Lng: 48.48964167, -108.75895
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06154390 — Peoples Creek near Cleveland, MT
+    Lat/Lng: 48.26405556, -108.8618278
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06154400 — Peoples Creek near Hays MT
+    Lat/Lng: 48.2237333, -108.7140528
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06154410 — Little Peoples Creek near Hays, MT
+    Lat/Lng: 47.9649333, -108.6559611
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06154430 — Lodge Pole Creek at Lodge Pole, MT
+    Lat/Lng: 48.0310972, -108.5326111
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06155030 — Milk River near Dodson MT
+    Lat/Lng: 48.40277778, -108.2940944
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06155500 — Milk River at Malta MT
+    Lat/Lng: 48.3621944, -107.876375
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06164510 — Milk River at Juneberg Bridge nr Saco MT
+    Lat/Lng: 48.50920278, -107.2187556
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06164600 — Beaver Creek trib near Zortman MT
+    Lat/Lng: 47.9274972, -108.3526722
+    Parameters: 00010=temp
+    In usgs_sites table: YES
+  06164623 — Little Warm Cr Tributary nr Lodge Pole MT
+    Lat/Lng: 47.99523889, -108.3200528
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06166000 — Beaver Cr bl Guston Coulee nr Saco MT
+    Lat/Lng: 48.3567833, -107.5821861
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06167500 — Beaver Creek near Hinsdale MT
+    Lat/Lng: 48.4203111, -107.1711389
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06172300 — Unger Creek near Vandalia MT
+    Lat/Lng: 48.37072778, -106.79735
+    Parameters: 00060=flow
+    In usgs_sites table: YES
+  06172310 — Milk River at Tampico MT
+    Lat/Lng: 48.30790556, -106.8223167
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06174500 — Milk River at Nashua MT
+    Lat/Lng: 48.13005278, -106.3643139
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06177500 — Redwater River at Circle MT
+    Lat/Lng: 47.4139722, -105.5756444
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06177700 — Cow Creek Tributary near Vida, MT
+    Lat/Lng: 47.7076833, -105.4917528
+    Parameters: 00060=flow
+    In usgs_sites table: YES
+  06178000 — Poplar River at international boundary
+    Lat/Lng: 48.9902861, -105.6969083
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06181000 — Poplar River near Poplar MT
+    Lat/Lng: 48.11791667, -105.1928167
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06183450 — Big Muddy Creek near Antelope MT
+    Lat/Lng: 48.6728972, -104.5120861
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06185110 — Big Muddy Creek nr mouth nr Culbertson MT
+    Lat/Lng: 48.16448056, -104.6295194
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06187915 — Soda Butte Cr at Park Bndry at Silver Gate
+    Lat/Lng: 45.00283056, -110.0018722
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06191000 — Gardner River near Mammoth, YNP
+    Lat/Lng: 44.9923444, -110.690975
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06191820 — Big Cr at Kendall Bridge nr Emigrant MT
+    Lat/Lng: 45.3057681, -110.848273
+    Parameters: 00010=temp
+    In usgs_sites table: YES
+  06192978 — Shields River bl SF Shields River nr Wilsall, MT
+    Lat/Lng: 46.167125, -110.4919472
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06195600 — Shields River nr Livingston MT
+    Lat/Lng: 45.7383611, -110.4794694
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06197800 — East Boulder River bl Dry Fork Cr nr Mcleod, MT
+    Lat/Lng: 45.5123333, -110.0877222
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06200000 — Boulder River at Big Timber MT
+    Lat/Lng: 45.8337944, -109.9387056
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06204050 — West Rosebud Creek near Roscoe MT
+    Lat/Lng: 45.24323889, -109.7313028
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06204070 — W Rosebud Cr at Emerald Lk Campground nr Roscoe
+    Lat/Lng: 45.25438735, -109.6998945
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06205000 — Stillwater River near Absarokee, MT
+    Lat/Lng: 45.53674167, -109.4220556
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06207800 — Bluewater Creek near Bridger, MT
+    Lat/Lng: 45.3313722, -108.801475
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06208790 — White Horse Canal near Silesia MT
+    Lat/Lng: 45.5163372, -108.8315328
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06211000 — Red Lodge Cr ab Cooney Re nr Boyd MT
+    Lat/Lng: 45.43785, -109.2533111
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06211500 — Willow Creek near Boyd MT
+    Lat/Lng: 45.4221472, -109.2305306
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06286490 — Big Horn Canal near St. Xavier MT
+    Lat/Lng: 45.3163485, -107.9184433
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06291500 — Lodge Grass Cr ab Willow Cr diversion, nr Wyola MT
+    Lat/Lng: 45.12775, -107.601917
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: NO
+  06293890 — Agency Canal Tailwaste near Hardin MT
+    Lat/Lng: 45.7305341, -107.567306
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06295113 — Rosebud C at Reservation Bndry nr Kirby MT
+    Lat/Lng: 45.36116667, -106.9903556
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06295220 — Rosebud C Bel Lame Deer C nr Lame Deer MT
+    Lat/Lng: 45.67582545, -106.700309
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06306300 — Tongue River at State Line nr Decker MT
+    Lat/Lng: 45.0091361, -106.8359444
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06307500 — Tongue River at Tongue R Dam nr Decker MT
+    Lat/Lng: 45.141275, -106.771356
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06307616 — Tongue R at Birney Day School Br nr Birney MT
+    Lat/Lng: 45.41160556, -106.4573528
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06307662 — Tongue River at Ashland, MT
+    Lat/Lng: 45.59775, -106.2749444
+    Parameters: 00060=flow
+    In usgs_sites table: YES
+  06307830 — Tongue R bl Brandenberg bridge nr Ashland MT
+    Lat/Lng: 45.8403861, -106.2234333
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06308500 — Tongue River at Miles City, MT
+    Lat/Lng: 46.3845944, -105.8455222
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06324500 — Powder River at Moorhead MT
+    Lat/Lng: 45.0571972, -105.8783778
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06326500 — Powder River near Locate MT
+    Lat/Lng: 46.4294361, -105.3103306
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  06327450 — Cains Coulee at Glendive MT
+    Lat/Lng: 47.09420556, -104.7132667
+    Parameters: 00060=flow
+    In usgs_sites table: YES
+  12301250 — Tobacco River at Eureka, MT
+    Lat/Lng: 48.8779472, -115.054461
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  12304500 — Yaak River near Troy MT
+    Lat/Lng: 48.5617222, -115.9701583
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  12323233 — Blacktail Creek above Grove Gulch, at Butte, MT
+    Lat/Lng: 45.9912694, -112.5273583
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  12323242 — Silver Bow Creek at Montana Street, at Butte, MT
+    Lat/Lng: 45.99572778, -112.538761
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  12323250 — Silver Bow Cr bl Blacktail Cr, at Butte, MT
+    Lat/Lng: 45.99916667, -112.5773222
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  12323600 — Silver Bow Creek at Opportunity MT
+    Lat/Lng: 46.1077583, -112.8052833
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  12323670 — Mill Creek nr Anaconda, MT
+    Lat/Lng: 46.0829722, -112.9171889
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  12323700 — Mill Creek at Opportunity, MT
+    Lat/Lng: 46.11360278, -112.82806111
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  12323710 — Willow Creek nr Anaconda, MT
+    Lat/Lng: 46.0645111, -112.8935306
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  12323720 — Willow Creek at Opportunity, MT
+    Lat/Lng: 46.10716389, -112.810611
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  12323750 — Silver Bow Creek at Warm Springs MT
+    Lat/Lng: 46.1794972, -112.780561
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  12323760 — Warm Springs Creek near Anaconda MT
+    Lat/Lng: 46.13366667, -112.9031528
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  12323770 — Warm Springs Creek at Warm Springs MT
+    Lat/Lng: 46.180375, -112.7850778
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  12323840 — Lost Creek near Anaconda MT
+    Lat/Lng: 46.161325, -112.8937972
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  12323850 — Lost Creek near Galen, MT
+    Lat/Lng: 46.2185722, -112.7741667
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  12325500 — Flint Creek near Southern Cross MT
+    Lat/Lng: 46.23266667, -113.2998722
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  12329500 — Flint Creek at Maxville MT
+    Lat/Lng: 46.4637583, -113.2402778
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  12330000 — Boulder Creek at Maxville MT
+    Lat/Lng: 46.47165278, -113.2357694
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  12331500 — Flint Creek near Drummond MT
+    Lat/Lng: 46.62872778, -113.1506917
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  12354000 — St. Regis River near St. Regis, MT
+    Lat/Lng: 47.2967111, -115.122625
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  12365700 — Stillwater River at Lawrence Park, at Kalispell
+    Lat/Lng: 48.21725, -114.313736
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  12366000 — Whitefish River near Kalispell MT
+    Lat/Lng: 48.3201861, -114.2785944
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  12370000 — Swan River near Bigfork, MT
+    Lat/Lng: 48.02423056, -113.9788194
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  12377150 — Mission Creek ab reservoir nr St. Ignatius MT
+    Lat/Lng: 47.32019167, -113.9878917
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  12381400 — South Fork Jocko River near Arlee MT
+    Lat/Lng: 47.19555, -113.850736
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  12389500 — Thompson River near Thompson Falls MT
+    Lat/Lng: 47.5918583, -115.229536
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  12390700 — Prospect Creek at Thompson Falls MT
+    Lat/Lng: 47.5860611, -115.3551
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+  453445106374201 — Lame Deer Cr ab Calls First Gulch nr Lame Deer, MT
+    Lat/Lng: 45.57905, -106.6283972
+    Parameters: 00010=temp
+    In usgs_sites table: YES
+  453632106394701 — Lame Deer Cr at Sweet Medicine Rd nr Lame Deer, MT
+    Lat/Lng: 45.6090083, -106.6631389
+    Parameters: 00010=temp
+    In usgs_sites table: YES
+  453711106400101 — Lame Deer Creek at 4th Street, at Lame Deer, MT
+    Lat/Lng: 45.61963889, -106.6668889
+    Parameters: 00010=temp
+    In usgs_sites table: YES
+  453738106403401 — Lame Deer Cr ab sewage treatment, nr Lame Deer, MT
+    Lat/Lng: 45.6272972, -106.676
+    Parameters: 00010=temp
+    In usgs_sites table: YES
+  453743106403101 — Lame Deer Cr bel sewage treatment nr Lame Deer, MT
+    Lat/Lng: 45.62858056, -106.6752889
+    Parameters: 00010=temp
+    In usgs_sites table: YES
+  453812106402901 — Lame Deer Cr ab Yellow Fox Gulch, nr Lame Deer, MT
+    Lat/Lng: 45.63656667, -106.6746722
+    Parameters: 00010=temp
+    In usgs_sites table: YES
+  453837106405001 — Lame Deer Cr bel Yellow Fox Gulch nr Lame Deer, MT
+    Lat/Lng: 45.6437, -106.6805583
+    Parameters: 00010=temp
+    In usgs_sites table: YES
+  462739112151101 — Tenmile Creek below Ruby Creek near Rimini MT
+    Lat/Lng: 46.4608333, -112.2530556
+    Parameters: 00010=temp
+    In usgs_sites table: YES
+  475207115253401 — Vermilion R 1.0 mi bl Grouse Cr nr Trout Creek, MT
+    Lat/Lng: 47.8687333, -115.426025
+    Parameters: 00010=temp
+    In usgs_sites table: YES
+  475209115242603 — Vermilion R 50 ft bl Grouse Cr, nr Trout Creek, MT
+    Lat/Lng: 47.8691944, -115.4071667
+    Parameters: 00010=temp
+    In usgs_sites table: YES
+  475210115240801 — Vermilion River ab Sims Creek, nr Trout Creek, MT
+    Lat/Lng: 47.86953056, -115.4022333
+    Parameters: 00010=temp
+    In usgs_sites table: YES
+  475210115242001 — Vermilion River bl Sims Creek, nr Trout Creek, MT
+    Lat/Lng: 47.86918889, -115.4055444
+    Parameters: 00010=temp
+    In usgs_sites table: YES
+  475210115243101 — Vermilion R 400 ft bl Grouse Cr nr Trout Creek, MT
+    Lat/Lng: 47.8693444, -115.4087333
+    Parameters: 00010=temp
+    In usgs_sites table: YES
+  475210115244001 — Vermilion R 1100 ft bl Grouse Cr nr Trout Creek MT
+    Lat/Lng: 47.86943889, -115.4111667
+    Parameters: 00010=temp
+    In usgs_sites table: YES
+  475210115250103 — Vermilion R, S channel, 0.55 mi bl Grouse Cr, MT
+    Lat/Lng: 47.8695, -115.4168472
+    Parameters: 00010=temp
+    In usgs_sites table: YES
+  475211115241701 — Sims Creek at mouth, nr Trout Creek, MT
+    Lat/Lng: 47.86964167, -115.4047972
+    Parameters: 00010=temp
+    In usgs_sites table: YES
+  475211115244901 — Vermilion R 1800 ft bl Grouse Cr nr Trout Creek MT
+    Lat/Lng: 47.86965556, -115.4136528
+    Parameters: 00010=temp
+    In usgs_sites table: YES
+  475211115245901 — Vermilion R, N channel, 0.55 mi bl Grouse Cr, MT
+    Lat/Lng: 47.8696472, -115.4163889
+    Parameters: 00010=temp
+    In usgs_sites table: YES
+  475211115250701 — Vermilion R .63 mi bl Grouse Cr nr Trout Creek, MT
+    Lat/Lng: 47.86978056, -115.4185389
+    Parameters: 00010=temp
+    In usgs_sites table: YES
+  475213115251801 — Vermilion R .78 mi bl Grouse Cr nr Trout Creek, MT
+    Lat/Lng: 47.8703694, -115.4215389
+    Parameters: 00010=temp
+    In usgs_sites table: YES
+  480608115242901 — Libby Wetland Site bl Schrieber Lake nr Libby, MT
+    Lat/Lng: 48.1022259, -115.4089188
+    Parameters: 00060=flow, 00010=temp
+    In usgs_sites table: YES
+
+END OF REPORT
