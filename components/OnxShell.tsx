@@ -42,14 +42,17 @@ type River = FishabilityRow;
 // ─── Tier helpers ───────────────────────────────────────────────────────────
 
 function getTierColors(tier?: string | null) {
-  if (tier === "HOT" || tier === "GOOD") {
-    return { bg: "#dcf0d4", text: "#2d5a1b", dot: "#2d5a1b", label: "Good" };
+  if (tier === "HOT") {
+    return { bg: "#1a3d0e", text: "#ffffff", dot: "#a3d977", label: "Hot", accent: "#2d5a1b" };
+  }
+  if (tier === "GOOD") {
+    return { bg: "#dcf0d4", text: "#2d5a1b", dot: "#2d5a1b", label: "Good", accent: null };
   }
   if (tier === "FAIR") {
-    return { bg: "#fef3c7", text: "#92400e", dot: "#d4900a", label: "Fair" };
+    return { bg: "#fef3c7", text: "#92400e", dot: "#d4900a", label: "Fair", accent: "#d4900a" };
   }
   if (tier === "TOUGH") {
-    return { bg: "#fee2e2", text: "#991b1b", dot: "#dc2626", label: "Tough" };
+    return { bg: "#fee2e2", text: "#991b1b", dot: "#dc2626", label: "Tough", accent: "#dc2626" };
   }
   return { bg: "#f3f4f6", text: "#6b7280", dot: "#9ca3af", label: "—" };
 }
@@ -488,13 +491,20 @@ function RiverRow({
   const tc = getTierColors(river.bite_tier);
   const score = river.fishability_score_calc;
 
+  const isHot = river.bite_tier === "HOT";
+
   return (
     <button
       onClick={onSelect}
       className={`mri-river-row ${selected ? "mri-river-row-selected" : ""}`}
+      style={isHot ? { borderLeft: "2px solid #2d5a1b", paddingLeft: "calc(var(--mri-row-px, 12px) - 2px)" } : undefined}
     >
-      <div className="mri-score-badge" style={{ background: tc.bg, color: tc.text }}>
-        {score != null ? Math.round(score) : "—"}
+      <div
+        className="mri-score-badge"
+        style={{ background: tc.bg, color: tc.text, display: "flex", flexDirection: "column", alignItems: "center", gap: 0 }}
+      >
+        <span>{score != null ? Math.round(score) : "—"}</span>
+        {isHot && <span style={{ fontSize: 7, color: "#a3d977", fontWeight: 700, letterSpacing: "0.05em", lineHeight: 1.2 }}>HOT</span>}
       </div>
       <div className="flex-1 min-w-0">
         <div className="text-[13px] font-semibold text-[var(--mri-text)] truncate leading-tight">{river.river_name}</div>
@@ -802,12 +812,21 @@ function RiverDetailContent({
   const score = selected.fishability_score_calc;
   const riverId = selected.river_id;
 
+  const isHot = selected.bite_tier === "HOT";
+
   return (
     <div className="space-y-3">
+      {/* Tier accent bar — top of panel, visible for all tiers except GOOD */}
+      {tc.accent && (
+        <div style={{ height: 3, background: tc.accent, borderRadius: "2px 2px 0 0", marginBottom: -4 }} />
+      )}
       {/* Score + tier */}
       <div className="flex items-end justify-between gap-4">
         <div>
-          <div className="text-[52px] font-bold leading-none tracking-tight" style={{ color: tc.text }}>
+          <div
+            className="text-[52px] font-bold leading-none tracking-tight"
+            style={{ color: isHot ? "#1a3d0e" : tc.text }}
+          >
             {score != null ? Math.round(score) : "—"}
           </div>
           <div className="text-[11px] text-[var(--mri-text-dim)] mt-1">{formatUpdatedAgo(selected.updated_at)}</div>
