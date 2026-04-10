@@ -1061,29 +1061,27 @@ function syncActiveStationsLayer(
       source: ACTIVE_STATIONS_SOURCE,
       minzoom: 5,
       paint: {
+        // Navy fill — visually distinct from green fishing access circles
         "circle-color": [
           "case",
           ["==", ["get", "is_selected_source"], true],
-          "#dff4ff",
-          "#f8fbff",
+          "#ffffff",
+          "#1a3a5c",
         ],
         "circle-radius": [
-          "interpolate",
-          ["linear"],
-          ["zoom"],
-          5, ["case", ["==", ["get", "is_selected_source"], true], 4.6, 3.1],
-          9, ["case", ["==", ["get", "is_selected_source"], true], 6.1, 4.1],
-          12, ["case", ["==", ["get", "is_selected_source"], true], 7.2, 5],
+          "case",
+          ["==", ["get", "is_selected_source"], true],
+          7,
+          5,
         ],
         "circle-stroke-color": [
           "case",
           ["==", ["get", "is_selected_source"], true],
-          "rgba(95,183,255,0.95)",
-          "rgba(8,19,28,0.96)",
+          "#5b9bd5",
+          "#7eb8d4",
         ],
-        "circle-stroke-width": ["case", ["==", ["get", "is_selected_source"], true], 2, 1.3],
+        "circle-stroke-width": 1.5,
         "circle-opacity": 0.96,
-        "circle-blur": 0.03,
       },
     });
   }
@@ -1760,7 +1758,10 @@ export function MapView({
       source: ACCESS_SOURCE,
       paint: {
         "circle-color": "#2d5a1b",
-        "circle-radius": 6,
+        // All features in this source are for the selected river, so use the
+        // "selected" radius of 8 to give a subtle pulse vs the base 6 used when
+        // the access layer is shown without a selection context.
+        "circle-radius": 8,
         "circle-stroke-color": "white",
         "circle-stroke-width": 2,
         "circle-opacity": 0.95,
@@ -1831,6 +1832,42 @@ export function MapView({
         </div>
       )}
       {mapReady && mapRef.current && <MapControls map={mapRef.current} />}
+      {/* Map legend — only shown when a river is selected and access points are visible */}
+      {selectedRiver && effectiveLayerState.access_fishing_sites && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: 28,
+            left: 10,
+            background: "white",
+            border: "0.5px solid rgba(0,0,0,0.18)",
+            borderRadius: 8,
+            padding: "6px 8px",
+            fontSize: 10,
+            lineHeight: "16px",
+            pointerEvents: "none",
+            zIndex: 10,
+            display: "flex",
+            flexDirection: "column",
+            gap: 3,
+          }}
+        >
+          {/* Fishing access — green circle */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <svg width="12" height="12" viewBox="0 0 12 12">
+              <circle cx="6" cy="6" r="4.5" fill="#2d5a1b" stroke="white" strokeWidth="1.5" />
+            </svg>
+            <span style={{ color: "#333" }}>Fishing access</span>
+          </div>
+          {/* USGS gauge — navy diamond (circle rotated 45°) */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <svg width="12" height="12" viewBox="0 0 12 12">
+              <rect x="3" y="3" width="6" height="6" rx="0.5" fill="#1a3a5c" stroke="#7eb8d4" strokeWidth="1.5" transform="rotate(45 6 6)" />
+            </svg>
+            <span style={{ color: "#333" }}>USGS gauge</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
