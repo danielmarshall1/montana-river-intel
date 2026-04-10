@@ -39,7 +39,7 @@ as $$
     'properties', jsonb_build_object(
       'river_id', r.id,
       'slug', r.slug,
-      'name', coalesce(r.river_name, r.name, r.slug)
+      'name', coalesce(r.river_name, r.slug)
     )
   )
   from public.rivers r
