@@ -410,7 +410,7 @@ function TrendChart({ historyRows }: { historyRows: HistoryRow[] }) {
       : "";
 
   return (
-    <div className="mri-card p-3 space-y-3">
+    <div className="mri-card p-3 space-y-3 overflow-hidden">
       <div className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--mri-text-dim)]">14-Day Trends</div>
 
       {hasScore && (
@@ -736,7 +736,7 @@ function AccessWeatherPanel({ riverId }: { riverId: string }) {
           const showGust = pt.gust_mph != null && pt.wind_mph != null && pt.gust_mph > pt.wind_mph + 5;
           const showPrecip = pt.precip_chance_pct != null && pt.precip_chance_pct > 20;
           return (
-            <div key={pt.id} className="mri-card px-3 py-2.5">
+            <div key={pt.id} className="mri-card px-3 py-2.5" style={{ minHeight: 48 }}>
               <div className="text-[12px] font-semibold text-[var(--mri-text)] leading-snug truncate mb-1.5">
                 {pt.name}
               </div>
@@ -824,7 +824,7 @@ function RiverDetailContent({
       <div className="flex items-end justify-between gap-4">
         <div>
           <div
-            className="text-[52px] font-bold leading-none tracking-tight"
+            className="text-[56px] font-bold leading-none tracking-tight"
             style={{ color: isHot ? "#1a3d0e" : tc.text }}
           >
             {score != null ? Math.round(score) : "—"}
@@ -962,12 +962,15 @@ export default function OnxShell({
 }) {
   type MobileListSnap = "peek" | "mid" | "full";
 
+  // Computed dynamically so peek always reveals ~280px of sheet on any screen height.
+  const [peekSnap, setPeekSnap] = useState(0.62);
+
   const SHEET_SNAPS: Record<MobileListSnap, number> = {
-    peek: 0.72,
+    peek: peekSnap,
     mid: 0.40,
     full: 0.0,
   };
-  const SNAP_TRANSITION = "transform 260ms cubic-bezier(0.32, 0.72, 0, 1)";
+  const SNAP_TRANSITION = "transform 260ms ease-out";
 
   // ── Core UI state
   const [search, setSearch] = useState("");
@@ -977,7 +980,7 @@ export default function OnxShell({
 
   // ── Mobile bottom sheet
   const [sheetSnap, setSheetSnap] = useState<MobileListSnap>("peek");
-  const [sheetY, setSheetY] = useState<number>(SHEET_SNAPS.peek);
+  const [sheetY, setSheetY] = useState<number>(0.62);
   const [isDragging, setIsDragging] = useState(false);
   const sheetDragRef = useRef<{ startY: number; startFraction: number } | null>(null);
 
@@ -1081,6 +1084,25 @@ export default function OnxShell({
     media.addEventListener("change", sync);
     return () => media.removeEventListener("change", sync);
   }, []);
+
+  // ── Dynamic peek snap: sheet reveals ~280px regardless of screen height
+  // sheet is 90dvh; visible = (0.9 - sheetY) * vh = 280px → sheetY = 0.9 - 280/vh
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    function update() {
+      const vh = window.innerHeight || 812;
+      const snap = Math.max(0.50, Math.min(0.78, 0.9 - 280 / vh));
+      setPeekSnap(snap);
+    }
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+
+  // When peekSnap updates (resize), re-sync position if sheet is at peek
+  useEffect(() => {
+    if (sheetSnap === "peek") setSheetY(peekSnap);
+  }, [peekSnap]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── River geometry fetch
   useEffect(() => {
@@ -1317,7 +1339,7 @@ export default function OnxShell({
 
       {/* Mobile header */}
       <header className="absolute top-0 left-0 right-0 z-20 sm:hidden px-3 pt-[max(12px,env(safe-area-inset-top))]">
-        <div className="mri-card flex items-center gap-3 px-3 py-2.5">
+        <div className="mri-card flex items-center gap-3 px-3 py-2.5 min-h-[44px]">
           <div className="flex-shrink-0">
             <div className="text-[14px] font-bold text-[#2d5a1b] tracking-tight">MRI</div>
           </div>
@@ -1366,11 +1388,11 @@ export default function OnxShell({
           </div>
 
           {/* Sheet header */}
-          <div className="flex-shrink-0 flex items-center justify-between px-4 pt-1 pb-2">
-            <div className="text-[13px] font-semibold text-[var(--mri-text)]">
+          <div className="flex-shrink-0 flex items-center justify-between px-4 pt-1 pb-2 gap-2">
+            <div className="text-[13px] font-semibold text-[var(--mri-text)] truncate">
               {filtered.length} rivers · {dateLabel}
             </div>
-            <div className="text-[11px] text-[var(--mri-text-dim)]">{formatPullTime(latestPullAt)} MT</div>
+            <div className="text-[10px] text-[var(--mri-text-dim)] whitespace-nowrap flex-shrink-0">{formatPullTime(latestPullAt)}</div>
           </div>
 
           {/* River list */}
@@ -1409,7 +1431,7 @@ export default function OnxShell({
             onPointerCancel={onDetailHandlePointerUp}
           >
             <button
-              className="flex items-center gap-1.5 text-[13px] font-medium text-[#2d5a1b]"
+              className="flex items-center gap-1.5 text-[13px] font-medium text-[#2d5a1b] min-h-[44px] px-1 -ml-1"
               onClick={() => { setMobileDetailOpen(false); setSelectedId(null); }}
             >
               <ChevronLeft size={16} strokeWidth={2.5} />
