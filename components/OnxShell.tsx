@@ -813,7 +813,15 @@ function StationStripSkeleton() {
   );
 }
 
-function RiverStationStrip({ riverId }: { riverId: string }) {
+function RiverStationStrip({
+  riverId,
+  selectedSiteNo,
+  onStationClick,
+}: {
+  riverId: string;
+  selectedSiteNo: string | null;
+  onStationClick: (seg: RiverSegmentPoint) => void;
+}) {
   const [segments, setSegments] = useState<RiverSegmentPoint[] | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -842,47 +850,61 @@ function RiverStationStrip({ riverId }: { riverId: string }) {
       </div>
       {/* Scrollable strip — horizontal scroll for rivers with many segments */}
       <div style={{ display: "flex", alignItems: "center", overflowX: "auto", paddingBottom: 2 }}>
-        {segments.map((seg, i) => (
-          <React.Fragment key={seg.site_no}>
-            {/* Connector line between stations */}
-            {i > 0 && (
-              <div style={{ flexShrink: 0, position: "relative" as const, width: 24, height: 1, background: "rgba(91,155,213,0.30)" }}>
-                <div style={{
-                  position: "absolute" as const, right: -2, top: -3,
-                  width: 0, height: 0,
-                  borderTop: "3.5px solid transparent",
-                  borderBottom: "3.5px solid transparent",
-                  borderLeft: "5px solid rgba(91,155,213,0.40)",
-                }} />
-              </div>
-            )}
-            {/* Station column — flex-shrink: 0 prevents compression on many-station rivers */}
-            <div style={{
-              display: "flex", flexDirection: "column" as const, alignItems: "center", gap: 3,
-              padding: "6px 4px",
-              borderRadius: 8,
-              minWidth: 60,
-              flexShrink: 0,
-              background: seg.is_primary ? "rgba(45,90,27,0.05)" : "transparent",
-            }}>
-              <div style={{ fontSize: 10, color: "var(--mri-text-muted)", textAlign: "center" as const, lineHeight: 1.2, width: 64, wordBreak: "break-word" as const }}>
-                {seg.display_name}
-              </div>
-              {seg.is_primary && (
-                <div style={{ width: 5, height: 5, borderRadius: "50%", background: "#2d5a1b" }} />
+        {segments.map((seg, i) => {
+          const isSelected = seg.site_no === selectedSiteNo;
+          return (
+            <React.Fragment key={seg.site_no}>
+              {/* Connector line between stations */}
+              {i > 0 && (
+                <div style={{ flexShrink: 0, position: "relative" as const, width: 24, height: 1, background: "rgba(91,155,213,0.30)" }}>
+                  <div style={{
+                    position: "absolute" as const, right: -2, top: -3,
+                    width: 0, height: 0,
+                    borderTop: "3.5px solid transparent",
+                    borderBottom: "3.5px solid transparent",
+                    borderLeft: "5px solid rgba(91,155,213,0.40)",
+                  }} />
+                </div>
               )}
-              <div style={{ fontSize: 12, fontWeight: 600, color: "var(--mri-text)", lineHeight: 1 }}>
-                {seg.flow_cfs != null ? `${Math.round(seg.flow_cfs).toLocaleString()}` : "—"}
-              </div>
-              <div style={{ fontSize: 9, color: "var(--mri-text-dim)", lineHeight: 1 }}>
-                {seg.flow_cfs != null ? "cfs" : ""}
-              </div>
-              <div style={{ fontSize: 11, color: "var(--mri-text-muted)", lineHeight: 1 }}>
-                {seg.water_temp_f != null ? `${seg.water_temp_f.toFixed(1)}°F` : "—"}
-              </div>
-            </div>
-          </React.Fragment>
-        ))}
+              {/* Station column — clickable; highlighted when selected */}
+              <button
+                onClick={() => onStationClick(seg)}
+                style={{
+                  display: "flex", flexDirection: "column" as const, alignItems: "center", gap: 3,
+                  padding: "6px 4px",
+                  borderRadius: 8,
+                  minWidth: 60,
+                  flexShrink: 0,
+                  background: isSelected ? "rgba(45,90,27,0.10)" : seg.is_primary ? "rgba(45,90,27,0.05)" : "transparent",
+                  borderBottom: isSelected ? "2px solid #2d5a1b" : "2px solid transparent",
+                  cursor: "pointer",
+                  border: "none",
+                  borderBottomWidth: 2,
+                  borderBottomStyle: "solid" as const,
+                  borderBottomColor: isSelected ? "#2d5a1b" : "transparent",
+                  outline: "none",
+                  WebkitTapHighlightColor: "transparent",
+                }}
+              >
+                <div style={{ fontSize: 10, color: "var(--mri-text-muted)", textAlign: "center" as const, lineHeight: 1.2, width: 64, wordBreak: "break-word" as const }}>
+                  {seg.display_name}
+                </div>
+                {seg.is_primary && (
+                  <div style={{ width: 5, height: 5, borderRadius: "50%", background: "#2d5a1b" }} />
+                )}
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--mri-text)", lineHeight: 1 }}>
+                  {seg.flow_cfs != null ? `${Math.round(seg.flow_cfs).toLocaleString()}` : "—"}
+                </div>
+                <div style={{ fontSize: 9, color: "var(--mri-text-dim)", lineHeight: 1 }}>
+                  {seg.flow_cfs != null ? "cfs" : ""}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--mri-text-muted)", lineHeight: 1 }}>
+                  {seg.water_temp_f != null ? `${seg.water_temp_f.toFixed(1)}°F` : "—"}
+                </div>
+              </button>
+            </React.Fragment>
+          );
+        })}
       </div>
     </div>
   );
@@ -1057,6 +1079,8 @@ function RiverDetailContent({
   onToggleMetrics,
   onToggleTransparency,
   decisionCard,
+  selectedStationSiteNo,
+  onStationClick,
 }: {
   selected: River;
   selectedFishIndex: ReturnType<typeof getFishabilityIndex>;
@@ -1069,6 +1093,8 @@ function RiverDetailContent({
   onToggleMetrics: () => void;
   onToggleTransparency: () => void;
   decisionCard: DecisionCard | null;
+  selectedStationSiteNo: string | null;
+  onStationClick: (seg: RiverSegmentPoint) => void;
 }) {
   const tc = getTierColors(selected.bite_tier);
   const score = selected.fishability_score_calc;
@@ -1082,7 +1108,7 @@ function RiverDetailContent({
       {decisionCard && <DecisionCardUI card={decisionCard} />}
 
       {/* Station strip — multi-gauge longitudinal view */}
-      <RiverStationStrip riverId={riverId} />
+      <RiverStationStrip riverId={riverId} selectedSiteNo={selectedStationSiteNo} onStationClick={onStationClick} />
 
       {/* Tier accent bar — top of panel, visible for all tiers except GOOD */}
       {tc.accent && (
@@ -1245,6 +1271,7 @@ export default function OnxShell({
   const [tier, setTier] = useState<"All" | "Good" | "Fair" | "Tough">("All");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectionSeq, setSelectionSeq] = useState(0);
+  const [selectedStationSiteNo, setSelectedStationSiteNo] = useState<string | null>(null);
 
   // ── Mobile bottom sheet
   const [sheetSnap, setSheetSnap] = useState<MobileListSnap>("peek");
@@ -1521,7 +1548,15 @@ export default function OnxShell({
 
   function selectRiver(riverId: string | null) {
     setSelectedId(riverId);
+    setSelectedStationSiteNo(null);
     if (riverId) setSelectionSeq((prev) => prev + 1);
+  }
+
+  function handleStationClick(seg: RiverSegmentPoint) {
+    setSelectedStationSiteNo((prev) => (prev === seg.site_no ? null : seg.site_no));
+    if (seg.lat != null && seg.lng != null) {
+      mapRef.current?.flyTo({ center: [seg.lng, seg.lat], zoom: 11, duration: 400, essential: true });
+    }
   }
 
   // ── Mobile bottom sheet drag
@@ -1599,6 +1634,7 @@ export default function OnxShell({
           onSelectRiver={(r) => selectRiver(r.river_id)}
           className="absolute inset-0"
           onMapReady={(m) => { mapRef.current = m; }}
+          highlightedStationSiteNo={selectedStationSiteNo}
         />
       </div>
 
@@ -1734,6 +1770,8 @@ export default function OnxShell({
               onToggleMetrics={() => setMobileDetailMetricsOpen((v) => !v)}
               onToggleTransparency={() => setMobileTransparencyOpen((v) => !v)}
               decisionCard={decisionCard}
+              selectedStationSiteNo={selectedStationSiteNo}
+              onStationClick={handleStationClick}
             />
           </div>
         </section>
@@ -1879,6 +1917,8 @@ export default function OnxShell({
               onToggleMetrics={() => setDetailMetricsOpen((v) => !v)}
               onToggleTransparency={() => setTransparencyOpen((v) => !v)}
               decisionCard={decisionCard}
+              selectedStationSiteNo={selectedStationSiteNo}
+              onStationClick={handleStationClick}
             />
           </div>
         )}

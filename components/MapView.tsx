@@ -43,6 +43,7 @@ interface MapViewProps {
   className?: string;
   initialStyleUrl?: string;
   onMapReady?: (map: mapboxgl.Map) => void;
+  highlightedStationSiteNo?: string | null;
 }
 
 const RIVERS_SOURCE = "rivers-source";
@@ -998,7 +999,8 @@ function syncActiveStationsLayer(
   map: mapboxgl.Map,
   enabled: boolean,
   stationsGeojson: GeoJSON.FeatureCollection<GeoJSON.Point, Record<string, unknown>> | null | undefined,
-  selectedRiver: FishabilityRow | null | undefined
+  selectedRiver: FishabilityRow | null | undefined,
+  highlightedStationSiteNo?: string | null
 ) {
   const hasFeatures = Boolean(stationsGeojson?.features?.length);
   if (!enabled || !hasFeatures) {
@@ -1024,6 +1026,7 @@ function syncActiveStationsLayer(
       const siteNo = props.site_no != null ? String(props.site_no) : "";
       const isFlowSource = Boolean(selectedFlowSiteNo && siteNo === selectedFlowSiteNo);
       const isTempSource = Boolean(selectedTempSiteNo && siteNo === selectedTempSiteNo);
+      const isHighlighted = Boolean(highlightedStationSiteNo && siteNo === highlightedStationSiteNo);
       return {
         ...feature,
         properties: {
@@ -1031,6 +1034,7 @@ function syncActiveStationsLayer(
           is_selected_source: isFlowSource || isTempSource,
           is_selected_flow_source: isFlowSource,
           is_selected_temp_source: isTempSource,
+          is_highlighted: isHighlighted,
           selected_source_roles: [isFlowSource ? "flow" : null, isTempSource ? "temp" : null]
             .filter(Boolean)
             .join(" + "),
@@ -1062,25 +1066,37 @@ function syncActiveStationsLayer(
       minzoom: 5,
       paint: {
         // Navy fill — visually distinct from green fishing access circles
+        // Highlighted (strip-clicked) station: white fill with green stroke
         "circle-color": [
           "case",
+          ["==", ["get", "is_highlighted"], true],
+          "#ffffff",
           ["==", ["get", "is_selected_source"], true],
           "#ffffff",
           "#1a3a5c",
         ],
         "circle-radius": [
           "case",
+          ["==", ["get", "is_highlighted"], true],
+          10,
           ["==", ["get", "is_selected_source"], true],
           7,
           5,
         ],
         "circle-stroke-color": [
           "case",
+          ["==", ["get", "is_highlighted"], true],
+          "#2d5a1b",
           ["==", ["get", "is_selected_source"], true],
           "#5b9bd5",
           "#7eb8d4",
         ],
-        "circle-stroke-width": 1.5,
+        "circle-stroke-width": [
+          "case",
+          ["==", ["get", "is_highlighted"], true],
+          3,
+          1.5,
+        ],
         "circle-opacity": 0.96,
       },
     });
@@ -1235,6 +1251,7 @@ export function MapView({
   className,
   initialStyleUrl,
   onMapReady,
+  highlightedStationSiteNo,
 }: MapViewProps) {
   const effectiveLayerState = layerState ?? createDefaultLayerState();
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -1271,6 +1288,8 @@ export function MapView({
   activeStationsGeojsonRef.current = activeStationsGeojson ?? null;
   layerStateRef.current = effectiveLayerState;
   onMapReadyRef.current = onMapReady;
+  const highlightedStationSiteNoRef = useRef<string | null | undefined>(highlightedStationSiteNo);
+  highlightedStationSiteNoRef.current = highlightedStationSiteNo;
 
   const syncRuntimeLayers = useCallback((map: mapboxgl.Map) => {
     toneRasterBasemap(map);
@@ -1300,7 +1319,8 @@ export function MapView({
       map,
       layerStateRef.current.mri_active_stations,
       activeStationsGeojsonRef.current,
-      selectedRiverRef.current
+      selectedRiverRef.current,
+      highlightedStationSiteNoRef.current
     );
     syncHydrologyOverlays(
       map,
@@ -1704,7 +1724,7 @@ export function MapView({
     syncStatewideHydrologyLayer(map, effectiveLayerState.statewide_hydrology);
     syncFederalLandsLayer(map, effectiveLayerState.public_federal);
     syncStateLandsLayer(map, effectiveLayerState.public_state);
-    syncActiveStationsLayer(map, effectiveLayerState.mri_active_stations, activeStationsGeojson, selectedRiver);
+    syncActiveStationsLayer(map, effectiveLayerState.mri_active_stations, activeStationsGeojson, selectedRiver, highlightedStationSiteNo);
     syncHydrologyOverlays(
       map,
       effectiveLayerState.hydro_flow_magnitude,
@@ -1724,6 +1744,7 @@ export function MapView({
     effectiveLayerState.mri_labels,
     activeStationsGeojson,
     selectedRiver,
+    highlightedStationSiteNo,
   ]);
 
   // Dedicated fishing access effect — completely isolated so river switches are

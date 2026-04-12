@@ -19,6 +19,8 @@ export interface RiverSegmentPoint {
   flow_cfs: number | null;
   water_temp_f: number | null;
   observed_at: string | null;
+  lat: number | null;
+  lng: number | null;
 }
 
 async function fetchUsgsIv(siteNo: string): Promise<{ flow_cfs: number | null; water_temp_f: number | null; observed_at: string | null }> {
@@ -79,8 +81,18 @@ export async function GET(req: NextRequest) {
 
   const segments = data as SegmentRow[];
 
-  // Fetch all USGS IV readings concurrently
-  const liveData = await Promise.all(segments.map((s) => fetchUsgsIv(s.site_no)));
+  // Fetch USGS IV readings and station coordinates concurrently
+  const siteNos = segments.map((s) => s.site_no);
+  const [liveData, coordsRes] = await Promise.all([
+    Promise.all(segments.map((s) => fetchUsgsIv(s.site_no))),
+    supabase.from("usgs_sites").select("site_no, lat, lon").in("site_no", siteNos),
+  ]);
+
+  const coordMap = new Map<string, { lat: number | null; lng: number | null }>();
+  for (const row of coordsRes.data ?? []) {
+    const r = row as { site_no: string; lat: number | null; lon: number | null };
+    coordMap.set(r.site_no, { lat: r.lat, lng: r.lon });
+  }
 
   const result: RiverSegmentPoint[] = segments.map((s, i) => ({
     site_no: s.site_no,
@@ -90,6 +102,8 @@ export async function GET(req: NextRequest) {
     flow_cfs: liveData[i].flow_cfs,
     water_temp_f: liveData[i].water_temp_f,
     observed_at: liveData[i].observed_at,
+    lat: coordMap.get(s.site_no)?.lat ?? null,
+    lng: coordMap.get(s.site_no)?.lng ?? null,
   }));
 
   return NextResponse.json(result, {
