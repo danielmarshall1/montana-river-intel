@@ -888,28 +888,24 @@ function RiverStationStrip({ riverId }: { riverId: string }) {
   );
 }
 
-// ─── DecisionCardUI ───────────────────────────────────────────────────────────
+// ─── GoBanner ────────────────────────────────────────────────────────────────
 
-function GoIcon({ label }: { label: string }) {
-  const excellent = label === "Excellent" || label === "Good";
-  const color = excellent ? "#2d5a1b" : label === "Fair" ? "#d4900a" : "#dc2626";
+function GoBanner({ card }: { card: DecisionCard | null }) {
+  if (!card) return null;
+  const { label, detail } = card.go;
+  const isGood = label === "Excellent" || label === "Good";
+  const isFair = label === "Fair";
+  const bg = isGood ? "#e8f5e3" : isFair ? "#fff8e6" : "#fef2f2";
+  const textColor = isGood ? "#1a4d0a" : isFair ? "#92400e" : "#991b1b";
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
-      {excellent ? (
-        <>
-          <circle cx="8" cy="8" r="7" stroke={color} strokeWidth="1.5" />
-          <polyline points="5,8.5 7,10.5 11,6" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-        </>
-      ) : (
-        <>
-          <circle cx="8" cy="8" r="7" stroke={color} strokeWidth="1.5" />
-          <line x1="8" y1="5" x2="8" y2="9" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
-          <circle cx="8" cy="11.5" r="0.75" fill={color} />
-        </>
-      )}
-    </svg>
+    <div style={{ background: bg, borderRadius: 8, padding: "8px 12px", display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" as const }}>
+      <span style={{ fontSize: 14, fontWeight: 600, color: textColor, flexShrink: 0 }}>{label}</span>
+      <span style={{ fontSize: 12, color: textColor, opacity: 0.75 }}>{detail}</span>
+    </div>
   );
 }
+
+// ─── DecisionCardUI ───────────────────────────────────────────────────────────
 
 function AccessIcon({ icon }: { icon: DecisionCard["access"]["icon"] }) {
   if (icon === "caution") {
@@ -1020,13 +1016,8 @@ function DecisionCardUI({ card }: { card: DecisionCard }) {
       }}
     >
       <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", color: "var(--mri-text-dim)", padding: "8px 12px 4px" }}>
-        Quick Read
+        Fishing Intel
       </div>
-      <DecisionCardRow
-        icon={<GoIcon label={card.go.label} />}
-        label={card.go.label}
-        detail={card.go.detail}
-      />
       <DecisionCardRow
         icon={<AccessIcon icon={card.access.icon} />}
         label={card.access.label}
@@ -1722,9 +1713,13 @@ export default function OnxShell({
           {/* Detail content */}
           <div className="mri-scroll overflow-auto h-[calc(100dvh-80px)] px-4 pt-4 pb-[max(24px,env(safe-area-inset-bottom))]">
             {/* River name */}
-            <div className="mb-4">
+            <div className="mb-3">
               <div className="text-[22px] font-bold text-[var(--mri-text)] leading-tight">{selected.river_name}</div>
               <div className="text-[13px] text-[var(--mri-text-muted)] mt-0.5">{selected.gauge_label ?? ""}</div>
+            </div>
+
+            <div className="mb-3">
+              <GoBanner card={decisionCard} />
             </div>
 
             <RiverDetailContent
@@ -1852,7 +1847,7 @@ export default function OnxShell({
             className="mri-scroll flex-shrink-0 overflow-auto border-t border-[var(--mri-border)] bg-white px-3 pt-3 pb-4"
             style={{ maxHeight: "62vh" }}
           >
-            <div className="mb-3">
+            <div className="mb-2">
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <div className="text-[15px] font-bold text-[var(--mri-text)] leading-tight">{selected.river_name}</div>
@@ -1866,6 +1861,10 @@ export default function OnxShell({
                   <X size={13} />
                 </button>
               </div>
+            </div>
+
+            <div className="mb-3">
+              <GoBanner card={decisionCard} />
             </div>
 
             <RiverDetailContent
