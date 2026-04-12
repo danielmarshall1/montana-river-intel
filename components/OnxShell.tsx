@@ -9,6 +9,7 @@ import { fetchRiverGeojsonBrowser } from "@/lib/supabaseBrowser";
 import { RIVER_FOCUS_POINTS } from "@/lib/river-focus-points";
 import { deriveScoreBreakdown } from "@/lib/scoreBreakdown";
 import { generateTodaysRead } from "@/lib/todaysRead";
+import { buildDecisionCard, type DecisionCard } from "@/lib/decisionCard";
 import { MRI_COLORS } from "@/lib/theme";
 import { getFlowTrendArrow } from "@/lib/trend";
 import {
@@ -783,6 +784,171 @@ function AccessWeatherPanel({ riverId }: { riverId: string }) {
   );
 }
 
+// ─── DecisionCardUI ───────────────────────────────────────────────────────────
+
+function GoIcon({ label }: { label: string }) {
+  const excellent = label === "Excellent" || label === "Good";
+  const color = excellent ? "#2d5a1b" : label === "Fair" ? "#d4900a" : "#dc2626";
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
+      {excellent ? (
+        <>
+          <circle cx="8" cy="8" r="7" stroke={color} strokeWidth="1.5" />
+          <polyline points="5,8.5 7,10.5 11,6" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </>
+      ) : (
+        <>
+          <circle cx="8" cy="8" r="7" stroke={color} strokeWidth="1.5" />
+          <line x1="8" y1="5" x2="8" y2="9" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+          <circle cx="8" cy="11.5" r="0.75" fill={color} />
+        </>
+      )}
+    </svg>
+  );
+}
+
+function AccessIcon({ icon }: { icon: DecisionCard["access"]["icon"] }) {
+  if (icon === "caution") {
+    return (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
+        <polygon points="8,2 15,14 1,14" stroke="#d4900a" strokeWidth="1.5" strokeLinejoin="round" fill="none" />
+        <line x1="8" y1="7" x2="8" y2="10.5" stroke="#d4900a" strokeWidth="1.5" strokeLinecap="round" />
+        <circle cx="8" cy="12.5" r="0.7" fill="#d4900a" />
+      </svg>
+    );
+  }
+  if (icon === "drift") {
+    return (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
+        <path d="M2 10 Q5 6 8 9 Q11 12 14 8" stroke="#5b9bd5" strokeWidth="1.5" strokeLinecap="round" fill="none" />
+        <path d="M3 8 L3 11 L9 11 L9 8 Q6 6 3 8Z" stroke="#5b9bd5" strokeWidth="1.2" fill="none" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (icon === "both") {
+    return (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
+        <circle cx="5" cy="3" r="1.5" stroke="#2d5a1b" strokeWidth="1.2" />
+        <path d="M5 5 L5 10 M3 7 L7 7 M5 10 L3.5 13 M5 10 L6.5 13" stroke="#2d5a1b" strokeWidth="1.2" strokeLinecap="round" />
+        <path d="M10 8 Q12 6 14 8" stroke="#5b9bd5" strokeWidth="1.4" strokeLinecap="round" fill="none" />
+        <path d="M9 9 L9 11.5 L15 11.5 L15 9 Q12 7.5 9 9Z" stroke="#5b9bd5" strokeWidth="1.1" fill="none" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  // wade
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <circle cx="8" cy="3" r="1.5" stroke="#2d5a1b" strokeWidth="1.2" />
+      <path d="M8 5 L8 10 M6 7 L10 7 M8 10 L6 13.5 M8 10 L10 13.5" stroke="#2d5a1b" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function HatchIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <ellipse cx="8" cy="9" rx="2" ry="3" stroke="#92400e" strokeWidth="1.2" />
+      <path d="M8 6 Q5 4 2 5" stroke="#92400e" strokeWidth="1.2" strokeLinecap="round" />
+      <path d="M8 6 Q11 4 14 5" stroke="#92400e" strokeWidth="1.2" strokeLinecap="round" />
+      <path d="M8 8 Q5 7 3 8" stroke="#92400e" strokeWidth="1" strokeLinecap="round" opacity="0.6" />
+      <path d="M8 8 Q11 7 13 8" stroke="#92400e" strokeWidth="1" strokeLinecap="round" opacity="0.6" />
+    </svg>
+  );
+}
+
+function ClarityIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path d="M8 2 Q10 6 10 9 A2 2 0 0 1 6 9 Q6 6 8 2Z" stroke="#5b9bd5" strokeWidth="1.3" strokeLinejoin="round" fill="none" />
+    </svg>
+  );
+}
+
+function BestTimeIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <circle cx="8" cy="8" r="5.5" stroke="#d4900a" strokeWidth="1.3" />
+      <line x1="8" y1="5" x2="8" y2="8" stroke="#d4900a" strokeWidth="1.3" strokeLinecap="round" />
+      <line x1="8" y1="8" x2="10.5" y2="9.5" stroke="#d4900a" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function DecisionCardRow({
+  icon,
+  label,
+  detail,
+  last,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  detail: string;
+  last?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 10,
+        padding: "9px 12px",
+        borderBottom: last ? "none" : "0.5px solid var(--mri-border)",
+        minHeight: 44,
+      }}
+    >
+      <div style={{ marginTop: 2 }}>{icon}</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--mri-text)", lineHeight: 1.3 }}>{label}</div>
+        <div style={{ fontSize: 11, color: "var(--mri-text-muted)", marginTop: 2, lineHeight: 1.4 }}>{detail}</div>
+      </div>
+    </div>
+  );
+}
+
+function DecisionCardUI({ card }: { card: DecisionCard }) {
+  return (
+    <div
+      style={{
+        background: "var(--mri-surface)",
+        border: "0.5px solid var(--mri-border)",
+        borderRadius: 12,
+        boxShadow: "var(--mri-shadow-sm)",
+        overflow: "hidden",
+      }}
+    >
+      <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", color: "var(--mri-text-dim)", padding: "8px 12px 4px" }}>
+        Quick Read
+      </div>
+      <DecisionCardRow
+        icon={<GoIcon label={card.go.label} />}
+        label={card.go.label}
+        detail={card.go.detail}
+      />
+      <DecisionCardRow
+        icon={<AccessIcon icon={card.access.icon} />}
+        label={card.access.label}
+        detail={card.access.detail}
+      />
+      <DecisionCardRow
+        icon={<HatchIcon />}
+        label={card.hatch.label}
+        detail={card.hatch.detail}
+      />
+      <DecisionCardRow
+        icon={<ClarityIcon />}
+        label={card.clarity.label}
+        detail={card.clarity.detail}
+      />
+      <DecisionCardRow
+        icon={<BestTimeIcon />}
+        label={card.bestTime.label}
+        detail={card.bestTime.detail}
+        last
+      />
+    </div>
+  );
+}
+
 // ─── RiverDetailContent ───────────────────────────────────────────────────────
 
 function RiverDetailContent({
@@ -796,6 +962,7 @@ function RiverDetailContent({
   transparencyOpen,
   onToggleMetrics,
   onToggleTransparency,
+  decisionCard,
 }: {
   selected: River;
   selectedFishIndex: ReturnType<typeof getFishabilityIndex>;
@@ -807,6 +974,7 @@ function RiverDetailContent({
   transparencyOpen: boolean;
   onToggleMetrics: () => void;
   onToggleTransparency: () => void;
+  decisionCard: DecisionCard | null;
 }) {
   const tc = getTierColors(selected.bite_tier);
   const score = selected.fishability_score_calc;
@@ -816,6 +984,9 @@ function RiverDetailContent({
 
   return (
     <div className="space-y-3">
+      {/* Decision Card — at top of detail panel */}
+      {decisionCard && <DecisionCardUI card={decisionCard} />}
+
       {/* Tier accent bar — top of panel, visible for all tiers except GOOD */}
       {tc.accent && (
         <div style={{ height: 3, background: tc.accent, borderRadius: "2px 2px 0 0", marginBottom: -4 }} />
@@ -1045,6 +1216,7 @@ export default function OnxShell({
   const breakdown = useMemo(() => (selected ? deriveScoreBreakdown(selected) : null), [selected]);
   const selectedFishIndex = useMemo(() => getFishabilityIndex(selected?.fishability_score_calc ?? null), [selected]);
   const todaysRead = useMemo(() => generateTodaysRead(selected), [selected]);
+  const decisionCard = useMemo(() => selected ? buildDecisionCard(selected) : null, [selected]);
 
   const detailedAnalytics = useMemo(
     () =>
@@ -1460,6 +1632,7 @@ export default function OnxShell({
               transparencyOpen={mobileTransparencyOpen}
               onToggleMetrics={() => setMobileDetailMetricsOpen((v) => !v)}
               onToggleTransparency={() => setMobileTransparencyOpen((v) => !v)}
+              decisionCard={decisionCard}
             />
           </div>
         </section>
@@ -1600,6 +1773,7 @@ export default function OnxShell({
               transparencyOpen={transparencyOpen}
               onToggleMetrics={() => setDetailMetricsOpen((v) => !v)}
               onToggleTransparency={() => setTransparencyOpen((v) => !v)}
+              decisionCard={decisionCard}
             />
           </div>
         )}

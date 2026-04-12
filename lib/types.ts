@@ -42,6 +42,9 @@ export interface FishabilityRow {
   last_usgs_pull_at?: string | null;
   last_weather_pull_at?: string | null;
   last_river_daily_date?: string | null;
+  wading_threshold_cfs?: number | null;
+  drift_optimal_min_cfs?: number | null;
+  drift_optimal_max_cfs?: number | null;
 }
 
 export interface RiverGeom {
