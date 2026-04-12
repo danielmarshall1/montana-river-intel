@@ -21,6 +21,7 @@ export interface RiverSegmentPoint {
   observed_at: string | null;
   lat: number | null;
   lng: number | null;
+  flow_p50: number | null;
 }
 
 async function fetchUsgsIv(siteNo: string): Promise<{ flow_cfs: number | null; water_temp_f: number | null; observed_at: string | null }> {
@@ -81,11 +82,23 @@ export async function GET(req: NextRequest) {
 
   const segments = data as SegmentRow[];
 
-  // Fetch USGS IV readings and station coordinates concurrently
+  // Today's day-of-year (1-based) for historical percentile lookup
+  const now = new Date();
+  const start = new Date(now.getFullYear(), 0, 0);
+  const dayOfYear = Math.floor((now.getTime() - start.getTime()) / 86400000);
+
+  // Fetch USGS IV readings, station coordinates, and historical p50 concurrently
   const siteNos = segments.map((s) => s.site_no);
-  const [liveData, coordsRes] = await Promise.all([
+  const [liveData, coordsRes, percentilesRes] = await Promise.all([
     Promise.all(segments.map((s) => fetchUsgsIv(s.site_no))),
     supabase.from("usgs_sites").select("site_no, lat, lon").in("site_no", siteNos),
+    supabase
+      .from("river_historical_percentiles")
+      .select("flow_p50")
+      .eq("river_id", river_id)
+      .eq("day_of_year", dayOfYear)
+      .limit(1)
+      .maybeSingle(),
   ]);
 
   const coordMap = new Map<string, { lat: number | null; lng: number | null }>();
@@ -93,6 +106,8 @@ export async function GET(req: NextRequest) {
     const r = row as { site_no: string; lat: number | null; lon: number | null };
     coordMap.set(r.site_no, { lat: r.lat, lng: r.lon });
   }
+
+  const flow_p50 = (percentilesRes.data as { flow_p50: number | null } | null)?.flow_p50 ?? null;
 
   const result: RiverSegmentPoint[] = segments.map((s, i) => ({
     site_no: s.site_no,
@@ -104,6 +119,7 @@ export async function GET(req: NextRequest) {
     observed_at: liveData[i].observed_at,
     lat: coordMap.get(s.site_no)?.lat ?? null,
     lng: coordMap.get(s.site_no)?.lng ?? null,
+    flow_p50,
   }));
 
   return NextResponse.json(result, {

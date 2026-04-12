@@ -898,6 +898,12 @@ function RiverStationStrip({
                 <div style={{ fontSize: 9, color: "var(--mri-text-dim)", lineHeight: 1 }}>
                   {seg.flow_cfs != null ? "cfs" : ""}
                 </div>
+                {seg.flow_cfs != null && seg.flow_p50 != null && (() => {
+                  const ratio = seg.flow_cfs / seg.flow_p50;
+                  if (ratio > 1.15) return <div style={{ fontSize: 9, color: "#d4900a", lineHeight: 1 }}>↑ above median</div>;
+                  if (ratio < 0.85) return <div style={{ fontSize: 9, color: "#5b9bd5", lineHeight: 1 }}>↓ below median</div>;
+                  return <div style={{ fontSize: 9, color: "#888", lineHeight: 1 }}>~ median</div>;
+                })()}
                 <div style={{ fontSize: 11, color: "var(--mri-text-muted)", lineHeight: 1 }}>
                   {seg.water_temp_f != null ? `${seg.water_temp_f.toFixed(1)}°F` : "—"}
                 </div>
@@ -913,6 +919,9 @@ function RiverStationStrip({
 // ─── GoBanner ────────────────────────────────────────────────────────────────
 
 function GoBanner({ card }: { card: DecisionCard | null }) {
+  React.useEffect(() => {
+    if (card) console.log("[GoBanner] mounted with card:", card.go);
+  }, [card]);
   if (!card) return null;
   const { label, detail } = card.go;
   const isGood = label === "Excellent" || label === "Good";
@@ -920,7 +929,7 @@ function GoBanner({ card }: { card: DecisionCard | null }) {
   const bg = isGood ? "#e8f5e3" : isFair ? "#fff8e6" : "#fef2f2";
   const textColor = isGood ? "#1a4d0a" : isFair ? "#92400e" : "#991b1b";
   return (
-    <div style={{ background: bg, borderRadius: 8, padding: "8px 12px", display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" as const }}>
+    <div data-testid="go-banner" style={{ background: bg, borderRadius: 8, padding: "8px 12px", display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" as const }}>
       <span style={{ fontSize: 14, fontWeight: 600, color: textColor, flexShrink: 0 }}>{label}</span>
       <span style={{ fontSize: 12, color: textColor, opacity: 0.75 }}>{detail}</span>
     </div>
