@@ -836,17 +836,17 @@ function RiverStationStrip({ riverId }: { riverId: string }) {
   if (!segments || segments.length < 2) return null;
 
   return (
-    <div style={{ background: "var(--mri-surface)", border: "0.5px solid var(--mri-border)", borderRadius: 12, padding: "10px 12px", overflow: "hidden" }}>
+    <div style={{ background: "var(--mri-surface)", border: "0.5px solid var(--mri-border)", borderRadius: 12, padding: "10px 12px" }}>
       <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.12em", color: "var(--mri-text-dim)", marginBottom: 10 }}>
         Conditions Along the River
       </div>
-      <div style={{ display: "flex", alignItems: "center" }}>
+      {/* Scrollable strip — horizontal scroll for rivers with many segments */}
+      <div style={{ display: "flex", alignItems: "center", overflowX: "auto", paddingBottom: 2 }}>
         {segments.map((seg, i) => (
           <React.Fragment key={seg.site_no}>
             {/* Connector line between stations */}
             {i > 0 && (
-              <div style={{ flex: 1, position: "relative" as const, height: 1, background: "rgba(91,155,213,0.30)", minWidth: 8 }}>
-                {/* downstream arrow */}
+              <div style={{ flexShrink: 0, position: "relative" as const, width: 24, height: 1, background: "rgba(91,155,213,0.30)" }}>
                 <div style={{
                   position: "absolute" as const, right: -2, top: -3,
                   width: 0, height: 0,
@@ -856,15 +856,16 @@ function RiverStationStrip({ riverId }: { riverId: string }) {
                 }} />
               </div>
             )}
-            {/* Station column */}
+            {/* Station column — flex-shrink: 0 prevents compression on many-station rivers */}
             <div style={{
               display: "flex", flexDirection: "column" as const, alignItems: "center", gap: 3,
               padding: "6px 4px",
               borderRadius: 8,
               minWidth: 60,
+              flexShrink: 0,
               background: seg.is_primary ? "rgba(45,90,27,0.05)" : "transparent",
             }}>
-              <div style={{ fontSize: 10, color: "var(--mri-text-muted)", textAlign: "center" as const, lineHeight: 1.2, maxWidth: 68, wordBreak: "break-word" as const }}>
+              <div style={{ fontSize: 10, color: "var(--mri-text-muted)", textAlign: "center" as const, lineHeight: 1.2, width: 64, wordBreak: "break-word" as const }}>
                 {seg.display_name}
               </div>
               {seg.is_primary && (
@@ -1016,7 +1017,6 @@ function DecisionCardUI({ card }: { card: DecisionCard }) {
         border: "0.5px solid var(--mri-border)",
         borderRadius: 12,
         boxShadow: "var(--mri-shadow-sm)",
-        overflow: "hidden",
       }}
     >
       <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", color: "var(--mri-text-dim)", padding: "8px 12px 4px" }}>
