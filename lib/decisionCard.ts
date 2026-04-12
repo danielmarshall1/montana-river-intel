@@ -41,27 +41,24 @@ export function buildDecisionCard(river: FishabilityRow): DecisionCard {
   } else if (wadingThreshold == null) {
     // No threshold configured — give generic read based on absolute flow
     if (flow < 500) {
-      access = { label: "Wade only", detail: `Low water at ${Math.round(flow).toLocaleString()} cfs`, icon: rising ? "caution" : "wade" };
+      access = { label: "Wading recommended", detail: `Low water at ${Math.round(flow).toLocaleString()} cfs`, icon: rising ? "caution" : "wade" };
     } else if (flow < 2000) {
-      access = { label: "Wade or drift", detail: `${Math.round(flow).toLocaleString()} cfs — both methods viable`, icon: rising ? "caution" : "both" };
+      access = { label: "Wade or float", detail: `${Math.round(flow).toLocaleString()} cfs — either works`, icon: rising ? "caution" : "both" };
     } else {
-      access = { label: "Drift recommended", detail: `${Math.round(flow).toLocaleString()} cfs — drift boat preferred`, icon: rising ? "caution" : "drift" };
+      access = { label: "Float recommended", detail: `${Math.round(flow).toLocaleString()} cfs — floating preferred`, icon: rising ? "caution" : "drift" };
     }
   } else {
     const lo = wadingThreshold * 0.7;
     const hi = wadingThreshold * 1.3;
+    const caution = rising ? " — rising quickly, use caution if wading" : "";
     if (flow < lo) {
-      const detail = `Low water — wade carefully, fish are concentrated${rising ? " — rising fast, use caution" : ""}`;
-      access = { label: "Wade only", detail, icon: rising ? "caution" : "wade" };
+      access = { label: "Wading recommended", detail: `Low water — wade carefully, fish are concentrated${caution}`, icon: rising ? "caution" : "wade" };
     } else if (flow < wadingThreshold) {
-      const detail = `Good wading conditions at ${Math.round(flow).toLocaleString()} cfs${rising ? " — rising fast, use caution" : ""}`;
-      access = { label: "Wade or drift", detail, icon: rising ? "caution" : "both" };
+      access = { label: "Wade or float", detail: `Good wading conditions at ${Math.round(flow).toLocaleString()} cfs — either works${caution}`, icon: rising ? "caution" : "both" };
     } else if (flow < hi) {
-      const detail = `Marginal wading at ${Math.round(flow).toLocaleString()} cfs — drift boat preferred${rising ? " — rising fast, use caution" : ""}`;
-      access = { label: "Drift recommended", detail, icon: rising ? "caution" : "drift" };
+      access = { label: "Float recommended", detail: `Marginal wading at ${Math.round(flow).toLocaleString()} cfs — floating preferred${caution}`, icon: rising ? "caution" : "drift" };
     } else {
-      const detail = `Too high to wade safely at ${Math.round(flow).toLocaleString()} cfs${rising ? " — rising fast, use caution" : ""}`;
-      access = { label: "Drift boat only", detail, icon: rising ? "caution" : "drift" };
+      access = { label: "Float trip recommended", detail: `High water at ${Math.round(flow).toLocaleString()} cfs — floating safer than wading${caution}`, icon: rising ? "caution" : "drift" };
     }
   }
 

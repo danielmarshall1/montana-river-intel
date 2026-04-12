@@ -10,6 +10,7 @@ import { RIVER_FOCUS_POINTS } from "@/lib/river-focus-points";
 import { deriveScoreBreakdown } from "@/lib/scoreBreakdown";
 import { generateTodaysRead } from "@/lib/todaysRead";
 import { buildDecisionCard, type DecisionCard } from "@/lib/decisionCard";
+import type { RiverSegmentPoint } from "@/app/api/river-segments/route";
 import { MRI_COLORS } from "@/lib/theme";
 import { getFlowTrendArrow } from "@/lib/trend";
 import {
@@ -784,6 +785,108 @@ function AccessWeatherPanel({ riverId }: { riverId: string }) {
   );
 }
 
+// ─── RiverStationStrip ───────────────────────────────────────────────────────
+
+function StationStripSkeleton() {
+  return (
+    <div style={{ background: "var(--mri-surface)", border: "0.5px solid var(--mri-border)", borderRadius: 12, padding: "10px 12px", overflow: "hidden" }}>
+      <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.12em", color: "var(--mri-text-dim)", marginBottom: 10 }}>
+        Conditions Along the River
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
+        {[0, 1, 2].map((i) => (
+          <React.Fragment key={i}>
+            {i > 0 && (
+              <div style={{ flex: 1, height: 1, background: "rgba(91,155,213,0.25)", position: "relative" as const }}>
+                <div style={{ position: "absolute" as const, right: -3, top: -3, width: 0, height: 0, borderTop: "3.5px solid transparent", borderBottom: "3.5px solid transparent", borderLeft: "5px solid rgba(91,155,213,0.25)" }} />
+              </div>
+            )}
+            <div style={{ display: "flex", flexDirection: "column" as const, alignItems: "center", gap: 4, width: 72 }}>
+              <div style={{ height: 8, width: 48, borderRadius: 4, background: "#e5e7eb" }} />
+              <div style={{ height: 10, width: 32, borderRadius: 4, background: "#e5e7eb" }} />
+              <div style={{ height: 8, width: 24, borderRadius: 4, background: "#f3f4f6" }} />
+            </div>
+          </React.Fragment>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RiverStationStrip({ riverId }: { riverId: string }) {
+  const [segments, setSegments] = useState<RiverSegmentPoint[] | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setSegments(null);
+    fetch(`/api/river-segments?river_id=${encodeURIComponent(riverId)}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((data: RiverSegmentPoint[]) => {
+        if (!cancelled) { setSegments(data); setLoading(false); }
+      })
+      .catch(() => {
+        if (!cancelled) { setSegments([]); setLoading(false); }
+      });
+    return () => { cancelled = true; };
+  }, [riverId]);
+
+  if (loading) return <StationStripSkeleton />;
+  if (!segments || segments.length < 2) return null;
+
+  return (
+    <div style={{ background: "var(--mri-surface)", border: "0.5px solid var(--mri-border)", borderRadius: 12, padding: "10px 12px", overflow: "hidden" }}>
+      <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.12em", color: "var(--mri-text-dim)", marginBottom: 10 }}>
+        Conditions Along the River
+      </div>
+      <div style={{ display: "flex", alignItems: "center" }}>
+        {segments.map((seg, i) => (
+          <React.Fragment key={seg.site_no}>
+            {/* Connector line between stations */}
+            {i > 0 && (
+              <div style={{ flex: 1, position: "relative" as const, height: 1, background: "rgba(91,155,213,0.30)", minWidth: 8 }}>
+                {/* downstream arrow */}
+                <div style={{
+                  position: "absolute" as const, right: -2, top: -3,
+                  width: 0, height: 0,
+                  borderTop: "3.5px solid transparent",
+                  borderBottom: "3.5px solid transparent",
+                  borderLeft: "5px solid rgba(91,155,213,0.40)",
+                }} />
+              </div>
+            )}
+            {/* Station column */}
+            <div style={{
+              display: "flex", flexDirection: "column" as const, alignItems: "center", gap: 3,
+              padding: "6px 4px",
+              borderRadius: 8,
+              minWidth: 60,
+              background: seg.is_primary ? "rgba(45,90,27,0.05)" : "transparent",
+            }}>
+              <div style={{ fontSize: 10, color: "var(--mri-text-muted)", textAlign: "center" as const, lineHeight: 1.2, maxWidth: 68, wordBreak: "break-word" as const }}>
+                {seg.display_name}
+              </div>
+              {seg.is_primary && (
+                <div style={{ width: 5, height: 5, borderRadius: "50%", background: "#2d5a1b" }} />
+              )}
+              <div style={{ fontSize: 12, fontWeight: 600, color: "var(--mri-text)", lineHeight: 1 }}>
+                {seg.flow_cfs != null ? `${Math.round(seg.flow_cfs).toLocaleString()}` : "—"}
+              </div>
+              <div style={{ fontSize: 9, color: "var(--mri-text-dim)", lineHeight: 1 }}>
+                {seg.flow_cfs != null ? "cfs" : ""}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--mri-text-muted)", lineHeight: 1 }}>
+                {seg.water_temp_f != null ? `${seg.water_temp_f.toFixed(1)}°F` : "—"}
+              </div>
+            </div>
+          </React.Fragment>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── DecisionCardUI ───────────────────────────────────────────────────────────
 
 function GoIcon({ label }: { label: string }) {
@@ -986,6 +1089,9 @@ function RiverDetailContent({
     <div className="space-y-3">
       {/* Decision Card — at top of detail panel */}
       {decisionCard && <DecisionCardUI card={decisionCard} />}
+
+      {/* Station strip — multi-gauge longitudinal view */}
+      <RiverStationStrip riverId={riverId} />
 
       {/* Tier accent bar — top of panel, visible for all tiers except GOOD */}
       {tc.accent && (
