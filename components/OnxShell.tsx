@@ -1349,7 +1349,6 @@ export default function OnxShell({
   const breakdown = useMemo(() => (selected ? deriveScoreBreakdown(selected) : null), [selected]);
   const selectedFishIndex = useMemo(() => getFishabilityIndex(selected?.fishability_score_calc ?? null), [selected]);
   const todaysRead = useMemo(() => generateTodaysRead(selected), [selected]);
-  const decisionCard = useMemo(() => selected ? buildDecisionCard(selected) : null, [selected]);
 
   const detailedAnalytics = useMemo(
     () =>
@@ -1363,6 +1362,14 @@ export default function OnxShell({
         backendAnalytics,
       }),
     [selected, historyRows, intradayRows, weatherRows, sourceSites, backendAnalytics]
+  );
+
+  // decisionCard depends on detailedAnalytics so the live wind speed
+  // (from v_river_detail_analytics via backendAnalytics) overrides the
+  // forecast wind_am_mph / wind_pm_mph when it's higher.
+  const decisionCard = useMemo(
+    () => selected ? buildDecisionCard(selected, { windMph: detailedAnalytics?.weather.windSpeedMph }) : null,
+    [selected, detailedAnalytics?.weather.windSpeedMph]
   );
 
   const latestPullAt = useMemo(() => {

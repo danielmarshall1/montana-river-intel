@@ -8,7 +8,17 @@ export interface DecisionCard {
   bestTime: { label: string; detail: string };
 }
 
-export function buildDecisionCard(river: FishabilityRow): DecisionCard {
+/**
+ * Build the 5-dimension decision card from a FishabilityRow.
+ *
+ * @param overrides.windMph  Live current wind speed (e.g. from v_river_detail_analytics).
+ *   When provided it is used in addition to the forecast wind_am_mph / wind_pm_mph fields,
+ *   ensuring the card reflects the actual observed wind rather than only the daily forecast.
+ */
+export function buildDecisionCard(
+  river: FishabilityRow,
+  overrides?: { windMph?: number | null }
+): DecisionCard {
   const score = river.fishability_score_calc;
   const flow = river.flow_cfs;
   const temp = river.water_temp_f;
@@ -17,6 +27,15 @@ export function buildDecisionCard(river: FishabilityRow): DecisionCard {
   const windPm = river.wind_pm_mph;
   const precip = river.precip_mm;
   const wadingThreshold = river.wading_threshold_cfs;
+
+  // Effective wind: max of forecast am/pm and any live override (e.g. current observed wind)
+  const effectiveWind = Math.max(windAm ?? 0, windPm ?? 0, overrides?.windMph ?? 0);
+
+  console.log(
+    "[buildDecisionCard]",
+    river.river_name,
+    { wind_am_mph: windAm, wind_pm_mph: windPm, liveWindOverride: overrides?.windMph, effectiveWind }
+  );
 
   // ── GO ──────────────────────────────────────────────────────────────────────
   let go: DecisionCard["go"];
@@ -35,22 +54,25 @@ export function buildDecisionCard(river: FishabilityRow): DecisionCard {
   // ── ACCESS ──────────────────────────────────────────────────────────────────
   let access: DecisionCard["access"];
   const rising = (change48h ?? 0) > 20;
+  const highWind = effectiveWind > 20;
+  const windNote = highWind ? " — high wind today" : "";
 
   if (flow == null) {
     access = { label: "Unknown", detail: "Flow data unavailable", icon: "caution" };
   } else if (wadingThreshold == null) {
     // No threshold configured — give generic read based on absolute flow
     if (flow < 500) {
-      access = { label: "Wading recommended", detail: `Low water at ${Math.round(flow).toLocaleString()} cfs`, icon: rising ? "caution" : "wade" };
+      access = { label: "Wading recommended", detail: `Low water at ${Math.round(flow).toLocaleString()} cfs${windNote}`, icon: rising ? "caution" : "wade" };
     } else if (flow < 2000) {
-      access = { label: "Wade or float", detail: `${Math.round(flow).toLocaleString()} cfs — either works`, icon: rising ? "caution" : "both" };
+      access = { label: "Wade or float", detail: `${Math.round(flow).toLocaleString()} cfs — either works${windNote}`, icon: rising ? "caution" : "both" };
     } else {
-      access = { label: "Float recommended", detail: `${Math.round(flow).toLocaleString()} cfs — floating preferred`, icon: rising ? "caution" : "drift" };
+      access = { label: "Float recommended", detail: `${Math.round(flow).toLocaleString()} cfs — floating preferred${windNote}`, icon: rising ? "caution" : "drift" };
     }
   } else {
     const lo = wadingThreshold * 0.7;
     const hi = wadingThreshold * 1.3;
-    const caution = rising ? " — rising quickly, use caution if wading" : "";
+    const risingNote = rising ? " — rising quickly, use caution if wading" : "";
+    const caution = risingNote + windNote;
     if (flow < lo) {
       access = { label: "Wading recommended", detail: `Low water — wade carefully, fish are concentrated${caution}`, icon: rising ? "caution" : "wade" };
     } else if (flow < wadingThreshold) {
@@ -95,8 +117,13 @@ export function buildDecisionCard(river: FishabilityRow): DecisionCard {
 
   // ── BEST TIME ───────────────────────────────────────────────────────────────
   let bestTime: DecisionCard["bestTime"];
-  if ((windPm ?? 0) > 20) {
-    bestTime = { label: "Fish morning", detail: `Wind picks up afternoon — get out early` };
+  if (effectiveWind > 20) {
+    // Use the time-of-day split only if we have forecast breakdown; otherwise generic
+    if ((windPm ?? 0) > (windAm ?? 0) || overrides?.windMph != null) {
+      bestTime = { label: "Fish morning", detail: `Wind picks up — get out early (${Math.round(effectiveWind)} mph observed)` };
+    } else {
+      bestTime = { label: "Fish afternoon", detail: "Morning wind — wait for afternoon calm" };
+    }
   } else if ((windAm ?? 0) > 20) {
     bestTime = { label: "Fish afternoon", detail: "Morning wind — wait for afternoon calm" };
   } else if (temp != null && temp < 45) {
