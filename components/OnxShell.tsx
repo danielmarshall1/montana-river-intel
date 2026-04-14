@@ -10,6 +10,7 @@ import { RIVER_FOCUS_POINTS } from "@/lib/river-focus-points";
 import { deriveScoreBreakdown } from "@/lib/scoreBreakdown";
 import { generateTodaysRead } from "@/lib/todaysRead";
 import { buildDecisionCard, type DecisionCard } from "@/lib/decisionCard";
+import type { FlyShopReportResponse } from "@/app/api/flyshop-reports/route";
 import type { RiverSegmentPoint } from "@/app/api/river-segments/route";
 import { MRI_COLORS } from "@/lib/theme";
 import { getFlowTrendArrow } from "@/lib/trend";
@@ -637,6 +638,181 @@ function LayersPanel({
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── FlyShopReportCard ────────────────────────────────────────────────────────
+
+function timeAgoLabel(isoStr: string): string {
+  const diffMs = Date.now() - new Date(isoStr).getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  if (diffDays === 0) return "Updated today";
+  if (diffDays === 1) return "Updated yesterday";
+  return `Updated ${diffDays} days ago`;
+}
+
+function freshnessColor(isoStr: string): string {
+  const diffMs = Date.now() - new Date(isoStr).getTime();
+  const diffDays = diffMs / (1000 * 60 * 60 * 24);
+  if (diffDays <= 3) return "#16a34a";
+  if (diffDays <= 7) return "#d4900a";
+  return "#dc2626";
+}
+
+const SALMONFLY_ACTIVE = new Set(["starting", "peak"]);
+
+const CONDITIONS_LABEL: Record<string, string> = {
+  excellent: "Excellent",
+  good: "Good",
+  fair: "Fair",
+  poor: "Poor",
+  unfishable: "Unfishable",
+};
+
+const CLARITY_LABEL: Record<string, string> = {
+  clear: "Clear",
+  slightly_off: "Slightly off",
+  off_color: "Off color",
+  blown: "Blown",
+};
+
+function FlyShopReportCard({ report }: { report: FlyShopReportResponse }) {
+  const salmonActive = report.salmonfly_status != null && SALMONFLY_ACTIVE.has(report.salmonfly_status);
+
+  return (
+    <div
+      style={{
+        background: "var(--mri-surface)",
+        border: "0.5px solid var(--mri-border)",
+        borderLeft: "3px solid #2d5a1b",
+        borderRadius: 10,
+        boxShadow: "var(--mri-shadow-sm)",
+        overflow: "hidden",
+      }}
+    >
+      {/* Salmonfly banner */}
+      {salmonActive && (
+        <div
+          style={{
+            background: "#fef3c7",
+            borderBottom: "1px solid #fbbf24",
+            padding: "6px 12px",
+            fontSize: 12,
+            fontWeight: 700,
+            color: "#92400e",
+            letterSpacing: "0.02em",
+          }}
+        >
+          SALMONFLY HATCH ACTIVE
+          {report.salmonfly_section && (
+            <span style={{ fontWeight: 400, marginLeft: 8 }}>
+              {report.salmonfly_section}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Header */}
+      <div
+        style={{
+          padding: "8px 12px 6px",
+          borderBottom: "0.5px solid var(--mri-border)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+        }}
+      >
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#2d5a1b", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+          {report.shop_name}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "var(--mri-text-dim)" }}>
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              background: freshnessColor(report.scraped_at),
+              display: "inline-block",
+              flexShrink: 0,
+            }}
+          />
+          {timeAgoLabel(report.scraped_at)}
+        </div>
+      </div>
+
+      {/* Rows */}
+      <div style={{ padding: "6px 0" }}>
+        {report.overall_conditions && (
+          <div style={{ display: "flex", gap: 8, padding: "4px 12px", fontSize: 12 }}>
+            <span style={{ color: "var(--mri-text-dim)", width: 60, flexShrink: 0 }}>Overall</span>
+            <span style={{ fontWeight: 600, color: "var(--mri-text)" }}>
+              {CONDITIONS_LABEL[report.overall_conditions] ?? report.overall_conditions}
+            </span>
+          </div>
+        )}
+        {report.primary_hatch && (
+          <div style={{ display: "flex", gap: 8, padding: "4px 12px", fontSize: 12 }}>
+            <span style={{ color: "var(--mri-text-dim)", width: 60, flexShrink: 0 }}>Hatch</span>
+            <span style={{ fontWeight: 600, color: "var(--mri-text)" }}>{report.primary_hatch}</span>
+          </div>
+        )}
+        {report.water_clarity && (
+          <div style={{ display: "flex", gap: 8, padding: "4px 12px", fontSize: 12 }}>
+            <span style={{ color: "var(--mri-text-dim)", width: 60, flexShrink: 0 }}>Clarity</span>
+            <span style={{ fontWeight: 600, color: "var(--mri-text)" }}>
+              {CLARITY_LABEL[report.water_clarity] ?? report.water_clarity}
+            </span>
+          </div>
+        )}
+        {report.tactical_notes && (
+          <div style={{ padding: "4px 12px 6px", fontSize: 11, color: "var(--mri-text-muted)", lineHeight: 1.5 }}>
+            {report.tactical_notes}
+          </div>
+        )}
+
+        {/* Fly pills */}
+        {report.recommended_flies.length > 0 && (
+          <div style={{ padding: "4px 12px 6px", display: "flex", flexWrap: "wrap", gap: 4 }}>
+            {report.recommended_flies.map((fly) => (
+              <span
+                key={fly}
+                style={{
+                  background: "#f0f4ee",
+                  border: "0.5px solid #c4d9bc",
+                  borderRadius: 10,
+                  padding: "2px 8px",
+                  fontSize: 10,
+                  color: "#2d5a1b",
+                  fontWeight: 500,
+                }}
+              >
+                {fly}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div
+        style={{
+          padding: "5px 12px",
+          borderTop: "0.5px solid var(--mri-border)",
+          display: "flex",
+          justifyContent: "flex-end",
+        }}
+      >
+        <a
+          href={report.report_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ fontSize: 10, color: "#2d5a1b", textDecoration: "underline" }}
+        >
+          Source: {report.shop_name}
+        </a>
       </div>
     </div>
   );
@@ -1406,6 +1582,7 @@ export default function OnxShell({
   const [sourceSites, setSourceSites] = useState<Record<string, RiverSourceSiteSummary>>({});
   const [backendAnalytics, setBackendAnalytics] = useState<RiverDetailAnalyticsBackendRow | null>(null);
   const [regulations, setRegulations] = useState<RiverRegulation[]>([]);
+  const [flyShopReport, setFlyShopReport] = useState<FlyShopReportResponse | null>(null);
 
   const [basemap, setBasemap] = useState<BasemapId>("hybrid");
   const [layerState, setLayerState] = useState<Record<LayerId, boolean>>(createDefaultLayerState());
@@ -1463,8 +1640,9 @@ export default function OnxShell({
       cloudCoverPct: detailedAnalytics?.weather.cloudCoverPct,
       isTailwater: selected?.is_tailwater,
       regulations,
+      flyShopHatch: flyShopReport?.primary_hatch ?? null,
     }) : null,
-    [selected, detailedAnalytics?.weather.windSpeedMph, detailedAnalytics?.weather.cloudCoverPct, selected?.is_tailwater, regulations]
+    [selected, detailedAnalytics?.weather.windSpeedMph, detailedAnalytics?.weather.cloudCoverPct, selected?.is_tailwater, regulations, flyShopReport?.primary_hatch]
   );
 
   const latestPullAt = useMemo(() => {
@@ -1593,6 +1771,24 @@ export default function OnxShell({
       if (!cancelled) setRegulations(data);
     }
     load().catch(() => { if (!cancelled) setRegulations([]); });
+    return () => { cancelled = true; };
+  }, [selected?.river_id]);
+
+  // ── Fly shop report
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (!selected?.river_id) { setFlyShopReport(null); return; }
+      try {
+        const resp = await fetch(`/api/flyshop-reports?river_id=${encodeURIComponent(selected.river_id)}`);
+        if (!resp.ok) { if (!cancelled) setFlyShopReport(null); return; }
+        const data: FlyShopReportResponse | null = await resp.json();
+        if (!cancelled) setFlyShopReport(data);
+      } catch {
+        if (!cancelled) setFlyShopReport(null);
+      }
+    }
+    load();
     return () => { cancelled = true; };
   }, [selected?.river_id]);
 
@@ -1886,6 +2082,11 @@ export default function OnxShell({
                 <RegulationNotice card={decisionCard} />
               </div>
             )}
+            {flyShopReport && (
+              <div className="mb-3">
+                <FlyShopReportCard report={flyShopReport} />
+              </div>
+            )}
 
             <RiverDetailContent
               selected={selected}
@@ -2036,6 +2237,11 @@ export default function OnxShell({
             {decisionCard?.regulation && (
               <div className="mb-3">
                 <RegulationNotice card={decisionCard} />
+              </div>
+            )}
+            {flyShopReport && (
+              <div className="mb-3">
+                <FlyShopReportCard report={flyShopReport} />
               </div>
             )}
 

@@ -25,6 +25,8 @@ export function buildDecisionCard(
     cloudCoverPct?: number | null;
     isTailwater?: boolean | null;
     regulations?: RiverRegulation[] | null;
+    /** Primary hatch from a fly shop report — overrides the temp-derived hatch label */
+    flyShopHatch?: string | null;
   }
 ): DecisionCard {
   const score = river.fishability_score_calc;
@@ -116,7 +118,10 @@ export function buildDecisionCard(
   }
 
   // ── HATCH ───────────────────────────────────────────────────────────────────
-  const hatch = deriveHatch({ month, temp, overcast, isTailwater, slug: river.slug, elevationOffsetWeeks });
+  const derivedHatch = deriveHatch({ month, temp, overcast, isTailwater, slug: river.slug, elevationOffsetWeeks });
+  const hatch: DecisionCard["hatch"] = overrides?.flyShopHatch
+    ? { label: `${overrides.flyShopHatch} (confirmed)`, detail: derivedHatch.detail }
+    : derivedHatch;
 
   // ── CLARITY ─────────────────────────────────────────────────────────────────
   let clarity: DecisionCard["clarity"];
