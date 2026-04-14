@@ -6,6 +6,7 @@ import type {
   RiverDetailAnalyticsBackendRow,
   RiverSourceSiteSummary,
   RiverWeatherDay,
+  RiverRegulation,
 } from "./types";
 
 /** Raw row from river_daily_scores */
@@ -819,4 +820,31 @@ export async function fetchUsgsSiteSummaries(
     }
   }
   return out;
+}
+
+/**
+ * Fetch active regulations for a river that apply today.
+ * Returns regulations where is_active=true and today falls within [start_date, end_date].
+ * Null start/end date means the regulation applies without a date bound.
+ */
+export async function fetchRiverRegulations(riverId: string): Promise<RiverRegulation[]> {
+  const client = createSupabaseClient();
+  if (!client || !riverId) return [];
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  const { data, error } = await client
+    .from("river_regulations")
+    .select("id,river_id,regulation_type,description,start_date,end_date,is_active,source_url,notes")
+    .eq("river_id", riverId)
+    .eq("is_active", true)
+    .or(`start_date.is.null,start_date.lte.${today}`)
+    .or(`end_date.is.null,end_date.gte.${today}`);
+
+  if (error) {
+    console.error("[fetchRiverRegulations]", error.message);
+    return [];
+  }
+
+  return (data ?? []) as RiverRegulation[];
 }

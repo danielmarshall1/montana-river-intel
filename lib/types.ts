@@ -1,5 +1,19 @@
 export type BiteTier = "HOT" | "GOOD" | "FAIR" | "TOUGH";
 
+export type RegulationType = "hoot_owl" | "closed" | "catch_release" | "hours_restricted";
+
+export interface RiverRegulation {
+  id: string;
+  river_id: string;
+  regulation_type: RegulationType;
+  description: string;
+  start_date: string | null;
+  end_date: string | null;
+  is_active: boolean;
+  source_url: string | null;
+  notes: string | null;
+}
+
 export interface FishabilityRow {
   river_id: string;
   slug?: string;

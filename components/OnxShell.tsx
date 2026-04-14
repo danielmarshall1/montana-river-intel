@@ -19,7 +19,9 @@ import {
   fetchRiverIntraday24h,
   fetchRiverWeatherWindow,
   fetchUsgsSiteSummaries,
+  fetchRiverRegulations,
 } from "@/lib/supabase";
+import type { RiverRegulation } from "@/lib/types";
 import { buildRiverDetailAnalytics } from "@/lib/riverAnalytics";
 import {
   BASEMAP_OPTIONS,
@@ -916,6 +918,58 @@ function RiverStationStrip({
   );
 }
 
+// ─── RegulationNotice ─────────────────────────────────────────────────────────
+
+const REG_LABELS: Record<string, string> = {
+  hoot_owl: "Hoot Owl Restriction",
+  closed: "River Closed",
+  catch_release: "Catch & Release Only",
+  hours_restricted: "Hours Restricted",
+};
+
+function RegulationNotice({ card }: { card: DecisionCard | null }) {
+  if (!card?.regulation) return null;
+  const { type, description, sourceUrl } = card.regulation;
+  const label = REG_LABELS[type] ?? type;
+  const isClosed = type === "closed";
+  return (
+    <div style={{
+      background: isClosed ? "#fef2f2" : "#fff8e6",
+      border: `1px solid ${isClosed ? "#fca5a5" : "#fcd34d"}`,
+      borderRadius: 8,
+      padding: "8px 12px",
+      display: "flex",
+      flexDirection: "column" as const,
+      gap: 3,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        {/* Warning triangle */}
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
+          <polygon points="8,2 15,14 1,14" stroke={isClosed ? "#dc2626" : "#d4900a"} strokeWidth="1.5" strokeLinejoin="round" fill="none" />
+          <line x1="8" y1="7" x2="8" y2="10.5" stroke={isClosed ? "#dc2626" : "#d4900a"} strokeWidth="1.5" strokeLinecap="round" />
+          <circle cx="8" cy="12.5" r="0.75" fill={isClosed ? "#dc2626" : "#d4900a"} />
+        </svg>
+        <span style={{ fontSize: 12, fontWeight: 700, color: isClosed ? "#991b1b" : "#92400e", textTransform: "uppercase" as const, letterSpacing: "0.04em" }}>
+          {label}
+        </span>
+      </div>
+      <span style={{ fontSize: 12, color: isClosed ? "#991b1b" : "#78350f", lineHeight: 1.4 }}>
+        {description}
+      </span>
+      {sourceUrl && (
+        <a
+          href={sourceUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ fontSize: 11, color: isClosed ? "#dc2626" : "#d4900a", textDecoration: "underline", marginTop: 1 }}
+        >
+          Source: Montana FWP
+        </a>
+      )}
+    </div>
+  );
+}
+
 // ─── GoBanner ────────────────────────────────────────────────────────────────
 
 function GoBanner({ card }: { card: DecisionCard | null }) {
@@ -1316,6 +1370,7 @@ export default function OnxShell({
   const [weatherRows, setWeatherRows] = useState<RiverWeatherDay[]>([]);
   const [sourceSites, setSourceSites] = useState<Record<string, RiverSourceSiteSummary>>({});
   const [backendAnalytics, setBackendAnalytics] = useState<RiverDetailAnalyticsBackendRow | null>(null);
+  const [regulations, setRegulations] = useState<RiverRegulation[]>([]);
 
   const [basemap, setBasemap] = useState<BasemapId>("hybrid");
   const [layerState, setLayerState] = useState<Record<LayerId, boolean>>(createDefaultLayerState());
@@ -1372,8 +1427,9 @@ export default function OnxShell({
       windMph: detailedAnalytics?.weather.windSpeedMph,
       cloudCoverPct: detailedAnalytics?.weather.cloudCoverPct,
       isTailwater: selected?.is_tailwater,
+      regulations,
     }) : null,
-    [selected, detailedAnalytics?.weather.windSpeedMph, detailedAnalytics?.weather.cloudCoverPct, selected?.is_tailwater]
+    [selected, detailedAnalytics?.weather.windSpeedMph, detailedAnalytics?.weather.cloudCoverPct, selected?.is_tailwater, regulations]
   );
 
   const latestPullAt = useMemo(() => {
@@ -1491,6 +1547,17 @@ export default function OnxShell({
     load().catch(() => { if (!cancelled) { setWeatherRows([]); setSourceSites({}); } });
     return () => { cancelled = true; };
   }, [selected?.river_id, selected?.flow_source_site_no, selected?.temp_source_site_no]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (!selected?.river_id) { setRegulations([]); return; }
+      const data = await fetchRiverRegulations(selected.river_id);
+      if (!cancelled) setRegulations(data);
+    }
+    load().catch(() => { if (!cancelled) setRegulations([]); });
+    return () => { cancelled = true; };
+  }, [selected?.river_id]);
 
   // ── localStorage layer persistence
   useEffect(() => {
@@ -1777,6 +1844,11 @@ export default function OnxShell({
             <div className="mb-3">
               <GoBanner card={decisionCard} />
             </div>
+            {decisionCard?.regulation && (
+              <div className="mb-3">
+                <RegulationNotice card={decisionCard} />
+              </div>
+            )}
 
             <RiverDetailContent
               selected={selected}
@@ -1924,6 +1996,11 @@ export default function OnxShell({
             <div className="mb-3">
               <GoBanner card={decisionCard} />
             </div>
+            {decisionCard?.regulation && (
+              <div className="mb-3">
+                <RegulationNotice card={decisionCard} />
+              </div>
+            )}
 
             <RiverDetailContent
               selected={selected}

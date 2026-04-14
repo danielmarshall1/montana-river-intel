@@ -1,4 +1,4 @@
-import type { FishabilityRow } from "@/lib/types";
+import type { FishabilityRow, RiverRegulation } from "@/lib/types";
 
 export interface DecisionCard {
   go: { label: string; detail: string };
@@ -6,6 +6,7 @@ export interface DecisionCard {
   hatch: { label: string; detail: string };
   clarity: { label: string; detail: string };
   bestTime: { label: string; detail: string };
+  regulation: { type: string; description: string; sourceUrl: string | null } | null;
 }
 
 /**
@@ -14,10 +15,16 @@ export interface DecisionCard {
  * @param overrides.windMph       Live current wind speed (from v_river_detail_analytics)
  * @param overrides.cloudCoverPct Live cloud cover percentage (from weather_daily/analytics)
  * @param overrides.isTailwater   Whether river is a dam-regulated tailwater
+ * @param overrides.regulations   Active regulations for this river today
  */
 export function buildDecisionCard(
   river: FishabilityRow,
-  overrides?: { windMph?: number | null; cloudCoverPct?: number | null; isTailwater?: boolean | null }
+  overrides?: {
+    windMph?: number | null;
+    cloudCoverPct?: number | null;
+    isTailwater?: boolean | null;
+    regulations?: RiverRegulation[] | null;
+  }
 ): DecisionCard {
   const score = river.fishability_score_calc;
   const flow = river.flow_cfs;
@@ -131,7 +138,19 @@ export function buildDecisionCard(
     bestTime = { label: "All day", detail: "Conditions favorable throughout the day" };
   }
 
-  return { go, access, hatch, clarity, bestTime };
+  // ── REGULATION ──────────────────────────────────────────────────────────────
+  // Priority: closed > hoot_owl > hours_restricted > catch_release
+  const regs = overrides?.regulations ?? [];
+  const regPriority = ["closed", "hoot_owl", "hours_restricted", "catch_release"];
+  const activeReg = regPriority
+    .map((type) => regs.find((r) => r.regulation_type === type))
+    .find(Boolean) ?? null;
+
+  const regulation = activeReg
+    ? { type: activeReg.regulation_type, description: activeReg.description, sourceUrl: activeReg.source_url }
+    : null;
+
+  return { go, access, hatch, clarity, bestTime, regulation };
 }
 
 // ── Hatch intelligence ────────────────────────────────────────────────────────
