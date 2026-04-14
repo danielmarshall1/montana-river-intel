@@ -63,6 +63,8 @@ export interface FishabilityRow {
   cloud_cover_pct?: number | null;
   /** MAX(updated_at) from river_daily for today — the actual MRI ingest run time */
   ingest_updated_at?: string | null;
+  /** River gauge elevation in feet — used for hatch timing offset */
+  elevation_ft?: number | null;
 }
 
 export interface RiverGeom {

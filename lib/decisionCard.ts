@@ -39,16 +39,26 @@ export function buildDecisionCard(
   const effectiveWind = Math.max(windAm ?? 0, windPm ?? 0, overrides?.windMph ?? 0);
 
   // Hatch context inputs
-  const month = new Date().getMonth() + 1; // 1-12
   const cloudCoverPct = overrides?.cloudCoverPct ?? river.cloud_cover_pct ?? null;
   const overcast = (cloudCoverPct ?? 0) > 50;
   const isTailwater = overrides?.isTailwater ?? river.is_tailwater ?? false;
+
+  // Elevation-adjusted effective date for hatch timing.
+  // High-elevation rivers run 1-3 weeks behind low-elevation rivers at the same temp
+  // because cold nights slow insect development regardless of water temperature.
+  const elevationFt = river.elevation_ft ?? null;
+  const elevationOffsetWeeks = elevationHatchOffset(elevationFt);
+  const effectiveDate = new Date();
+  effectiveDate.setDate(effectiveDate.getDate() - elevationOffsetWeeks * 7);
+  const month = effectiveDate.getMonth() + 1; // 1-12, elevation-adjusted
+  const dayOfMonth = effectiveDate.getDate();
 
   console.log(
     "[buildDecisionCard]",
     river.river_name,
     { wind_am_mph: windAm, wind_pm_mph: windPm, liveWindOverride: overrides?.windMph, effectiveWind,
-      month, temp, overcast, cloudCoverPct, isTailwater }
+      elevation_ft: elevationFt, elevationOffsetWeeks, effectiveMonth: month, actualMonth: new Date().getMonth() + 1,
+      temp, overcast, cloudCoverPct, isTailwater }
   );
 
   // ── GO ──────────────────────────────────────────────────────────────────────
@@ -105,7 +115,7 @@ export function buildDecisionCard(
   }
 
   // ── HATCH ───────────────────────────────────────────────────────────────────
-  const hatch = deriveHatch({ month, temp, overcast, isTailwater, slug: river.slug });
+  const hatch = deriveHatch({ month, temp, overcast, isTailwater, slug: river.slug, elevationOffsetWeeks });
 
   // ── CLARITY ─────────────────────────────────────────────────────────────────
   let clarity: DecisionCard["clarity"];
@@ -155,7 +165,44 @@ export function buildDecisionCard(
 
 // ── Hatch intelligence ────────────────────────────────────────────────────────
 
+function elevationHatchOffset(elevationFt: number | null): number {
+  if (elevationFt == null) return 0;
+  if (elevationFt > 6000) return 3;
+  if (elevationFt > 5000) return 2;
+  if (elevationFt >= 3500) return 1;
+  return 0;
+}
+
 function deriveHatch({
+  month,
+  temp,
+  overcast,
+  isTailwater,
+  slug,
+  elevationOffsetWeeks,
+}: {
+  month: number;
+  temp: number | null;
+  overcast: boolean;
+  isTailwater: boolean;
+  slug?: string;
+  elevationOffsetWeeks?: number;
+}): { label: string; detail: string } {
+  const elevNote =
+    elevationOffsetWeeks == null || elevationOffsetWeeks === 0
+      ? ""
+      : elevationOffsetWeeks >= 3
+      ? " — high elevation delays hatches ~3 weeks vs lower rivers"
+      : elevationOffsetWeeks === 2
+      ? " — moderate-high elevation, hatches run ~2 weeks behind lower rivers"
+      : " — moderate elevation, hatches run ~1 week behind lower rivers";
+
+  const result = deriveHatchInner({ month, temp, overcast, isTailwater, slug });
+  if (elevNote) result.detail += elevNote;
+  return result;
+}
+
+function deriveHatchInner({
   month,
   temp,
   overcast,
