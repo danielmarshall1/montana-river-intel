@@ -649,6 +649,7 @@ type AccessWeatherPoint = {
   name: string;
   lat: number;
   lng: number;
+  coordinate_confidence: "high" | "moderate" | "low";
   temp_f: number | null;
   wind_mph: number | null;
   wind_dir_deg: number | null;
@@ -739,10 +740,16 @@ function AccessWeatherPanel({ riverId }: { riverId: string }) {
         {points.map((pt) => {
           const showGust = pt.gust_mph != null && pt.wind_mph != null && pt.gust_mph > pt.wind_mph + 5;
           const showPrecip = pt.precip_chance_pct != null && pt.precip_chance_pct > 20;
+          const conf = pt.coordinate_confidence;
           return (
             <div key={pt.id} className="mri-card px-3 py-2.5" style={{ minHeight: 48 }}>
-              <div className="text-[12px] font-semibold text-[var(--mri-text)] leading-snug truncate mb-1.5">
-                {pt.name}
+              <div className="flex items-baseline justify-between gap-1 mb-1.5">
+                <div className="text-[12px] font-semibold text-[var(--mri-text)] leading-snug truncate">
+                  {pt.name}
+                </div>
+                {conf === "low" && (
+                  <span className="text-[10px] text-[var(--mri-text-dim)] shrink-0">approx.</span>
+                )}
               </div>
               <div className="flex items-center gap-3 flex-wrap">
                 {/* Wind */}
@@ -754,6 +761,7 @@ function AccessWeatherPanel({ riverId }: { riverId: string }) {
                       </span>
                     )}
                     <span className="font-medium text-[var(--mri-text)]">
+                      {conf === "moderate" && <span className="text-[var(--mri-text-dim)] font-normal mr-0.5">~</span>}
                       {pt.wind_mph.toFixed(0)} mph
                     </span>
                     {pt.wind_direction && (

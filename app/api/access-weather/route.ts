@@ -5,11 +5,14 @@ export const revalidate = 1800; // 30 minutes
 
 const MAX_POINTS = 8;
 
+type CoordinateConfidence = "high" | "moderate" | "low";
+
 type AccessSiteRow = {
   id: string;
   name: string;
   lat: number;
   lng: number;
+  coordinate_confidence: CoordinateConfidence | null;
 };
 
 type AccessWeatherPoint = {
@@ -17,6 +20,7 @@ type AccessWeatherPoint = {
   name: string;
   lat: number;
   lng: number;
+  coordinate_confidence: CoordinateConfidence;
   temp_f: number | null;
   wind_mph: number | null;
   wind_dir_deg: number | null;
@@ -30,7 +34,7 @@ function degToCompass(deg: number): string {
   return dirs[Math.round(deg / 45) % 8];
 }
 
-async function fetchPointWeather(lat: number, lng: number): Promise<Omit<AccessWeatherPoint, "id" | "name" | "lat" | "lng">> {
+async function fetchPointWeather(lat: number, lng: number): Promise<Omit<AccessWeatherPoint, "id" | "name" | "lat" | "lng" | "coordinate_confidence">> {
   const url =
     `https://api.open-meteo.com/v1/forecast` +
     `?latitude=${lat}&longitude=${lng}` +
@@ -69,7 +73,7 @@ export async function GET(req: NextRequest) {
 
   const { data, error } = await sb
     .from("fishing_access_sites")
-    .select("id,name,lat,lng")
+    .select("id,name,lat,lng,coordinate_confidence")
     .eq("river_id", river_id)
     .in("river_confidence", ["high", "moderate"])
     .order("name")
@@ -85,7 +89,14 @@ export async function GET(req: NextRequest) {
   const results: AccessWeatherPoint[] = await Promise.all(
     sites.map(async (site) => {
       const wx = await fetchPointWeather(site.lat, site.lng);
-      return { id: site.id, name: site.name, lat: site.lat, lng: site.lng, ...wx };
+      return {
+        id: site.id,
+        name: site.name,
+        lat: site.lat,
+        lng: site.lng,
+        coordinate_confidence: site.coordinate_confidence ?? "moderate",
+        ...wx,
+      };
     })
   );
 
