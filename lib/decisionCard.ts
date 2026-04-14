@@ -60,12 +60,19 @@ export function buildDecisionCard(
 
   // ── ACCESS ──────────────────────────────────────────────────────────────────
   let access: DecisionCard["access"];
+  const rapidRise = (change48h ?? 0) > 25;
   const rising = (change48h ?? 0) > 20;
   const highWind = effectiveWind > 20;
   const windNote = highWind ? " — high wind today" : "";
 
   if (flow == null) {
     access = { label: "Unknown", detail: "Flow data unavailable", icon: "caution" };
+  } else if (rapidRise) {
+    access = {
+      label: "Rising fast",
+      detail: `Flow up ${Math.round(change48h ?? 0)}% in 48hrs — wading dangerous, conditions changing`,
+      icon: "caution",
+    };
   } else if (wadingThreshold == null) {
     if (flow < 500) {
       access = { label: "Wading recommended", detail: `Low water at ${Math.round(flow).toLocaleString()} cfs${windNote}`, icon: rising ? "caution" : "wade" };
