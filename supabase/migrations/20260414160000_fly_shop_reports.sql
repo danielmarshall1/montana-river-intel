@@ -48,16 +48,18 @@ grant all    on public.fly_shop_reports to service_role;
 
 -- ── Seed sources ─────────────────────────────────────────────────────────────
 
-insert into public.fly_shop_sources (shop_name, river_id, report_url) values
-  ('Grizzly Hackle',  (select id from public.rivers where slug = 'bitterroot-missoula'),        'https://grizzlyhackle.com/pages/bitterroot-river-fishing-report'),
-  ('Grizzly Hackle',  (select id from public.rivers where slug = 'blackfoot-bonner'),            'https://grizzlyhackle.com/pages/blackfoot-river-fishing-report'),
-  ('Grizzly Hackle',  (select id from public.rivers where slug = 'clark-fork-st-regis'),         'https://grizzlyhackle.com/pages/clark-fork-river-fishing-report'),
-  ('Grizzly Hackle',  (select id from public.rivers where slug = 'missouri-toston'),             'https://grizzlyhackle.com/pages/missouri-river-fishing-report'),
-  ('Grizzly Hackle',  (select id from public.rivers where slug = 'rock-creek-clinton'),          'https://grizzlyhackle.com/pages/rock-creek-fishing-report'),
-  ('Sunrise Fly Shop',(select id from public.rivers where slug = 'big-hole-melrose'),            'https://www.sunriseflyshop.com/montana-fishing-reports/big-hole-river/'),
-  ('The River''s Edge',(select id from public.rivers where slug = 'madison-west-yellowstone'),  'https://theriversedge.com/pages/montana-fishing-reports'),
-  ('The River''s Edge',(select id from public.rivers where slug = 'gallatin-gateway'),           'https://theriversedge.com/pages/montana-fishing-reports'),
-  ('The River''s Edge',(select id from public.rivers where slug = 'yellowstone-livingston'),     'https://theriversedge.com/pages/montana-fishing-reports')
+-- Active sources — verified to return static HTML content without JavaScript rendering
+insert into public.fly_shop_sources (shop_name, river_id, report_url, is_active) values
+  ('Grizzly Hackle',  (select id from public.rivers where slug = 'bitterroot-missoula'),  'https://grizzlyhackle.com/pages/bitterroot-river-fishing-report',  true),
+  ('Grizzly Hackle',  (select id from public.rivers where slug = 'blackfoot-bonner'),     'https://grizzlyhackle.com/pages/blackfoot-river-fishing-report',    true),
+  ('Grizzly Hackle',  (select id from public.rivers where slug = 'clark-fork-st-regis'),  'https://grizzlyhackle.com/pages/clark-fork-river-fishing-report',   true),
+  ('Grizzly Hackle',  (select id from public.rivers where slug = 'missouri-toston'),      'https://grizzlyhackle.com/pages/missouri-river-fishing-report',     true),
+  ('Grizzly Hackle',  (select id from public.rivers where slug = 'rock-creek-clinton'),   'https://grizzlyhackle.com/pages/rock-creek-fishing-report',         true),
+  ('Sunrise Fly Shop',(select id from public.rivers where slug = 'big-hole-melrose'),     'https://www.sunriseflyshop.com/montana-fishing-reports/big-hole-river/', true),
+  -- Inactive: theriversedge.com is a Shopify store — all pages are JS-rendered shells
+  ('The River''s Edge',(select id from public.rivers where slug = 'madison-west-yellowstone'), 'https://theriversedge.com/pages/montana-fishing-reports', false),
+  ('The River''s Edge',(select id from public.rivers where slug = 'gallatin-gateway'),          'https://theriversedge.com/pages/montana-fishing-reports',          false),
+  ('The River''s Edge',(select id from public.rivers where slug = 'yellowstone-livingston'),    'https://theriversedge.com/pages/montana-fishing-reports',          false)
 on conflict do nothing;
 
 -- ── Cron: every Tuesday and Friday at 8am MT (14:00 UTC) ─────────────────────
