@@ -45,9 +45,11 @@ type ParsedUSGS = {
   flowCfs: number | null;
   waterTempF: number | null;
   gageHeightFt: number | null;
+  turbidityFnu: number | null;
   flowObservedAt: string | null;
   tempObservedAt: string | null;
   gageObservedAt: string | null;
+  turbidityObservedAt: string | null;
   parameterCodes: string[];
   rawSummary: Record<string, unknown>;
   hasTempSeries: boolean;
@@ -105,10 +107,12 @@ function parseUSGSTimeSeries(payload: any): ParsedUSGS {
   let flowCfs: number | null = null;
   let waterTempF: number | null = null;
   let gageHeightFt: number | null = null;
+  let turbidityFnu: number | null = null;
 
   let flowObservedAt: string | null = null;
   let tempObservedAt: string | null = null;
   let gageObservedAt: string | null = null;
+  let turbidityObservedAt: string | null = null;
 
   const parameterCodes = new Set<string>();
   const rawSummary: Record<string, unknown> = {};
@@ -161,6 +165,10 @@ function parseUSGSTimeSeries(payload: any): ParsedUSGS {
     } else if (code === "00065") {
       gageHeightFt = rawValue;
       gageObservedAt = observedAt;
+    } else if (code === "63680") {
+      // turbidity in FNU (Formazin Nephelometric Units) — negative values are invalid
+      turbidityFnu = rawValue >= 0 ? Number(rawValue.toFixed(1)) : null;
+      turbidityObservedAt = observedAt;
     }
 
     rawSummary[code] = {
@@ -206,9 +214,11 @@ function parseUSGSTimeSeries(payload: any): ParsedUSGS {
     flowCfs,
     waterTempF,
     gageHeightFt,
+    turbidityFnu,
     flowObservedAt,
     tempObservedAt,
     gageObservedAt,
+    turbidityObservedAt,
     parameterCodes: Array.from(parameterCodes),
     rawSummary,
     hasTempSeries,
@@ -482,7 +492,7 @@ serve(async (req) => {
       const flowSiteNo = String(flowCandidates[0] ?? defaultSiteNo).trim();
       const tempSiteNo = tempCandidates.length > 0 ? String(tempCandidates[0]).trim() : null;
 
-      const { parsed: mainIv, status } = await fetchUSGSIv(flowSiteNo, "00060,00065");
+      const { parsed: mainIv, status } = await fetchUSGSIv(flowSiteNo, "00060,00065,63680");
 
       let flowValue = mainIv.flowCfs;
       let flowObservedAt = mainIv.flowObservedAt;
@@ -495,6 +505,9 @@ serve(async (req) => {
       let tempIsFresh = false;
       let hasTempIv = false;
       let hasTempDv = false;
+      // turbidity: prefer flow site if it has 63680, otherwise pick up from temp candidates
+      let turbidityFnu: number | null = mainIv.turbidityFnu;
+      let turbidityObservedAt: string | null = mainIv.turbidityObservedAt;
       let staleTempCandidate: {
         value: number;
         observedAt: string | null;
@@ -504,8 +517,15 @@ serve(async (req) => {
 
       for (const candidate of tempCandidates) {
         try {
-          const ivTempOnly = await fetchUSGSIv(candidate, "00010");
+          const ivTempOnly = await fetchUSGSIv(candidate, "00010,63680");
           if (ivTempOnly.parsed.hasTempSeries) hasTempIv = true;
+          // pick up turbidity from this candidate if not yet found
+          if (turbidityFnu == null && ivTempOnly.parsed.turbidityFnu != null &&
+              isObservationFresh(ivTempOnly.parsed.turbidityObservedAt, 72)) {
+            turbidityFnu = ivTempOnly.parsed.turbidityFnu;
+            turbidityObservedAt = ivTempOnly.parsed.turbidityObservedAt;
+            mainIv.rawSummary.turbidity_site_no = candidate;
+          }
           if (ivTempOnly.parsed.waterTempF != null) {
             const isFresh = isObservationFresh(ivTempOnly.parsed.tempObservedAt, 72);
             if (isFresh) {
@@ -692,6 +712,14 @@ serve(async (req) => {
         mainIv.rawSummary.temp_status = "available_fresh";
       }
 
+      if (turbidityFnu != null) {
+        mainIv.rawSummary.turbidity_fnu = turbidityFnu;
+        mainIv.rawSummary.turbidity_observed_at = turbidityObservedAt;
+        if (!mainIv.parameterCodes.includes("63680")) {
+          mainIv.parameterCodes.push("63680(TURBIDITY)");
+        }
+      }
+
       const upsertResp = await sb.from("river_daily").upsert(
         {
           river_id: river.id,
@@ -700,6 +728,7 @@ serve(async (req) => {
           flow_cfs: flowValue,
           water_temp_f: tempValue,
           gage_height_ft: mainIv.gageHeightFt,
+          turbidity_fnu: turbidityFnu,
           source_flow_observed_at: flowObservedAt,
           source_temp_observed_at: tempObservedAt,
           source_gage_observed_at: mainIv.gageObservedAt,
