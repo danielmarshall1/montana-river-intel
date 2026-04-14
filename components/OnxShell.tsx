@@ -1185,7 +1185,7 @@ function RiverDetailContent({
         <div className="mri-card p-3">
           <div className="text-[10px] font-medium text-[var(--mri-text-dim)] uppercase tracking-wide">Hatch</div>
           <div className="text-[13px] font-semibold text-[var(--mri-text)] mt-1 leading-tight">
-            {detailedAnalytics?.biology.hatchLikelihood ?? "—"}
+            {decisionCard?.hatch.label ?? detailedAnalytics?.biology.hatchLikelihood ?? "—"}
           </div>
         </div>
       </div>
@@ -1368,8 +1368,12 @@ export default function OnxShell({
   // (from v_river_detail_analytics via backendAnalytics) overrides the
   // forecast wind_am_mph / wind_pm_mph when it's higher.
   const decisionCard = useMemo(
-    () => selected ? buildDecisionCard(selected, { windMph: detailedAnalytics?.weather.windSpeedMph }) : null,
-    [selected, detailedAnalytics?.weather.windSpeedMph]
+    () => selected ? buildDecisionCard(selected, {
+      windMph: detailedAnalytics?.weather.windSpeedMph,
+      cloudCoverPct: detailedAnalytics?.weather.cloudCoverPct,
+      isTailwater: selected?.is_tailwater,
+    }) : null,
+    [selected, detailedAnalytics?.weather.windSpeedMph, detailedAnalytics?.weather.cloudCoverPct, selected?.is_tailwater]
   );
 
   const latestPullAt = useMemo(() => {

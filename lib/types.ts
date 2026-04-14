@@ -45,6 +45,8 @@ export interface FishabilityRow {
   wading_threshold_cfs?: number | null;
   drift_optimal_min_cfs?: number | null;
   drift_optimal_max_cfs?: number | null;
+  is_tailwater?: boolean | null;
+  cloud_cover_pct?: number | null;
 }
 
 export interface RiverGeom {
