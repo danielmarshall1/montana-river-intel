@@ -1067,16 +1067,31 @@ function BestTimeIcon() {
   );
 }
 
+function BestWindowIcon() {
+  // Sun arc: semicircle above horizon line, rays at 3 positions
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <line x1="2" y1="11" x2="14" y2="11" stroke="#6b7280" strokeWidth="1.2" strokeLinecap="round" />
+      <path d="M4.5 11 A3.5 3.5 0 0 1 11.5 11" stroke="#6b7280" strokeWidth="1.2" strokeLinecap="round" fill="none" />
+      <line x1="8" y1="4" x2="8" y2="3" stroke="#6b7280" strokeWidth="1.2" strokeLinecap="round" />
+      <line x1="5" y1="5.2" x2="4.3" y2="4.5" stroke="#6b7280" strokeWidth="1.2" strokeLinecap="round" />
+      <line x1="11" y1="5.2" x2="11.7" y2="4.5" stroke="#6b7280" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function DecisionCardRow({
   icon,
   label,
   detail,
   last,
+  labelColor,
 }: {
   icon: React.ReactNode;
   label: string;
   detail: string;
   last?: boolean;
+  labelColor?: string;
 }) {
   return (
     <div
@@ -1091,7 +1106,7 @@ function DecisionCardRow({
     >
       <div style={{ marginTop: 2 }}>{icon}</div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--mri-text)", lineHeight: 1.3 }}>{label}</div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: labelColor ?? "var(--mri-text)", lineHeight: 1.3 }}>{label}</div>
         <div style={{ fontSize: 11, color: "var(--mri-text-muted)", marginTop: 2, lineHeight: 1.4 }}>{detail}</div>
       </div>
     </div>
@@ -1130,6 +1145,18 @@ function DecisionCardUI({ card }: { card: DecisionCard }) {
         icon={<BestTimeIcon />}
         label={card.bestTime.label}
         detail={card.bestTime.detail}
+      />
+      <DecisionCardRow
+        icon={<BestWindowIcon />}
+        label={card.bestWindow.label}
+        detail={card.bestWindow.reason}
+        labelColor={
+          card.bestWindow.urgency === "high"
+            ? "#dc2626"
+            : card.bestWindow.urgency === "medium"
+            ? "#d4900a"
+            : "#2d5a1b"
+        }
         last
       />
     </div>

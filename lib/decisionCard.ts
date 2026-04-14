@@ -6,6 +6,7 @@ export interface DecisionCard {
   hatch: { label: string; detail: string };
   clarity: { label: string; detail: string };
   bestTime: { label: string; detail: string };
+  bestWindow: { label: string; reason: string; urgency: "low" | "medium" | "high" };
   regulation: { type: string; description: string; sourceUrl: string | null } | null;
 }
 
@@ -130,23 +131,24 @@ export function buildDecisionCard(
     clarity = { label: "Likely clear", detail: "Stable conditions suggest clear water" };
   }
 
-  // ── BEST TIME ───────────────────────────────────────────────────────────────
+  // ── BEST TIME (simplified — bestWindow carries the detail) ─────────────────
   let bestTime: DecisionCard["bestTime"];
-  if (effectiveWind > 20) {
-    if ((windPm ?? 0) > (windAm ?? 0) || overrides?.windMph != null) {
-      bestTime = { label: "Fish morning", detail: `Wind picks up — get out early (${Math.round(effectiveWind)} mph observed)` };
-    } else {
-      bestTime = { label: "Fish afternoon", detail: "Morning wind — wait for afternoon calm" };
-    }
-  } else if ((windAm ?? 0) > 20) {
-    bestTime = { label: "Fish afternoon", detail: "Morning wind — wait for afternoon calm" };
+  if ((windPm ?? 0) > 18 && (windPm ?? 0) > (windAm ?? 0)) {
+    bestTime = { label: "Morning", detail: "Wind picks up in the afternoon" };
+  } else if ((windAm ?? 0) > 18 && (windPm ?? 0) < 12) {
+    bestTime = { label: "Afternoon", detail: "Morning wind settles by afternoon" };
   } else if (temp != null && temp < 45) {
-    bestTime = { label: "Midday only", detail: "Cold water — fish active only during warmest hours" };
+    bestTime = { label: "Midday", detail: "Cold water — fish active only during peak warmth" };
+  } else if (temp != null && temp > 68) {
+    bestTime = { label: "Dawn only", detail: "Thermal stress — off water by 9am" };
   } else if (temp != null && temp > 62) {
-    bestTime = { label: "Early morning", detail: "Warm water — fish before 9am to avoid heat stress" };
+    bestTime = { label: "Morning or evening", detail: "Avoid midday heat" };
   } else {
-    bestTime = { label: "All day", detail: "Conditions favorable throughout the day" };
+    bestTime = { label: "All day", detail: "Conditions favorable throughout" };
   }
+
+  // ── BEST WINDOW ─────────────────────────────────────────────────────────────
+  const bestWindow = deriveBestWindow({ temp, windAm, windPm, month, elevationFt });
 
   // ── REGULATION ──────────────────────────────────────────────────────────────
   // Priority: closed > hoot_owl > hours_restricted > catch_release
@@ -160,7 +162,88 @@ export function buildDecisionCard(
     ? { type: activeReg.regulation_type, description: activeReg.description, sourceUrl: activeReg.source_url }
     : null;
 
-  return { go, access, hatch, clarity, bestTime, regulation };
+  return { go, access, hatch, clarity, bestTime, bestWindow, regulation };
+}
+
+// ── Best window ───────────────────────────────────────────────────────────────
+
+function deriveBestWindow({
+  temp,
+  windAm,
+  windPm,
+  month,
+  elevationFt,
+}: {
+  temp: number | null;
+  windAm: number | null;
+  windPm: number | null;
+  month: number;
+  elevationFt: number | null;
+}): DecisionCard["bestWindow"] {
+  const highElev = (elevationFt ?? 0) > 5500;
+  const elevSuffix = highElev ? " — high elevation, water warms later in the day" : "";
+
+  // Heat stress — trumps everything
+  if (temp != null && temp > 68) {
+    return {
+      label: "Before 9am only",
+      reason: "Thermal stress — fish at first light, off water by 9am",
+      urgency: "high",
+    };
+  }
+
+  // Warm water — July/August zone
+  if (temp != null && temp >= 62) {
+    return {
+      label: "Morning or evening",
+      reason: "Midday heat stress — fish before 10am or after 6pm",
+      urgency: "high",
+    };
+  }
+
+  // Cold water — April/May
+  if (temp != null && temp < 45 && month >= 3 && month <= 5) {
+    const windowLabel = highElev ? "Best 12pm–4pm" : "Best 11am–3pm";
+    return {
+      label: windowLabel,
+      reason: `Cold water — trout most active during peak warmth${elevSuffix}`,
+      urgency: "high",
+    };
+  }
+
+  // Wind: PM worse than AM
+  if ((windPm ?? 0) > 18 && (windPm ?? 0) > (windAm ?? 0)) {
+    return {
+      label: "Fish morning",
+      reason: "Wind picks up afternoon — get out early",
+      urgency: "medium",
+    };
+  }
+
+  // Wind: AM worse, PM clears
+  if ((windAm ?? 0) > 18 && (windPm ?? 0) < 12) {
+    return {
+      label: "Fish afternoon",
+      reason: "Morning wind settles by afternoon",
+      urgency: "medium",
+    };
+  }
+
+  // Optimal — any mild cold water modifier
+  if (temp != null && temp < 48) {
+    const windowLabel = highElev ? "Best 12pm–4pm" : "Best 11am–3pm";
+    return {
+      label: windowLabel,
+      reason: `Cool water — fish most active midday${elevSuffix}`,
+      urgency: "medium",
+    };
+  }
+
+  return {
+    label: "All day",
+    reason: "Good conditions throughout",
+    urgency: "low",
+  };
 }
 
 // ── Hatch intelligence ────────────────────────────────────────────────────────
