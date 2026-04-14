@@ -3,7 +3,7 @@ import { fetchRiverLinesGeojson } from "@/lib/supabase-server";
 import OnxShell from "@/components/OnxShell";
 
 export const dynamic = "force-dynamic";
-export const revalidate = 600;
+export const revalidate = 900;
 
 export default async function HomePage() {
   const useMock = !process.env.NEXT_PUBLIC_SUPABASE_URL;

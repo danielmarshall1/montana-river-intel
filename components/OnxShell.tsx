@@ -1433,13 +1433,15 @@ export default function OnxShell({
   );
 
   const latestPullAt = useMemo(() => {
+    // ingest_updated_at = MAX(river_daily.updated_at) for today — the MRI ingest run time.
+    // Prefer this over last_usgs_pull_at which is COALESCE(source_flow_observed_at, ...)
+    // i.e. the USGS *observation* timestamp (often from yesterday evening), not the pull time.
+    const fromIngest = rivers.find((r) => r.ingest_updated_at)?.ingest_updated_at ?? null;
+    if (fromIngest) return fromIngest;
+    // Fallback: MAX(updated_at) across all rivers
     let latestMs = 0;
     for (const r of rivers) {
-      // last_usgs_pull_at = coalesce(source_flow_observed_at, source_temp_observed_at, updated_at)
-      // updated_at alone can lag behind the actual observation time when the row was
-      // written in a prior session; prefer last_usgs_pull_at which always reflects the
-      // most recent USGS observation timestamp for the river.
-      const candidate = r.last_usgs_pull_at ?? r.updated_at ?? null;
+      const candidate = r.updated_at ?? r.last_usgs_pull_at ?? null;
       if (!candidate) continue;
       const ms = new Date(candidate).getTime();
       if (!Number.isNaN(ms) && ms > latestMs) latestMs = ms;

@@ -61,6 +61,8 @@ export interface FishabilityRow {
   drift_optimal_max_cfs?: number | null;
   is_tailwater?: boolean | null;
   cloud_cover_pct?: number | null;
+  /** MAX(updated_at) from river_daily for today — the actual MRI ingest run time */
+  ingest_updated_at?: string | null;
 }
 
 export interface RiverGeom {

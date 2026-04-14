@@ -242,12 +242,21 @@ export async function fetchRiversWithLatest(): Promise<FishabilityRow[]> {
     .order("fishability_score_calc", { ascending: false, nullsFirst: false });
 
   if (!latestRes.error && latestRes.data && latestRes.data.length > 0) {
-    const [healthMap, riversRes] = await Promise.all([
+    const today = new Date().toISOString().slice(0, 10);
+    const [healthMap, riversRes, maxUpdatedRes] = await Promise.all([
       fetchHealthMap(supabase),
       supabase
         .from("rivers")
         .select("id,wading_threshold_cfs,drift_optimal_min_cfs,drift_optimal_max_cfs,is_tailwater"),
+      supabase
+        .from("river_daily")
+        .select("updated_at")
+        .eq("obs_date", today)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
     ]);
+    const ingestUpdatedAt: string | null = (maxUpdatedRes.data as { updated_at?: string | null } | null)?.updated_at ?? null;
     type RiverMeta = { id: string; wading_threshold_cfs: number | null; drift_optimal_min_cfs: number | null; drift_optimal_max_cfs: number | null; is_tailwater: boolean | null };
     const thresholdMap = new Map<string, RiverMeta>();
     for (const rv of (riversRes.data ?? []) as RiverMeta[]) {
@@ -319,6 +328,7 @@ export async function fetchRiversWithLatest(): Promise<FishabilityRow[]> {
       drift_optimal_min_cfs: thresholdMap.get(String(r.river_id ?? ""))?.drift_optimal_min_cfs ?? null,
       drift_optimal_max_cfs: thresholdMap.get(String(r.river_id ?? ""))?.drift_optimal_max_cfs ?? null,
       is_tailwater: thresholdMap.get(String(r.river_id ?? ""))?.is_tailwater ?? null,
+      ingest_updated_at: ingestUpdatedAt,
     })) as FishabilityRow[];
 
     rows.sort((a, b) => (b.fishability_score_calc ?? 0) - (a.fishability_score_calc ?? 0));
