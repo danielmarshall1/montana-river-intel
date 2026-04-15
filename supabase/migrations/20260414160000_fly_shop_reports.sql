@@ -59,7 +59,13 @@ insert into public.fly_shop_sources (shop_name, river_id, report_url, is_active)
   -- Inactive: theriversedge.com is a Shopify store — all pages are JS-rendered shells
   ('The River''s Edge',(select id from public.rivers where slug = 'madison-west-yellowstone'), 'https://theriversedge.com/pages/montana-fishing-reports', false),
   ('The River''s Edge',(select id from public.rivers where slug = 'gallatin-gateway'),          'https://theriversedge.com/pages/montana-fishing-reports',          false),
-  ('The River''s Edge',(select id from public.rivers where slug = 'yellowstone-livingston'),    'https://theriversedge.com/pages/montana-fishing-reports',          false)
+  ('The River''s Edge',(select id from public.rivers where slug = 'yellowstone-livingston'),    'https://theriversedge.com/pages/montana-fishing-reports',          false),
+  -- Yellowstone and Madison — verified static HTML with real report content
+  ('Yellowstone Angler',(select id from public.rivers where slug = 'yellowstone-livingston'),  'https://www.yellowstoneangler.com/pages/yellowstone-river-fishing-report', true),
+  ('Montana Trout',     (select id from public.rivers where slug = 'madison-west-yellowstone'),'https://www.montanatrout.com/pages/madison-river-fishing-report',          true)
+  -- Gallatin: no static-HTML source found as of 2026-04-15. All known shops
+  -- (River's Edge, Gallatin River Guides, Bigy Fly Co) are JS-rendered or dead.
+  -- Gallatin hatch intelligence falls back to temperature-derived logic in decisionCard.ts.
 on conflict do nothing;
 
 -- ── Cron: every Tuesday and Friday at 8am MT (14:00 UTC) ─────────────────────
