@@ -4,28 +4,6 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import type mapboxgl from "mapbox-gl";
 import dynamic from "next/dynamic";
 import { Layers, Plus, Minus, Maximize2, Crosshair, ChevronLeft, X } from "lucide-react";
-
-const MapView = dynamic(
-  () => import("@/components/MapView").then((m) => ({ default: m.MapView })),
-  {
-    ssr: false,
-    loading: () => (
-      <div style={{
-        width: "100%",
-        height: "100%",
-        background: "#e8e4dc",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        color: "#2d5a1b",
-        fontSize: 14,
-        fontWeight: 500,
-      }}>
-        Loading map...
-      </div>
-    ),
-  }
-);
 import { fetchRiverGeom } from "@/lib/supabase";
 import { fetchRiverGeojsonBrowser } from "@/lib/supabaseBrowser";
 import { RIVER_FOCUS_POINTS } from "@/lib/river-focus-points";
@@ -63,6 +41,14 @@ import type {
   RiverSourceSiteSummary,
   RiverWeatherDay,
 } from "@/lib/types";
+
+// Dynamic import — keeps the 946 KB mapbox-gl chunk out of the critical path.
+// ssr:false because mapbox-gl is browser-only. The mounted guard in OnxShell
+// ensures this is only rendered after hydration, eliminating any SSR mismatch.
+const MapView = dynamic(
+  () => import("@/components/MapView").then((m) => ({ default: m.MapView })),
+  { ssr: false }
+);
 
 type River = FishabilityRow;
 
@@ -1596,6 +1582,10 @@ export default function OnxShell({
   const [mobileTransparencyOpen, setMobileTransparencyOpen] = useState(false);
 
   // ── Map / data state
+  // mounted gates the dynamic MapView render — eliminates server/client hydration
+  // mismatch caused by ssr:false. The placeholder renders on both server and client
+  // during SSR; MapView only mounts after first client paint.
+  const [mounted, setMounted] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [selectedGeojson, setSelectedGeojson] = useState<GeoJSON.GeoJSON | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
@@ -1690,6 +1680,9 @@ export default function OnxShell({
     }
     return latestMs > 0 ? new Date(latestMs).toISOString() : null;
   }, [rivers]);
+
+  // ── Mount flag — flip after first client paint so MapView never mismatches SSR
+  useEffect(() => { setMounted(true); }, []);
 
   // ── Responsive detection
   useEffect(() => {
@@ -1968,24 +1961,28 @@ export default function OnxShell({
 
       {/* ── Map layer (always behind) ── */}
       <div className="absolute inset-0 z-0">
-        <MapView
-          rivers={filtered}
-          selectedRiver={selected}
-          selectedRiverName={selected?.river_name ?? null}
-          selectedRiverId={selectedId}
-          selectedRiverGeojson={selectedGeojson}
-          riverLinesGeojson={initialRiverLinesGeojson ?? null}
-          activeStationsGeojson={stationGeojson ?? null}
-          basemap={basemap}
-          layerState={layerState}
-          rightPanelOpen={!isMobile && !!selected}
-          drawerState="collapsed"
-          selectionSeq={selectionSeq}
-          onSelectRiver={(r) => selectRiver(r.river_id)}
-          className="absolute inset-0"
-          onMapReady={(m) => { mapRef.current = m; }}
-          highlightedStationSiteNo={selectedStationSiteNo}
-        />
+        {mounted ? (
+          <MapView
+            rivers={filtered}
+            selectedRiver={selected}
+            selectedRiverName={selected?.river_name ?? null}
+            selectedRiverId={selectedId}
+            selectedRiverGeojson={selectedGeojson}
+            riverLinesGeojson={initialRiverLinesGeojson ?? null}
+            activeStationsGeojson={stationGeojson ?? null}
+            basemap={basemap}
+            layerState={layerState}
+            rightPanelOpen={!isMobile && !!selected}
+            drawerState="collapsed"
+            selectionSeq={selectionSeq}
+            onSelectRiver={(r) => selectRiver(r.river_id)}
+            className="absolute inset-0"
+            onMapReady={(m) => { mapRef.current = m; }}
+            highlightedStationSiteNo={selectedStationSiteNo}
+          />
+        ) : (
+          <div style={{ position: "absolute", inset: 0, background: "#e8e4dc" }} />
+        )}
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════════

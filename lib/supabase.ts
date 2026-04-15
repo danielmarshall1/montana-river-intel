@@ -179,7 +179,7 @@ export async function fetchLatestRiverScores(): Promise<RiverScoreRow[]> {
 
   const fromLatest = await supabase
     .from("v_river_latest")
-    .select("river_id,slug,river_name,gauge_label,usgs_site_no,date,flow_cfs,gage_height_ft,change_48h_pct_calc,water_temp_f,wind_am_mph,wind_pm_mph,bite_tier,median_flow_cfs,flow_ratio_calc,fishability_score_calc,source_flow_observed_at,source_temp_observed_at,temp_observed_at,flow_source_site_no,temp_status,temp_stale,temp_age_minutes,temp_source_site_no,temp_source_kind,confidence_level,temp_unavailable,temp_reason,updated_at");
+    .select("river_id,slug,river_name,gauge_label,usgs_site_no,date,flow_cfs,change_48h_pct_calc,water_temp_f,wind_am_mph,wind_pm_mph,bite_tier,median_flow_cfs,flow_ratio_calc,fishability_score_calc,source_flow_observed_at,source_temp_observed_at,flow_source_site_no,temp_status,temp_stale,temp_age_minutes,temp_source_site_no,temp_source_kind,temp_unavailable,temp_reason,updated_at");
 
   if (!fromLatest.error && fromLatest.data && fromLatest.data.length > 0) {
     return (fromLatest.data as RiverLatestRow[]).map((r) => ({
@@ -242,7 +242,7 @@ export async function fetchRiversWithLatest(): Promise<FishabilityRow[]> {
   const [latestRes, healthMap, riversRes, maxUpdatedRes] = await Promise.all([
     supabase
       .from("v_river_latest")
-      .select("river_id,slug,river_name,gauge_label,usgs_site_no,date,flow_cfs,gage_height_ft,median_flow_cfs,flow_ratio_calc,change_48h_pct_calc,water_temp_f,wind_am_mph,wind_pm_mph,precip_mm,precip_probability_pct,fishability_score_calc,fishability_rank,fishability_percentile,bite_tier,latitude,longitude,source_flow_observed_at,source_temp_observed_at,temp_observed_at,flow_source_site_no,temp_status,temp_stale,temp_age_minutes,temp_source_site_no,temp_source_kind,confidence_level,temp_unavailable,temp_reason,updated_at,is_stale,stale_reason,last_usgs_pull_at,last_weather_pull_at,last_river_daily_date")
+      .select("river_id,slug,river_name,gauge_label,usgs_site_no,date,flow_cfs,median_flow_cfs,flow_ratio_calc,change_48h_pct_calc,water_temp_f,wind_am_mph,wind_pm_mph,precip_mm,precip_probability_pct,fishability_score_calc,fishability_rank,fishability_percentile,bite_tier,latitude,longitude,source_flow_observed_at,source_temp_observed_at,flow_source_site_no,temp_status,temp_stale,temp_age_minutes,temp_source_site_no,temp_source_kind,temp_unavailable,temp_reason,updated_at,is_stale,stale_reason,last_usgs_pull_at,last_weather_pull_at,last_river_daily_date")
       .order("fishability_score_calc", { ascending: false, nullsFirst: false }),
     fetchHealthMap(supabase),
     supabase
