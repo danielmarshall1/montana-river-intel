@@ -5,11 +5,19 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
 
+// Haiku: ~20x cheaper than Sonnet. Extraction is simple structured JSON —
+// no reasoning or long-form generation required.
+const CLAUDE_MODEL = "claude-haiku-4-5-20251001";
+
 type FlyShopSource = {
   id: string;
   shop_name: string;
   river_id: string | null;
   report_url: string;
+};
+
+type LastReport = {
+  content_hash: string | null;
 };
 
 type ExtractedReport = {
@@ -23,6 +31,15 @@ type ExtractedReport = {
   tactical_notes: string | null;
   confidence_score: number | null;
 };
+
+/** SHA-256 hex digest of a string — used for change detection. */
+async function sha256(text: string): Promise<string> {
+  const data = new TextEncoder().encode(text);
+  const buf = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
 
 /** Strip HTML tags and collapse whitespace, keeping meaningful text. */
 function stripHtml(html: string): string {
@@ -44,8 +61,8 @@ function stripHtml(html: string): string {
     .trim();
 }
 
-/** Truncate text to a token-safe length for Claude. */
-function truncate(text: string, maxChars = 6000): string {
+/** Truncate to a token-safe length. Haiku context is generous but keep costs low. */
+function truncate(text: string, maxChars = 4000): string {
   if (text.length <= maxChars) return text;
   return text.slice(0, maxChars) + "\n\n[truncated]";
 }
@@ -53,8 +70,9 @@ function truncate(text: string, maxChars = 6000): string {
 async function fetchReportText(url: string): Promise<string> {
   const resp = await fetch(url, {
     headers: {
-      "User-Agent": "Montana River Intelligence / fishing report aggregator (contact: info@montanariverintelligence.com)",
-      "Accept": "text/html,application/xhtml+xml",
+      "User-Agent":
+        "Montana River Intelligence / fishing report aggregator (contact: info@montanariverintelligence.com)",
+      Accept: "text/html,application/xhtml+xml",
     },
     signal: AbortSignal.timeout(15_000),
   });
@@ -63,7 +81,10 @@ async function fetchReportText(url: string): Promise<string> {
   return stripHtml(html);
 }
 
-async function extractWithClaude(text: string): Promise<ExtractedReport> {
+async function extractWithClaude(
+  text: string,
+  sourceLabel: string
+): Promise<ExtractedReport> {
   const resp = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -72,8 +93,8 @@ async function extractWithClaude(text: string): Promise<ExtractedReport> {
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1024,
+      model: CLAUDE_MODEL,
+      max_tokens: 512,
       system:
         "You are extracting structured fishing report data from a Montana fly shop website. " +
         "Extract only factual information present in the text. Return JSON only, no markdown, no explanation.",
@@ -86,7 +107,7 @@ async function extractWithClaude(text: string): Promise<ExtractedReport> {
             `- overall_conditions: one of 'excellent', 'good', 'fair', 'poor', 'unfishable'\n` +
             `- water_clarity: one of 'clear', 'slightly_off', 'off_color', 'blown'\n` +
             `- primary_hatch: the main insect hatch mentioned (e.g. 'BWO', 'Salmonfly', 'Caddis', 'Midges'), or null\n` +
-            `- salmonfly_status: one of 'not_started', 'pre_hatch', 'starting', 'peak', 'trailing', 'done', 'not_applicable' — use 'not_applicable' if no salmonfly mention\n` +
+            `- salmonfly_status: one of 'not_started', 'pre_hatch', 'starting', 'peak', 'trailing', 'done', 'not_applicable'\n` +
             `- salmonfly_section: specific river section where salmonfly hatch is occurring, or null\n` +
             `- recommended_flies: array of fly pattern names mentioned (empty array if none)\n` +
             `- tactical_notes: 1-2 sentence summary of key fishing tactics, or null\n` +
@@ -104,15 +125,35 @@ async function extractWithClaude(text: string): Promise<ExtractedReport> {
   }
 
   const data = await resp.json();
-  const rawContent = data?.content?.[0]?.text ?? "{}";
 
-  // Claude may wrap JSON in a code block — strip it
-  const jsonStr = rawContent.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  // Log token usage for cost monitoring
+  const usage = data?.usage ?? {};
+  console.log(
+    `[claude] ${sourceLabel} — model: ${CLAUDE_MODEL}` +
+    ` | input_tokens: ${usage.input_tokens ?? "?"} | output_tokens: ${usage.output_tokens ?? "?"}`
+  );
+
+  const rawContent = data?.content?.[0]?.text ?? "{}";
+  const jsonStr = rawContent
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
   return JSON.parse(jsonStr) as ExtractedReport;
 }
 
-serve(async (_req) => {
+serve(async (req) => {
   const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+  // Parse body for optional force flag
+  let force = false;
+  try {
+    const body = await req.json();
+    force = body?.force === true;
+  } catch {
+    // empty body is fine
+  }
+
+  if (force) console.log("[flyshop-scraper] force=true — skipping hash checks");
 
   const { data: sources, error: srcErr } = await sb
     .from("fly_shop_sources")
@@ -120,23 +161,67 @@ serve(async (_req) => {
     .eq("is_active", true);
 
   if (srcErr) {
-    return new Response(JSON.stringify({ error: srcErr.message }), { status: 500 });
+    return new Response(JSON.stringify({ error: srcErr.message }), {
+      status: 500,
+    });
   }
 
-  const results: Array<{ source_id: string; shop_name: string; status: "ok" | "error"; detail?: string }> = [];
+  const results: Array<{
+    source_id: string;
+    shop_name: string;
+    status: "ok" | "skipped" | "error";
+    reason?: string;
+    detail?: string;
+  }> = [];
 
   for (const source of (sources ?? []) as FlyShopSource[]) {
     const now = new Date().toISOString();
+    const label = `${source.shop_name} / ${source.id.slice(0, 8)}`;
+
     try {
       const text = await fetchReportText(source.report_url);
-      const extracted = await extractWithClaude(text);
+      const hash = await sha256(text);
+
+      // ── Hash deduplication ───────────────────────────────────────────────
+      if (!force) {
+        const { data: last } = await sb
+          .from("fly_shop_reports")
+          .select("content_hash")
+          .eq("source_id", source.id)
+          .order("scraped_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        const lastHash = (last as LastReport | null)?.content_hash ?? null;
+
+        if (lastHash === hash) {
+          // Content unchanged — touch last_scraped_at, skip Claude
+          await sb
+            .from("fly_shop_sources")
+            .update({ last_scraped_at: now })
+            .eq("id", source.id);
+
+          console.log(`[flyshop-scraper] ${label} — content unchanged, skipped Claude`);
+          results.push({
+            source_id: source.id,
+            shop_name: source.shop_name,
+            status: "skipped",
+            reason: "content unchanged",
+          });
+          continue;
+        }
+      }
+
+      // ── Extract with Claude ──────────────────────────────────────────────
+      const extracted = await extractWithClaude(text, label);
 
       await sb.from("fly_shop_reports").insert({
         source_id: source.id,
         river_id: source.river_id,
         scraped_at: now,
         report_date: extracted.report_date ?? null,
-        raw_text: text.slice(0, 10_000), // store first 10k chars
+        raw_text: text.slice(0, 10_000),
+        content_hash: hash,
         overall_conditions: extracted.overall_conditions ?? null,
         water_clarity: extracted.water_clarity ?? null,
         primary_hatch: extracted.primary_hatch ?? null,
@@ -147,24 +232,50 @@ serve(async (_req) => {
         confidence_score: extracted.confidence_score ?? null,
       });
 
-      await sb.from("fly_shop_sources").update({
-        last_scraped_at: now,
-        last_successful_scrape_at: now,
-        scrape_error: null,
-      }).eq("id", source.id);
+      await sb
+        .from("fly_shop_sources")
+        .update({
+          last_scraped_at: now,
+          last_successful_scrape_at: now,
+          scrape_error: null,
+        })
+        .eq("id", source.id);
 
-      results.push({ source_id: source.id, shop_name: source.shop_name, status: "ok" });
+      results.push({
+        source_id: source.id,
+        shop_name: source.shop_name,
+        status: "ok",
+      });
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
-      await sb.from("fly_shop_sources").update({
-        last_scraped_at: now,
-        scrape_error: detail,
-      }).eq("id", source.id);
-      results.push({ source_id: source.id, shop_name: source.shop_name, status: "error", detail });
+      await sb
+        .from("fly_shop_sources")
+        .update({ last_scraped_at: now, scrape_error: detail })
+        .eq("id", source.id);
+      results.push({
+        source_id: source.id,
+        shop_name: source.shop_name,
+        status: "error",
+        detail,
+      });
     }
   }
 
-  return new Response(JSON.stringify({ scraped: results.length, results }), {
+  const summary = {
+    model: CLAUDE_MODEL,
+    force,
+    total: results.length,
+    ok: results.filter((r) => r.status === "ok").length,
+    skipped: results.filter((r) => r.status === "skipped").length,
+    errors: results.filter((r) => r.status === "error").length,
+    results,
+  };
+
+  console.log(
+    `[flyshop-scraper] done — ok: ${summary.ok}, skipped: ${summary.skipped}, errors: ${summary.errors}`
+  );
+
+  return new Response(JSON.stringify(summary), {
     headers: { "Content-Type": "application/json" },
   });
 });
