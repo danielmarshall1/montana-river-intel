@@ -9,6 +9,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <head>
+        {/* Preconnect to external domains before they're needed */}
+        <link rel="preconnect" href="https://api.mapbox.com" />
+        <link rel="preconnect" href="https://events.mapbox.com" />
+        <link rel="preconnect" href="https://waterservices.usgs.gov" />
+        <link rel="dns-prefetch" href="https://relkyvqwmfbmzzlqypmu.supabase.co" />
         <link rel="manifest" href="/manifest.json" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />

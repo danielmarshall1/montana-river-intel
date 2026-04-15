@@ -510,10 +510,14 @@ function RiverRow({
   river,
   selected,
   onSelect,
+  onMouseEnter,
+  onMouseLeave,
 }: {
   river: River;
   selected: boolean;
   onSelect: () => void;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
 }) {
   const tc = getTierColors(river.bite_tier);
   const score = river.fishability_score_calc;
@@ -523,6 +527,8 @@ function RiverRow({
   return (
     <button
       onClick={onSelect}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
       className={`mri-river-row ${selected ? "mri-river-row-selected" : ""}`}
       style={isHot ? { borderLeft: "2px solid #2d5a1b", paddingLeft: "calc(var(--mri-row-px, 12px) - 2px)" } : undefined}
     >
@@ -1593,6 +1599,7 @@ export default function OnxShell({
   const [isMobile, setIsMobile] = useState(false);
   const [selectedGeojson, setSelectedGeojson] = useState<GeoJSON.GeoJSON | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
+  const prefetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [historyRows, setHistoryRows] = useState<HistoryRow[]>([]);
   const [, setHistoryLoading] = useState(false);
@@ -2059,6 +2066,14 @@ export default function OnxShell({
                       setSheetSnap("peek");
                       setSheetY(SHEET_SNAPS.peek);
                     }}
+                    onMouseEnter={() => {
+                      prefetchTimer.current = setTimeout(() => {
+                        fetchRiverDetailAnalyticsByIdOrSlug(r.river_id);
+                      }, 200);
+                    }}
+                    onMouseLeave={() => {
+                      if (prefetchTimer.current) clearTimeout(prefetchTimer.current);
+                    }}
                   />
                 ))}
               </div>
@@ -2226,6 +2241,14 @@ export default function OnxShell({
                   river={r}
                   selected={r.river_id === selectedId}
                   onSelect={() => selectRiver(r.river_id === selectedId ? null : r.river_id)}
+                  onMouseEnter={() => {
+                    prefetchTimer.current = setTimeout(() => {
+                      fetchRiverDetailAnalyticsByIdOrSlug(r.river_id);
+                    }, 200);
+                  }}
+                  onMouseLeave={() => {
+                    if (prefetchTimer.current) clearTimeout(prefetchTimer.current);
+                  }}
                 />
               ))}
             </div>

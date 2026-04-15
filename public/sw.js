@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mri-v1';
+const CACHE_NAME = 'mri-v2';
 
 const APP_SHELL = [
   '/',
@@ -25,15 +25,63 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+const RIVERS_CACHE_TTL = 15 * 60 * 1000; // 15 minutes
+
 // ── Fetch: routing strategy ───────────────────────────────────────────────────
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Only handle same-origin requests
+  // Only handle same-origin GET requests
   if (url.origin !== self.location.origin) return;
+  if (request.method !== 'GET') return;
 
-  // Network-first for API routes
+  // Stale-while-revalidate for /api/rivers — river list changes every ~15 min
+  if (url.pathname === '/api/rivers') {
+    event.respondWith(
+      caches.open(CACHE_NAME).then(async (cache) => {
+        const cached = await cache.match(request);
+        const now = Date.now();
+
+        // Serve cached response immediately if fresh enough
+        if (cached) {
+          const cachedAt = Number(cached.headers.get('x-sw-cached-at') || 0);
+          if (now - cachedAt < RIVERS_CACHE_TTL) {
+            // Background revalidate if older than half TTL
+            if (now - cachedAt > RIVERS_CACHE_TTL / 2) {
+              fetch(request).then((res) => {
+                if (res.ok) {
+                  const headers = new Headers(res.headers);
+                  headers.set('x-sw-cached-at', String(Date.now()));
+                  cache.put(request, new Response(res.body, { status: res.status, headers }));
+                }
+              }).catch(() => {});
+            }
+            return cached;
+          }
+        }
+
+        // Cache miss or stale — fetch, stamp, cache, return
+        try {
+          const res = await fetch(request);
+          if (res.ok) {
+            const headers = new Headers(res.headers);
+            headers.set('x-sw-cached-at', String(Date.now()));
+            cache.put(request, new Response(res.clone().body, { status: res.status, headers }));
+          }
+          return res;
+        } catch {
+          return cached || new Response(
+            JSON.stringify({ error: 'offline', message: "You're offline — cached river data shown" }),
+            { status: 503, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+      })
+    );
+    return;
+  }
+
+  // Network-first for other API routes (access-weather, river-segments, flyshop-reports, etc.)
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(
       fetch(request)
