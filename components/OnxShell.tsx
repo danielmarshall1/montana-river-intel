@@ -1,9 +1,31 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import mapboxgl from "mapbox-gl";
+import type mapboxgl from "mapbox-gl";
+import dynamic from "next/dynamic";
 import { Layers, Plus, Minus, Maximize2, Crosshair, ChevronLeft, X } from "lucide-react";
-import { MapView } from "@/components/MapView";
+
+const MapView = dynamic(
+  () => import("@/components/MapView").then((m) => ({ default: m.MapView })),
+  {
+    ssr: false,
+    loading: () => (
+      <div style={{
+        width: "100%",
+        height: "100%",
+        background: "#e8e4dc",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "#2d5a1b",
+        fontSize: 14,
+        fontWeight: 500,
+      }}>
+        Loading map...
+      </div>
+    ),
+  }
+);
 import { fetchRiverGeom } from "@/lib/supabase";
 import { fetchRiverGeojsonBrowser } from "@/lib/supabaseBrowser";
 import { RIVER_FOCUS_POINTS } from "@/lib/river-focus-points";
@@ -1835,10 +1857,11 @@ export default function OnxShell({
     mapRef.current?.flyTo?.({ center: [-109.75, 47.05], zoom: 6.15, duration: 450, pitch: 14, bearing: 0, essential: true });
   }
 
-  function fitToRivers() {
+  async function fitToRivers() {
     const map = mapRef.current;
     if (!map || !filtered.length) return;
-    const bounds = new mapboxgl.LngLatBounds();
+    const { LngLatBounds } = await import("mapbox-gl");
+    const bounds = new LngLatBounds();
     let hasAny = false;
     for (const r of filtered) {
       const lat = r.lat ?? (r as { latitude?: number }).latitude;

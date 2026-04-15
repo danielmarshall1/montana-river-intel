@@ -179,7 +179,7 @@ export async function fetchLatestRiverScores(): Promise<RiverScoreRow[]> {
 
   const fromLatest = await supabase
     .from("v_river_latest")
-    .select("*");
+    .select("river_id,slug,river_name,gauge_label,usgs_site_no,date,flow_cfs,gage_height_ft,change_48h_pct_calc,water_temp_f,wind_am_mph,wind_pm_mph,bite_tier,median_flow_cfs,flow_ratio_calc,fishability_score_calc,source_flow_observed_at,source_temp_observed_at,temp_observed_at,flow_source_site_no,temp_status,temp_stale,temp_age_minutes,temp_source_site_no,temp_source_kind,confidence_level,temp_unavailable,temp_reason,updated_at");
 
   if (!fromLatest.error && fromLatest.data && fromLatest.data.length > 0) {
     return (fromLatest.data as RiverLatestRow[]).map((r) => ({
@@ -236,26 +236,28 @@ export async function fetchRiversWithLatest(): Promise<FishabilityRow[]> {
   const supabase = createSupabaseClient();
   if (!supabase) return [];
 
-  const latestRes: any = await supabase
-    .from("v_river_latest")
-    .select("*")
-    .order("fishability_score_calc", { ascending: false, nullsFirst: false });
+  const today = new Date().toISOString().slice(0, 10);
 
-  if (!latestRes.error && latestRes.data && latestRes.data.length > 0) {
-    const today = new Date().toISOString().slice(0, 10);
-    const [healthMap, riversRes, maxUpdatedRes] = await Promise.all([
-      fetchHealthMap(supabase),
-      supabase
-        .from("rivers")
-        .select("id,wading_threshold_cfs,drift_optimal_min_cfs,drift_optimal_max_cfs,is_tailwater,elevation_ft"),
-      supabase
-        .from("river_daily")
-        .select("updated_at")
-        .eq("obs_date", today)
-        .order("updated_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-    ]);
+  // All four queries fire simultaneously — no sequential round trips.
+  const [latestRes, healthMap, riversRes, maxUpdatedRes] = await Promise.all([
+    supabase
+      .from("v_river_latest")
+      .select("river_id,slug,river_name,gauge_label,usgs_site_no,date,flow_cfs,gage_height_ft,median_flow_cfs,flow_ratio_calc,change_48h_pct_calc,water_temp_f,wind_am_mph,wind_pm_mph,precip_mm,precip_probability_pct,fishability_score_calc,fishability_rank,fishability_percentile,bite_tier,latitude,longitude,source_flow_observed_at,source_temp_observed_at,temp_observed_at,flow_source_site_no,temp_status,temp_stale,temp_age_minutes,temp_source_site_no,temp_source_kind,confidence_level,temp_unavailable,temp_reason,updated_at,is_stale,stale_reason,last_usgs_pull_at,last_weather_pull_at,last_river_daily_date")
+      .order("fishability_score_calc", { ascending: false, nullsFirst: false }),
+    fetchHealthMap(supabase),
+    supabase
+      .from("rivers")
+      .select("id,wading_threshold_cfs,drift_optimal_min_cfs,drift_optimal_max_cfs,is_tailwater,elevation_ft"),
+    supabase
+      .from("river_daily")
+      .select("updated_at")
+      .eq("obs_date", today)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  if (!(latestRes as any).error && (latestRes as any).data && (latestRes as any).data.length > 0) {
     const ingestUpdatedAt: string | null = (maxUpdatedRes.data as { updated_at?: string | null } | null)?.updated_at ?? null;
     type RiverMeta = { id: string; wading_threshold_cfs: number | null; drift_optimal_min_cfs: number | null; drift_optimal_max_cfs: number | null; is_tailwater: boolean | null; elevation_ft: number | null };
     const thresholdMap = new Map<string, RiverMeta>();
@@ -269,7 +271,7 @@ export async function fetchRiversWithLatest(): Promise<FishabilityRow[]> {
         elevation_ft: rv.elevation_ft ?? null,
       });
     }
-    const rows = (latestRes.data as RiverLatestRow[]).map((r) => ({
+    const rows = ((latestRes as any).data as RiverLatestRow[]).map((r) => ({
       river_id: String(r.river_id ?? ""),
       slug: r.slug ?? undefined,
       river_name: r.river_name ?? formatSlug(String(r.slug ?? r.river_id ?? "")),
@@ -607,38 +609,58 @@ export async function fetchRiverDetailByIdOrSlug(
   return null;
 }
 
+// ── In-memory caches for river selection queries ────────────────────────────
+// Selecting the same river twice within 5 minutes returns instantly.
+const CACHE_TTL = 5 * 60 * 1000;
+
+const analyticsCache = new Map<string, { data: RiverDetailAnalyticsBackendRow | null; ts: number }>();
+const historyCache = new Map<string, { data: Array<{ obs_date: string; flow_cfs: number | null; water_temp_f: number | null; fishability_score: number | null }>; ts: number }>();
+
 export async function fetchRiverDetailAnalyticsByIdOrSlug(
   riverIdOrSlug: string
 ): Promise<RiverDetailAnalyticsBackendRow | null> {
+  const cached = analyticsCache.get(riverIdOrSlug);
+  if (cached && Date.now() - cached.ts < CACHE_TTL) return cached.data;
+
   const client = createSupabaseClient();
   if (!client) return null;
 
+  const analyticsColumns = "river_id,slug,river_name,gauge_label,date,current_flow_cfs,current_temp_f,current_stage_ft,median_flow_cfs,flow_ratio,flow_48h_ago,temp_24h_ago,change_48h_pct,temp_change_24h_f,stability_index_raw,stability_label,flow_trend_label,flow_percentile,flow_percentile_status,flow_p10,flow_p25,flow_p50,flow_p75,flow_p90,historical_sample_size,temp_source_kind,temp_observed_at,confidence_level,flow_source_site_no,flow_source_site_name,temp_source_site_no,temp_source_site_name,observation_timestamp,last_hydrology_pull_at,air_temp_f,wind_speed_mph,wind_direction_deg,wind_direction,gust_mph,precip_chance_pct,cloud_cover_pct,daily_high_f,daily_low_f,weather_observed_at,thermal_trend_label,temp_direction_3d,forecast_day1_air_temp_f,forecast_day1_wind_mph,forecast_day1_precip_chance_pct,forecast_day2_air_temp_f,forecast_day2_wind_mph,forecast_day2_precip_chance_pct,forecast_day3_air_temp_f,forecast_day3_wind_mph,forecast_day3_precip_chance_pct,wind_outlook,flow_outlook,fishing_outlook";
+
   const byId = await client
     .from("v_river_detail_analytics")
-    .select("*")
+    .select(analyticsColumns)
     .eq("river_id", riverIdOrSlug)
     .maybeSingle();
 
   if (!byId.error && byId.data) {
-    return byId.data as RiverDetailAnalyticsRow;
+    const result = byId.data as RiverDetailAnalyticsRow;
+    analyticsCache.set(riverIdOrSlug, { data: result, ts: Date.now() });
+    return result;
   }
 
   const bySlug = await client
     .from("v_river_detail_analytics")
-    .select("*")
+    .select(analyticsColumns)
     .eq("slug", riverIdOrSlug)
     .maybeSingle();
 
   if (!bySlug.error && bySlug.data) {
-    return bySlug.data as RiverDetailAnalyticsRow;
+    const result = bySlug.data as RiverDetailAnalyticsRow;
+    analyticsCache.set(riverIdOrSlug, { data: result, ts: Date.now() });
+    return result;
   }
 
+  analyticsCache.set(riverIdOrSlug, { data: null, ts: Date.now() });
   return null;
 }
 
-export async function fetchRiverHistory14d(
-  riverDbId: string
-): Promise<Array<{ obs_date: string; flow_cfs: number | null; water_temp_f: number | null; fishability_score: number | null }>> {
+type HistoryRow = { obs_date: string; flow_cfs: number | null; water_temp_f: number | null; fishability_score: number | null };
+
+export async function fetchRiverHistory14d(riverDbId: string): Promise<HistoryRow[]> {
+  const cached = historyCache.get(riverDbId);
+  if (cached && Date.now() - cached.ts < CACHE_TTL) return cached.data;
+
   const client = createSupabaseClient();
   if (!client) return [];
 
@@ -658,12 +680,9 @@ export async function fetchRiverHistory14d(
     p_river_id: resolvedRiverId,
   });
   if (!error && data) {
-    return data as Array<{
-      obs_date: string;
-      flow_cfs: number | null;
-      water_temp_f: number | null;
-      fishability_score: number | null;
-    }>;
+    const result = data as HistoryRow[];
+    historyCache.set(riverDbId, { data: result, ts: Date.now() });
+    return result;
   }
 
   // Fallback path when RPC is missing/mismatched: read directly from river_daily.
@@ -675,12 +694,9 @@ export async function fetchRiverHistory14d(
     .limit(14);
 
   if (dailyRes.error || !dailyRes.data) return [];
-  return (dailyRes.data as Array<{
-    obs_date: string;
-    flow_cfs: number | null;
-    water_temp_f: number | null;
-    fishability_score: number | null;
-  }>);
+  const result = dailyRes.data as HistoryRow[];
+  historyCache.set(riverDbId, { data: result, ts: Date.now() });
+  return result;
 }
 
 export async function fetchRiverIntraday24h(
@@ -765,9 +781,11 @@ export async function fetchRiverWeatherWindow(riverDbId: string): Promise<RiverW
   if (!resolvedRiverId) return [];
 
   const today = mountainDate();
+  const weatherColumns = "date,wind_am_mph,wind_pm_mph,wind_speed_max_mph,air_temp_f,wind_direction_deg,gust_mph,cloud_cover_pct,air_temp_high_f,air_temp_low_f,precip_mm,precip_probability_pct,observed_at";
+
   let res = await client
     .from("weather_daily")
-    .select("*")
+    .select(weatherColumns)
     .eq("river_id", resolvedRiverId)
     .gte("date", today)
     .order("date", { ascending: true })
@@ -776,7 +794,7 @@ export async function fetchRiverWeatherWindow(riverDbId: string): Promise<RiverW
   if (res.error || !res.data?.length) {
     res = await client
       .from("weather_daily")
-      .select("*")
+      .select(weatherColumns)
       .eq("river_id", resolvedRiverId)
       .order("date", { ascending: false })
       .limit(4);
