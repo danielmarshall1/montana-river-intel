@@ -61,10 +61,35 @@ function stripHtml(html: string): string {
     .trim();
 }
 
-/** Truncate to a token-safe length. Haiku context is generous but keep costs low. */
-function truncate(text: string, maxChars = 4000): string {
-  if (text.length <= maxChars) return text;
-  return text.slice(0, maxChars) + "\n\n[truncated]";
+/**
+ * Extract the most report-like section of the text and truncate for Claude.
+ * Many shop sites have 30-40k chars of nav/CSS before the actual report body.
+ * We find the first occurrence of common report signals and start from there,
+ * then take up to maxChars. Falls back to the tail of the document if no
+ * signal is found (report content is often at the end of Shopify pages).
+ */
+function extractReportSection(text: string, maxChars = 4000): string {
+  const signals = [
+    "Updated weekly", "Fishing Report", "current conditions", "river is currently",
+    "flows are", "water clarity", "nymphing", "streamer", "hatch", "cfs",
+    "fish are", "fishing has been", "wading", "runoff",
+  ];
+  let best = -1;
+  for (const sig of signals) {
+    const idx = text.toLowerCase().indexOf(sig.toLowerCase());
+    // Skip matches in first 500 chars — likely page title/nav, not report body
+    if (idx > 500 && (best === -1 || idx < best)) best = idx;
+  }
+  // If no signal found after char 500, fall back to the tail of the document
+  // (report content is often at the end of Shopify / CMS pages)
+  if (best === -1) {
+    return text.length > maxChars ? text.slice(text.length - maxChars) : text;
+  }
+  // Start a little before the signal to catch context
+  const start = best > 200 ? best - 200 : 0;
+  const section = text.slice(start);
+  if (section.length <= maxChars) return section;
+  return section.slice(0, maxChars) + "\n\n[truncated]";
 }
 
 async function fetchReportText(url: string): Promise<string> {
@@ -112,7 +137,7 @@ async function extractWithClaude(
             `- recommended_flies: array of fly pattern names mentioned (empty array if none)\n` +
             `- tactical_notes: 1-2 sentence summary of key fishing tactics, or null\n` +
             `- confidence_score: 0.0-1.0 based on how current and specific the report is\n\n` +
-            `Text:\n${truncate(text)}`,
+            `Text:\n${extractReportSection(text)}`,
         },
       ],
     }),
