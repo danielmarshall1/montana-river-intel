@@ -75,6 +75,11 @@ const HYDRO_FLOW_LAYER = "hydro-flow-magnitude-layer";
 const HYDRO_CHANGE_LAYER = "hydro-change-indicator-layer";
 const HYDRO_TEMP_LAYER = "hydro-temp-stress-layer";
 
+const PADUS_SOURCE = "padus-public-lands-source";
+const PADUS_LAYER = "padus-public-lands-layer";
+const PADUS_TILES =
+  "https://gis.usgs.gov/sciencebase2/rest/services/padus3/combined/MapServer/tile/{z}/{y}/{x}";
+
 const BLM_TILES =
   "https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA_Cached_without_PriUnk/MapServer/tile/{z}/{y}/{x}";
 const STATE_LANDS_GEOJSON =
@@ -226,7 +231,8 @@ function toneRasterBasemap(map: mapboxgl.Map) {
       !lid.includes("label") &&
       !lid.includes("reference") &&
       !lid.includes("boundaries") &&
-      id !== FEDERAL_LANDS_LAYER;
+      id !== FEDERAL_LANDS_LAYER &&
+      id !== PADUS_LAYER;
     if (!isImagery) continue;
 
     try {
@@ -896,6 +902,45 @@ function syncFederalLandsLayer(map: mapboxgl.Map, enabled: boolean) {
   }
 }
 
+function syncPadusLayer(map: mapboxgl.Map, enabled: boolean) {
+  if (enabled) {
+    if (!map.getSource(PADUS_SOURCE)) {
+      map.addSource(PADUS_SOURCE, {
+        type: "raster",
+        tiles: [PADUS_TILES],
+        tileSize: 256,
+        attribution: "USGS PAD-US v3",
+      });
+    }
+    if (!map.getLayer(PADUS_LAYER)) {
+      map.addLayer({
+        id: PADUS_LAYER,
+        type: "raster",
+        source: PADUS_SOURCE,
+        minzoom: 6,
+        paint: {
+          "raster-opacity": 0.45,
+        },
+      });
+    }
+    // Sit below hydrology and river lines so they stay readable
+    try {
+      if (map.getLayer(STATEWIDE_HYDRO_LAYER)) {
+        map.moveLayer(PADUS_LAYER, STATEWIDE_HYDRO_LAYER);
+      } else if (map.getLayer(RIVER_CASING_LAYER)) {
+        map.moveLayer(PADUS_LAYER, RIVER_CASING_LAYER);
+      } else if (map.getLayer(UNCLUSTERED_LAYER)) {
+        map.moveLayer(PADUS_LAYER, UNCLUSTERED_LAYER);
+      }
+    } catch {
+      /* ignore ordering failures */
+    }
+    return;
+  }
+  if (map.getLayer(PADUS_LAYER)) map.removeLayer(PADUS_LAYER);
+  if (map.getSource(PADUS_SOURCE)) map.removeSource(PADUS_SOURCE);
+}
+
 function syncStateLandsLayer(map: mapboxgl.Map, enabled: boolean) {
   if (enabled) {
     if (!map.getSource(STATE_LANDS_SOURCE)) {
@@ -1277,6 +1322,10 @@ export function MapView({
   const lastFitSignatureRef = useRef<string | null>(null);
   const [mapReady, setMapReady] = useState(false);
   const [mapInitError, setMapInitError] = useState<string | null>(null);
+  // Incremented each time the access GeoJSON fetch completes — gives the fishing
+  // access effect a reactive dependency to re-run on mobile where style.load fires
+  // before the fetch returns, making the subsequent setMapReady(true) a no-op.
+  const [accessGeojsonVersion, setAccessGeojsonVersion] = useState(0);
 
   riversRef.current = rivers;
   onSelectRiverRef.current = onSelectRiver;
@@ -1311,6 +1360,7 @@ export function MapView({
       layerStateRef.current.mri_labels
     );
     syncStatewideHydrologyLayer(map, layerStateRef.current.statewide_hydrology);
+    syncPadusLayer(map, layerStateRef.current.padus_public_lands);
     syncFederalLandsLayer(map, layerStateRef.current.public_federal);
     syncStateLandsLayer(map, layerStateRef.current.public_state);
     // Fishing access is handled exclusively by the dedicated useEffect which has
@@ -1390,8 +1440,12 @@ export function MapView({
         .then((geojson: GeoJSON.FeatureCollection) => {
           console.log("[access-load] access GeoJSON loaded, features:", geojson.features?.length ?? 0);
           accessGeojsonRef.current = geojson;
+          // Increment version so the fishing access effect re-runs even if
+          // mapReady is already true (style.load fires before this fetch returns
+          // on mobile, making the setMapReady(true) below a no-op).
+          setAccessGeojsonVersion((v) => v + 1);
         })
-        .catch((err) => console.warn("[access-load] fetch failed, will fall back to URL:", err))
+        .catch((err) => console.warn("[access-load] fetch failed:", err))
         .finally(() => {
           setMapReady(true);
           onMapReadyRef.current?.(map);
@@ -1492,9 +1546,37 @@ export function MapView({
         const props = (feature.properties ?? {}) as Record<string, unknown>;
         const name =
           String(props.NAME ?? props.Name ?? props.name ?? "Fishing Access Site");
-        new mapboxgl.Popup({ closeButton: false, closeOnClick: true, offset: 10 })
+        const [lng, lat] = coords;
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+        const isMobile = isIOS || /Android/.test(navigator.userAgent);
+        const appleUrl = `https://maps.apple.com/?daddr=${lat},${lng}&dirflg=d`;
+        const googleUrl = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+        const navHtml = isMobile
+          ? `<a href="${isIOS ? appleUrl : googleUrl}" target="_blank" rel="noopener noreferrer"
+               style="display:block;background:#2d5a1b;color:white;text-decoration:none;
+                      text-align:center;padding:10px 16px;min-height:44px;border-radius:6px;
+                      font-size:14px;font-weight:600;line-height:24px;">
+               Get Directions →
+             </a>`
+          : `<div style="display:flex;gap:8px;margin-top:6px;">
+               <a href="${appleUrl}" target="_blank" rel="noopener noreferrer"
+                  style="flex:1;text-align:center;padding:6px 8px;border:1px solid #d1d5db;
+                         border-radius:4px;font-size:12px;color:#374151;text-decoration:none;">
+                 Apple Maps ↗
+               </a>
+               <a href="${googleUrl}" target="_blank" rel="noopener noreferrer"
+                  style="flex:1;text-align:center;padding:6px 8px;border:1px solid #d1d5db;
+                         border-radius:4px;font-size:12px;color:#374151;text-decoration:none;">
+                 Google Maps ↗
+               </a>
+             </div>`;
+        new mapboxgl.Popup({ closeButton: true, closeOnClick: true, offset: 10, maxWidth: "240px" })
           .setLngLat(coords)
-          .setHTML(`<div style="font-size:12px;font-weight:600;color:#0f172a;">${name}</div>`)
+          .setHTML(`
+            <div style="padding:4px 2px;">
+              <div style="font-size:13px;font-weight:600;color:#0f172a;margin-bottom:8px;">${name}</div>
+              ${navHtml}
+            </div>`)
           .addTo(map);
       });
 
@@ -1722,6 +1804,7 @@ export function MapView({
     if (typeof map.isStyleLoaded === "function" && !map.isStyleLoaded()) return;
 
     syncStatewideHydrologyLayer(map, effectiveLayerState.statewide_hydrology);
+    syncPadusLayer(map, effectiveLayerState.padus_public_lands);
     syncFederalLandsLayer(map, effectiveLayerState.public_federal);
     syncStateLandsLayer(map, effectiveLayerState.public_state);
     syncActiveStationsLayer(map, effectiveLayerState.mri_active_stations, activeStationsGeojson, selectedRiver, highlightedStationSiteNo);
@@ -1735,6 +1818,7 @@ export function MapView({
   }, [
     mapReady,
     effectiveLayerState.statewide_hydrology,
+    effectiveLayerState.padus_public_lands,
     effectiveLayerState.public_federal,
     effectiveLayerState.public_state,
     effectiveLayerState.mri_active_stations,
@@ -1768,34 +1852,57 @@ export function MapView({
 
     if (!features.length) return;
 
-    map.addSource(ACCESS_SOURCE, {
-      type: "geojson",
-      data: { type: "FeatureCollection", features },
-    });
+    // Purely adds the source and layer — no guard inside so there's no re-entry.
+    // Guards live outside so stale listeners can be cleaned up correctly.
+    const addAccessLayer = () => {
+      console.log("[access] layer added, river=" + uuid + ", features=" + features.length);
+      // Clear any remnants (should already be gone from the top-of-effect cleanup,
+      // but guard against the styledata-callback path arriving after a re-render).
+      if (map.getLayer(ACCESS_LAYER)) map.removeLayer(ACCESS_LAYER);
+      if (map.getSource(ACCESS_SOURCE)) map.removeSource(ACCESS_SOURCE);
+      map.addSource(ACCESS_SOURCE, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features },
+      });
+      map.addLayer({
+        id: ACCESS_LAYER,
+        type: "circle",
+        source: ACCESS_SOURCE,
+        paint: {
+          "circle-color": "#2d5a1b",
+          // All features in this source are for the selected river, so use the
+          // "selected" radius of 8 to give a subtle pulse vs the base 6 used when
+          // the access layer is shown without a selection context.
+          "circle-radius": 8,
+          "circle-stroke-color": "white",
+          "circle-stroke-width": 2,
+          "circle-opacity": 0.95,
+        },
+      });
+    };
 
-    map.addLayer({
-      id: ACCESS_LAYER,
-      type: "circle",
-      source: ACCESS_SOURCE,
-      paint: {
-        "circle-color": "#2d5a1b",
-        // All features in this source are for the selected river, so use the
-        // "selected" radius of 8 to give a subtle pulse vs the base 6 used when
-        // the access layer is shown without a selection context.
-        "circle-radius": 8,
-        "circle-stroke-color": "white",
-        "circle-stroke-width": 2,
-        "circle-opacity": 0.95,
-      },
-    });
+    // isStyleLoaded() checks tile loading, not just style JSON. It can return
+    // false even after the `load` event if viewport tiles are still downloading.
+    // The guard: if the style is ready go immediately; otherwise wait once.
+    // map.once("styledata") is de-registered in the cleanup so a stale callback
+    // never fires after React has torn down this effect.
+    console.log("[access] effect fired, river=" + uuid + ", styleLoaded=" + map.isStyleLoaded());
+    if (map.isStyleLoaded()) {
+      addAccessLayer();
+    } else {
+      map.once("styledata", addAccessLayer);
+    }
 
     return () => {
       const m = mapRef.current;
       if (!m) return;
+      // De-register the styledata listener before removing source/layer so the
+      // callback can't fire on a map that's already been cleaned up.
+      m.off("styledata", addAccessLayer);
       if (m.getLayer(ACCESS_LAYER)) m.removeLayer(ACCESS_LAYER);
       if (m.getSource(ACCESS_SOURCE)) m.removeSource(ACCESS_SOURCE);
     };
-  }, [mapReady, selectedRiverId, effectiveLayerState.access_fishing_sites]);
+  }, [mapReady, accessGeojsonVersion, selectedRiverId, effectiveLayerState.access_fishing_sites]);
 
   // Re-apply custom sources/layers after every Mapbox style change.
   useEffect(() => {
@@ -1853,42 +1960,81 @@ export function MapView({
         </div>
       )}
       {mapReady && mapRef.current && <MapControls map={mapRef.current} />}
-      {/* Map legend — only shown when a river is selected and access points are visible */}
-      {selectedRiver && effectiveLayerState.access_fishing_sites && (
-        <div
-          style={{
-            position: "absolute",
-            bottom: 28,
-            left: 10,
-            background: "white",
-            border: "0.5px solid rgba(0,0,0,0.18)",
-            borderRadius: 8,
-            padding: "6px 8px",
-            fontSize: 10,
-            lineHeight: "16px",
-            pointerEvents: "none",
-            zIndex: 10,
-            display: "flex",
-            flexDirection: "column",
-            gap: 3,
-          }}
-        >
-          {/* Fishing access — green circle */}
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <svg width="12" height="12" viewBox="0 0 12 12">
-              <circle cx="6" cy="6" r="4.5" fill="#2d5a1b" stroke="white" strokeWidth="1.5" />
-            </svg>
-            <span style={{ color: "#333" }}>Fishing access</span>
+      {/* Legend stack — bottom-left, grows upward */}
+      <div
+        style={{
+          position: "absolute",
+          bottom: 28,
+          left: 10,
+          zIndex: 10,
+          pointerEvents: "none",
+          display: "flex",
+          flexDirection: "column",
+          gap: 4,
+        }}
+      >
+        {/* Fishing access legend — only when a river is selected */}
+        {selectedRiver && effectiveLayerState.access_fishing_sites && (
+          <div
+            style={{
+              background: "white",
+              border: "0.5px solid rgba(0,0,0,0.18)",
+              borderRadius: 8,
+              padding: "6px 8px",
+              fontSize: 10,
+              lineHeight: "16px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 3,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <svg width="12" height="12" viewBox="0 0 12 12">
+                <circle cx="6" cy="6" r="4.5" fill="#2d5a1b" stroke="white" strokeWidth="1.5" />
+              </svg>
+              <span style={{ color: "#333" }}>Fishing access</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <svg width="12" height="12" viewBox="0 0 12 12">
+                <rect x="3" y="3" width="6" height="6" rx="0.5" fill="#1a3a5c" stroke="#7eb8d4" strokeWidth="1.5" transform="rotate(45 6 6)" />
+              </svg>
+              <span style={{ color: "#333" }}>USGS gauge</span>
+            </div>
           </div>
-          {/* USGS gauge — navy diamond (circle rotated 45°) */}
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <svg width="12" height="12" viewBox="0 0 12 12">
-              <rect x="3" y="3" width="6" height="6" rx="0.5" fill="#1a3a5c" stroke="#7eb8d4" strokeWidth="1.5" transform="rotate(45 6 6)" />
-            </svg>
-            <span style={{ color: "#333" }}>USGS gauge</span>
+        )}
+
+        {/* PAD-US legend — shown whenever the layer is active */}
+        {effectiveLayerState.padus_public_lands && (
+          <div
+            style={{
+              background: "rgba(255,255,255,0.96)",
+              border: "0.5px solid rgba(0,0,0,0.18)",
+              borderRadius: 8,
+              padding: "6px 8px",
+              fontSize: 10,
+              lineHeight: "16px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 3,
+            }}
+          >
+            <div style={{ fontWeight: 600, color: "#333", marginBottom: 1, fontSize: 10 }}>Public Lands</div>
+            {([
+              { color: "#2d6a2d", label: "National Forest" },
+              { color: "#c8a84b", label: "BLM" },
+              { color: "#1a4d1a", label: "National Park" },
+              { color: "#4a7fb5", label: "State" },
+              { color: "#6b4c8f", label: "Wilderness" },
+            ] as const).map(({ color, label }) => (
+              <div key={label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div style={{ width: 10, height: 10, borderRadius: 2, background: color, flexShrink: 0 }} />
+                <span style={{ color: "#333" }}>{label}</span>
+              </div>
+            ))}
+            <div style={{ marginTop: 2, fontSize: 9, color: "#888" }}>USGS PAD-US v3</div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

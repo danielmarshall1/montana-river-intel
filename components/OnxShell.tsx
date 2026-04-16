@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type mapboxgl from "mapbox-gl";
 import dynamic from "next/dynamic";
-import { Layers, Plus, Minus, Maximize2, Crosshair, ChevronLeft, X } from "lucide-react";
+import { Layers, Plus, Minus, Maximize2, Crosshair, ChevronLeft, X, Globe } from "lucide-react";
 import { fetchRiverGeom } from "@/lib/supabase";
 import { fetchRiverGeojsonBrowser } from "@/lib/supabaseBrowser";
 import { RIVER_FOCUS_POINTS } from "@/lib/river-focus-points";
@@ -2016,6 +2016,17 @@ export default function OnxShell({
           ))}
         </div>
       </header>
+
+      {/* Mobile satellite/terrain toggle — floating above sheet, below header */}
+      <button
+        className="absolute right-3 z-10 sm:hidden mri-card flex items-center gap-1.5 px-3 py-2 text-[12px] font-semibold text-[var(--mri-text)] min-h-[44px]"
+        style={{ top: "calc(max(12px, env(safe-area-inset-top)) + 94px)" }}
+        title={basemap === "topo" ? "Switch to satellite" : "Switch to terrain"}
+        onClick={() => setBasemapStyle(basemap === "topo" ? "hybrid" : "topo")}
+      >
+        <Globe size={13} strokeWidth={2} />
+        {basemap === "topo" ? "Satellite" : "Terrain"}
+      </button>
 
       {/* Mobile bottom sheet — always visible, slides to snap points */}
       <section

@@ -6,6 +6,7 @@ export type LayerId =
   | "statewide_hydrology"
   | "public_federal"
   | "public_state"
+  | "padus_public_lands"
   | "access_fishing_sites"
   | "mri_river_lines"
   | "mri_selected_highlight"
@@ -157,8 +158,25 @@ export const LAYER_REGISTRY: LayerDefinition[] = [
   },
   // ── Public Lands ─────────────────────────────────────────────────────────
   {
+    id: "padus_public_lands",
+    label: "Public Lands (PAD-US)",
+    group: "Public Lands",
+    defaultOn: false,
+    source: {
+      id: "padus-public-lands-source",
+      type: "raster",
+      tiles: [
+        "https://gis.usgs.gov/sciencebase2/rest/services/padus3/combined/MapServer/tile/{z}/{y}/{x}",
+      ],
+      tileSize: 256,
+      attribution: "USGS PAD-US v3",
+    },
+    layers: ["padus-public-lands-layer"],
+    minZoomNote: "Visible at zoom 6+",
+  },
+  {
     id: "public_federal",
-    label: "Federal",
+    label: "Federal BLM",
     group: "Public Lands",
     defaultOn: false,
     source: {
