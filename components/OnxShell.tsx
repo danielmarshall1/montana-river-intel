@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type mapboxgl from "mapbox-gl";
 import dynamic from "next/dynamic";
-import { Layers, Plus, Minus, Maximize2, Crosshair, ChevronLeft, X, Globe } from "lucide-react";
+import { Layers, Plus, Minus, Maximize2, Crosshair, ChevronLeft, ChevronRight, X, Globe, MapPin } from "lucide-react";
 import { fetchRiverGeom } from "@/lib/supabase";
 import { fetchRiverGeojsonBrowser } from "@/lib/supabaseBrowser";
 import { RIVER_FOCUS_POINTS } from "@/lib/river-focus-points";
@@ -2028,67 +2028,125 @@ export default function OnxShell({
         {basemap === "topo" ? "Satellite" : "Terrain"}
       </button>
 
-      {/* Mobile bottom sheet — always visible, slides to snap points */}
-      <section
-        className="absolute bottom-0 left-0 right-0 z-20 sm:hidden"
-        style={{
-          height: "90dvh",
-          transform: `translateY(${sheetY * 100}dvh)`,
-          transition: isDragging ? "none" : SNAP_TRANSITION,
-        }}
-      >
-        <div className="mri-sheet h-full rounded-t-2xl flex flex-col">
-          {/* Handle — 44px touch target, pointer capture for iOS Safari */}
-          <div
-            className="flex-shrink-0 flex flex-col items-center justify-center cursor-grab active:cursor-grabbing select-none"
-            style={{ touchAction: "none", minHeight: "44px" }}
-            onPointerDown={onHandlePointerDown}
-            onPointerMove={onHandlePointerMove}
-            onPointerUp={snapSheet}
-            onPointerCancel={snapSheet}
-          >
-            <div className="mri-handle" />
-          </div>
-
-          {/* Sheet header */}
-          <div className="flex-shrink-0 flex items-center justify-between px-4 pt-1 pb-2 gap-2">
-            <div className="text-[13px] font-semibold text-[var(--mri-text)] truncate">
-              {filtered.length} rivers · {dateLabel}
+      {/* Mobile bottom sheet — hidden while in map-view mode (river selected, detail closed) */}
+      {(!selectedId || mobileDetailOpen || !isMobile) && (
+        <section
+          className="absolute bottom-0 left-0 right-0 z-20 sm:hidden"
+          style={{
+            height: "90dvh",
+            transform: `translateY(${sheetY * 100}dvh)`,
+            transition: isDragging ? "none" : SNAP_TRANSITION,
+          }}
+        >
+          <div className="mri-sheet h-full rounded-t-2xl flex flex-col">
+            {/* Handle — 44px touch target, pointer capture for iOS Safari */}
+            <div
+              className="flex-shrink-0 flex flex-col items-center justify-center cursor-grab active:cursor-grabbing select-none"
+              style={{ touchAction: "none", minHeight: "44px" }}
+              onPointerDown={onHandlePointerDown}
+              onPointerMove={onHandlePointerMove}
+              onPointerUp={snapSheet}
+              onPointerCancel={snapSheet}
+            >
+              <div className="mri-handle" />
             </div>
-            <div className="text-[10px] text-[var(--mri-text-dim)] whitespace-nowrap flex-shrink-0">{formatPullTime(latestPullAt)}</div>
-          </div>
 
-          {/* River list */}
-          <div className="mri-scroll flex-1 overflow-auto px-3 pb-[max(8px,env(safe-area-inset-bottom))]">
-            {filtered.length === 0 ? (
-              <div className="text-[13px] text-[var(--mri-text-muted)] text-center mt-8">No rivers match your filters</div>
-            ) : (
-              <div className="space-y-0.5">
-                {filtered.map((r) => (
-                  <RiverRow
-                    key={r.river_id}
-                    river={r}
-                    selected={r.river_id === selectedId}
-                    onSelect={() => {
-                      selectRiver(r.river_id);
-                      setSheetSnap("peek");
-                      setSheetY(SHEET_SNAPS.peek);
-                    }}
-                    onMouseEnter={() => {
-                      prefetchTimer.current = setTimeout(() => {
-                        fetchRiverDetailAnalyticsByIdOrSlug(r.river_id);
-                      }, 200);
-                    }}
-                    onMouseLeave={() => {
-                      if (prefetchTimer.current) clearTimeout(prefetchTimer.current);
-                    }}
-                  />
-                ))}
+            {/* Sheet header */}
+            <div className="flex-shrink-0 flex items-center justify-between px-4 pt-1 pb-2 gap-2">
+              <div className="text-[13px] font-semibold text-[var(--mri-text)] truncate">
+                {filtered.length} rivers · {dateLabel}
               </div>
-            )}
+              <div className="text-[10px] text-[var(--mri-text-dim)] whitespace-nowrap flex-shrink-0">{formatPullTime(latestPullAt)}</div>
+            </div>
+
+            {/* River list */}
+            <div className="mri-scroll flex-1 overflow-auto px-3 pb-[max(8px,env(safe-area-inset-bottom))]">
+              {filtered.length === 0 ? (
+                <div className="text-[13px] text-[var(--mri-text-muted)] text-center mt-8">No rivers match your filters</div>
+              ) : (
+                <div className="space-y-0.5">
+                  {filtered.map((r) => (
+                    <RiverRow
+                      key={r.river_id}
+                      river={r}
+                      selected={r.river_id === selectedId}
+                      onSelect={() => {
+                        selectRiver(r.river_id);
+                        setSheetSnap("peek");
+                        setSheetY(SHEET_SNAPS.peek);
+                      }}
+                      onMouseEnter={() => {
+                        prefetchTimer.current = setTimeout(() => {
+                          fetchRiverDetailAnalyticsByIdOrSlug(r.river_id);
+                        }, 200);
+                      }}
+                      onMouseLeave={() => {
+                        if (prefetchTimer.current) clearTimeout(prefetchTimer.current);
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* ── Map-view mode strip ─────────────────────────────────────────────────
+          Shown when a river is selected but the detail overlay is closed.
+          The map is fully visible with fishing access pins; this strip sits at
+          the bottom providing navigation back to the list or into the detail.
+      ──────────────────────────────────────────────────────────────────────── */}
+      {selectedId && !mobileDetailOpen && isMobile && selected && (
+        <div
+          className="absolute bottom-0 left-0 right-0 z-20 sm:hidden"
+          style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+        >
+          <div className="mx-3 mb-2 mri-card rounded-2xl overflow-hidden">
+            {/* Handle */}
+            <div className="flex justify-center pt-2 pb-1">
+              <div className="mri-handle" />
+            </div>
+            {/* Three-column row: deselect | river info | open detail */}
+            <div className="flex items-center px-3 pb-3 gap-1">
+              <button
+                className="flex items-center gap-0.5 text-[12px] font-medium text-[var(--mri-text-muted)] min-h-[44px] flex-shrink-0 pr-2"
+                onClick={() => setSelectedId(null)}
+              >
+                <ChevronLeft size={14} strokeWidth={2.5} />
+                Rivers
+              </button>
+              {/* River name + tier — tapping reopens detail */}
+              <button
+                className="flex-1 flex flex-col items-center justify-center min-h-[44px] gap-0.5"
+                onClick={() => setMobileDetailOpen(true)}
+              >
+                <div className="text-[14px] font-semibold text-[var(--mri-text)] truncate max-w-full px-1 leading-tight">
+                  {selected.river_name}
+                </div>
+                {selected.bite_tier && (
+                  <div
+                    className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                    style={{
+                      background: getTierColors(selected.bite_tier).bg,
+                      color: getTierColors(selected.bite_tier).text,
+                    }}
+                  >
+                    {getTierColors(selected.bite_tier).label}
+                  </div>
+                )}
+              </button>
+              <button
+                className="flex items-center gap-0.5 text-[12px] font-semibold text-[#2d5a1b] min-h-[44px] flex-shrink-0 pl-2"
+                onClick={() => setMobileDetailOpen(true)}
+              >
+                Details
+                <ChevronRight size={14} strokeWidth={2.5} />
+              </button>
+            </div>
           </div>
         </div>
-      </section>
+      )}
 
       {/* Mobile detail sheet — slides up over list */}
       {mobileDetailOpen && selected && (
@@ -2101,6 +2159,7 @@ export default function OnxShell({
             onPointerUp={onDetailHandlePointerUp}
             onPointerCancel={onDetailHandlePointerUp}
           >
+            {/* Full deselect — returns to river list */}
             <button
               className="flex items-center gap-1.5 text-[13px] font-medium text-[#2d5a1b] min-h-[44px] px-1 -ml-1"
               onClick={() => { setMobileDetailOpen(false); setSelectedId(null); }}
@@ -2109,7 +2168,18 @@ export default function OnxShell({
               Rivers
             </button>
             <div className="mri-handle" style={{ width: 28 }} />
-            <div className="text-[11px] text-[var(--mri-text-dim)] w-16 text-right">{formatUpdatedAgo(selected.updated_at)}</div>
+            {/* Keep river selected, collapse to map view */}
+            <button
+              className="flex items-center gap-1 text-[12px] font-medium text-[#2d5a1b] min-h-[44px] px-1 -mr-1"
+              onClick={() => {
+                setMobileDetailOpen(false);
+                setSheetSnap("peek");
+                setSheetY(SHEET_SNAPS.peek);
+              }}
+            >
+              <MapPin size={12} strokeWidth={2} />
+              View Map
+            </button>
           </div>
 
           {/* Detail content */}

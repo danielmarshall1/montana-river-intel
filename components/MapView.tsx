@@ -1835,7 +1835,23 @@ export function MapView({
   // guaranteed to rebuild the layer with the correct UUID.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapReady) return;
+
+    // ── DIAGNOSIS BLOCK ──────────────────────────────────────────────────────
+    console.log('[ACCESS] effect fired');
+    console.log('[ACCESS]   selectedRiverId:', selectedRiverId);
+    console.log('[ACCESS]   map exists:', !!map);
+    console.log('[ACCESS]   mapReady:', mapReady);
+    console.log('[ACCESS]   isStyleLoaded:', map?.isStyleLoaded());
+    console.log('[ACCESS]   access_fishing_sites enabled:', effectiveLayerState.access_fishing_sites);
+    console.log('[ACCESS]   GeoJSON cache:', accessGeojsonRef.current
+      ? accessGeojsonRef.current.features.length + ' features'
+      : 'NULL — fetch not complete or failed');
+    // ────────────────────────────────────────────────────────────────────────
+
+    if (!map || !mapReady) {
+      console.log('[ACCESS] BAIL: map=' + !!map + ' mapReady=' + mapReady);
+      return;
+    }
 
     const enabled = effectiveLayerState.access_fishing_sites;
     const uuid = selectedRiverId;
@@ -1844,41 +1860,60 @@ export function MapView({
     if (map.getLayer(ACCESS_LAYER)) map.removeLayer(ACCESS_LAYER);
     if (map.getSource(ACCESS_SOURCE)) map.removeSource(ACCESS_SOURCE);
 
-    if (!enabled || !uuid || !cached) return;
+    if (!enabled) { console.log('[ACCESS] BAIL: layer toggle disabled'); return; }
+    if (!uuid)    { console.log('[ACCESS] BAIL: no river selected (selectedRiverId is null)'); return; }
+    if (!cached)  { console.log('[ACCESS] BAIL: GeoJSON not loaded yet'); return; }
+
+    // Diagnose feature matching — mismatched types are the silent killer here
+    const sampleIds = cached.features.slice(0, 5).map((f) => ({
+      river_id: f.properties?.river_id,
+      type: typeof f.properties?.river_id,
+    }));
+    console.log('[ACCESS] river_id being matched:', uuid, '(type:', typeof uuid + ')');
+    console.log('[ACCESS] sample feature river_ids:', JSON.stringify(sampleIds));
 
     const features = cached.features.filter(
       (f) => String(f.properties?.river_id) === String(uuid)
     );
 
-    if (!features.length) return;
+    console.log('[ACCESS] features matching river:', features.length, '(of', cached.features.length, 'total)');
+    if (!features.length) {
+      console.log('[ACCESS] BAIL: 0 features for this river — check river_id match above');
+      return;
+    }
 
     // Purely adds the source and layer — no guard inside so there's no re-entry.
     // Guards live outside so stale listeners can be cleaned up correctly.
     const addAccessLayer = () => {
-      console.log("[access] layer added, river=" + uuid + ", features=" + features.length);
+      console.log('[ACCESS] addAccessLayer called, isStyleLoaded=', map.isStyleLoaded());
       // Clear any remnants (should already be gone from the top-of-effect cleanup,
       // but guard against the styledata-callback path arriving after a re-render).
       if (map.getLayer(ACCESS_LAYER)) map.removeLayer(ACCESS_LAYER);
       if (map.getSource(ACCESS_SOURCE)) map.removeSource(ACCESS_SOURCE);
-      map.addSource(ACCESS_SOURCE, {
-        type: "geojson",
-        data: { type: "FeatureCollection", features },
-      });
-      map.addLayer({
-        id: ACCESS_LAYER,
-        type: "circle",
-        source: ACCESS_SOURCE,
-        paint: {
-          "circle-color": "#2d5a1b",
-          // All features in this source are for the selected river, so use the
-          // "selected" radius of 8 to give a subtle pulse vs the base 6 used when
-          // the access layer is shown without a selection context.
-          "circle-radius": 8,
-          "circle-stroke-color": "white",
-          "circle-stroke-width": 2,
-          "circle-opacity": 0.95,
-        },
-      });
+      try {
+        map.addSource(ACCESS_SOURCE, {
+          type: "geojson",
+          data: { type: "FeatureCollection", features },
+        });
+        map.addLayer({
+          id: ACCESS_LAYER,
+          type: "circle",
+          source: ACCESS_SOURCE,
+          paint: {
+            "circle-color": "#2d5a1b",
+            // All features in this source are for the selected river, so use the
+            // "selected" radius of 8 to give a subtle pulse vs the base 6 used when
+            // the access layer is shown without a selection context.
+            "circle-radius": 8,
+            "circle-stroke-color": "white",
+            "circle-stroke-width": 2,
+            "circle-opacity": 0.95,
+          },
+        });
+        console.log('[ACCESS] layer added successfully ✓');
+      } catch (err) {
+        console.error('[ACCESS] ERROR adding source/layer:', err);
+      }
     };
 
     // isStyleLoaded() checks tile loading, not just style JSON. It can return
@@ -1886,10 +1921,11 @@ export function MapView({
     // The guard: if the style is ready go immediately; otherwise wait once.
     // map.once("styledata") is de-registered in the cleanup so a stale callback
     // never fires after React has torn down this effect.
-    console.log("[access] effect fired, river=" + uuid + ", styleLoaded=" + map.isStyleLoaded());
+    console.log('[ACCESS] isStyleLoaded at dispatch time:', map.isStyleLoaded());
     if (map.isStyleLoaded()) {
       addAccessLayer();
     } else {
+      console.log('[ACCESS] style not loaded — waiting for styledata event');
       map.once("styledata", addAccessLayer);
     }
 
