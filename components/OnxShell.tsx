@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type mapboxgl from "mapbox-gl";
 import dynamic from "next/dynamic";
-import { Layers, Plus, Minus, Maximize2, Crosshair, ChevronLeft, ChevronRight, X, Globe, MapPin } from "lucide-react";
+import { Layers, Plus, Minus, Maximize2, Crosshair, ChevronLeft, ChevronRight, ChevronDown, X, Globe, MapPin, ScrollText } from "lucide-react";
 import { fetchRiverGeom } from "@/lib/supabase";
 import { fetchRiverGeojsonBrowser } from "@/lib/supabaseBrowser";
 import { RIVER_FOCUS_POINTS } from "@/lib/river-focus-points";
@@ -887,6 +887,7 @@ function AccessWeatherPanel({ riverId }: { riverId: string }) {
   const [points, setPoints] = useState<AccessWeatherPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [open, setOpen] = useState(false);
 
   const isUuid = UUID_RE.test(riverId);
 
@@ -923,9 +924,29 @@ function AccessWeatherPanel({ riverId }: { riverId: string }) {
 
   return (
     <div>
-      <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)] mb-2">
-        Conditions by Access Point
-      </div>
+      <button
+        className="flex items-center justify-between w-full text-left mb-2"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)]">
+            Conditions by Access Point
+          </span>
+          <span className="text-[10px] font-medium text-[var(--mri-text-dim)] bg-[var(--mri-surface)] border border-[var(--mri-border)] rounded-full px-1.5 py-0.5 leading-none">
+            {points.length}
+          </span>
+        </div>
+        <ChevronDown
+          size={13}
+          strokeWidth={2.5}
+          className="text-[var(--mri-text-dim)] transition-transform duration-200"
+          style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)" }}
+        />
+      </button>
+      <div
+        className="overflow-hidden transition-all duration-200"
+        style={{ maxHeight: open ? `${points.length * 80}px` : "0px" }}
+      >
       <div className="space-y-1.5">
         {points.map((pt) => {
           const showGust = pt.gust_mph != null && pt.wind_mph != null && pt.gust_mph > pt.wind_mph + 5;
@@ -980,6 +1001,7 @@ function AccessWeatherPanel({ riverId }: { riverId: string }) {
             </div>
           );
         })}
+      </div>
       </div>
     </div>
   );
@@ -1542,12 +1564,13 @@ export default function OnxShell({
   riverLinesGeojson?: GeoJSON.FeatureCollection<GeoJSON.Geometry, Record<string, unknown>> | null;
   dateLabel?: string;
 }) {
-  type MobileListSnap = "peek" | "mid" | "full";
+  type MobileListSnap = "hidden" | "peek" | "mid" | "full";
 
   // Computed dynamically so peek always reveals ~280px of sheet on any screen height.
   const [peekSnap, setPeekSnap] = useState(0.62);
 
   const SHEET_SNAPS: Record<MobileListSnap, number> = {
+    hidden: 0.86,
     peek: peekSnap,
     mid: 0.40,
     full: 0.0,
@@ -1920,7 +1943,7 @@ export default function OnxShell({
     if (!sheetDragRef.current) return;
     const dy = e.clientY - sheetDragRef.current.startY;
     const h = window.innerHeight || 800;
-    setSheetY(clamp(sheetDragRef.current.startFraction + dy / h, 0, 0.80));
+    setSheetY(clamp(sheetDragRef.current.startFraction + dy / h, 0, 0.86));
   }
 
   function snapSheet() {
@@ -2219,6 +2242,16 @@ export default function OnxShell({
               selectedStationSiteNo={selectedStationSiteNo}
               onStationClick={handleStationClick}
             />
+            <div className="mt-4 pb-2 text-center">
+              <a
+                href="https://fwp.mt.gov/fish/regulations"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[11px] text-[var(--mri-text-dim)] underline underline-offset-2"
+              >
+                📋 MT Fishing Regulations ↗
+              </a>
+            </div>
           </div>
         </section>
       )}
@@ -2257,6 +2290,16 @@ export default function OnxShell({
         <button className="mri-rail-btn" title="Recenter Montana" onClick={recenter}>
           <Crosshair size={15} strokeWidth={2.5} />
         </button>
+
+        <a
+          href="https://fwp.mt.gov/fish/regulations"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mri-rail-btn mt-auto"
+          title="MT Fishing Regulations (FWP)"
+        >
+          <ScrollText size={15} strokeWidth={2.5} />
+        </a>
       </aside>
 
       {/* Desktop layers panel — floats next to left rail */}

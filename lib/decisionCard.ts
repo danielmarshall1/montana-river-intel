@@ -37,6 +37,7 @@ export function buildDecisionCard(
   const windPm = river.wind_pm_mph;
   const precip = river.precip_mm;
   const wadingThreshold = river.wading_threshold_cfs;
+  const driftOptimalMin = river.drift_optimal_min_cfs;
 
   // Effective wind: max of forecast am/pm and any live override
   const effectiveWind = Math.max(windAm ?? 0, windPm ?? 0, overrides?.windMph ?? 0);
@@ -85,6 +86,9 @@ export function buildDecisionCard(
   const highWind = effectiveWind > 20;
   const windNote = highWind ? " — high wind today" : "";
 
+  // Wade-only: drift_optimal_min_cfs is null but wading_threshold_cfs is set
+  const isWadeOnly = driftOptimalMin == null && wadingThreshold != null;
+
   if (flow == null) {
     access = { label: "Unknown", detail: "Flow data unavailable", icon: "caution" };
   } else if (rapidRise) {
@@ -93,6 +97,18 @@ export function buildDecisionCard(
       detail: `Flow up ${Math.round(change48h ?? 0)}% in 48hrs — wading dangerous, conditions changing`,
       icon: "caution",
     };
+  } else if (isWadeOnly) {
+    // Wade-only river — never show float language
+    const risingNote = rising ? " — rising, use caution" : "";
+    const caution = risingNote + windNote;
+    const lo = wadingThreshold! * 0.7;
+    if (flow < lo) {
+      access = { label: "Wading recommended", detail: `Good wading at ${Math.round(flow).toLocaleString()} cfs — fish are concentrated in lower flows${caution}`, icon: rising ? "caution" : "wade" };
+    } else if (flow < wadingThreshold!) {
+      access = { label: "Wading recommended", detail: `Good wading at ${Math.round(flow).toLocaleString()} cfs${caution}`, icon: rising ? "caution" : "wade" };
+    } else {
+      access = { label: "High for wading", detail: `${Math.round(flow).toLocaleString()} cfs — above typical wading threshold, use caution${caution}`, icon: "caution" };
+    }
   } else if (wadingThreshold == null) {
     if (flow < 500) {
       access = { label: "Wading recommended", detail: `Low water at ${Math.round(flow).toLocaleString()} cfs${windNote}`, icon: rising ? "caution" : "wade" };
