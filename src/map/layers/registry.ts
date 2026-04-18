@@ -242,6 +242,7 @@ export const LAYER_REGISTRY: LayerDefinition[] = [
     defaultOn: false,
     source: { id: "rivers-source", type: "geojson" },
     layers: ["rivers-unclustered"],
+    locked: true,
   },
   {
     id: "mri_labels",
@@ -258,6 +259,7 @@ export const LAYER_REGISTRY: LayerDefinition[] = [
     defaultOn: false,
     source: { id: "rivers-source", type: "geojson" },
     layers: ["hydro-flow-magnitude-layer"],
+    locked: true,
   },
   {
     id: "hydro_change_indicator",
@@ -266,6 +268,7 @@ export const LAYER_REGISTRY: LayerDefinition[] = [
     defaultOn: false,
     source: { id: "rivers-source", type: "geojson" },
     layers: ["hydro-change-indicator-layer"],
+    locked: true,
   },
   {
     id: "hydro_temp_stress",
@@ -274,6 +277,7 @@ export const LAYER_REGISTRY: LayerDefinition[] = [
     defaultOn: false,
     source: { id: "rivers-source", type: "geojson" },
     layers: ["hydro-temp-stress-layer"],
+    locked: true,
   },
 ];
 

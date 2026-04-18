@@ -7,8 +7,6 @@ import { Layers, Plus, Minus, Maximize2, Crosshair, ChevronLeft, ChevronRight, C
 import { fetchRiverGeom } from "@/lib/supabase";
 import { fetchRiverGeojsonBrowser } from "@/lib/supabaseBrowser";
 import { RIVER_FOCUS_POINTS } from "@/lib/river-focus-points";
-import { deriveScoreBreakdown } from "@/lib/scoreBreakdown";
-import { generateTodaysRead } from "@/lib/todaysRead";
 import { buildDecisionCard, type DecisionCard } from "@/lib/decisionCard";
 import type { FlyShopReportResponse } from "@/app/api/flyshop-reports/route";
 import type { RiverSegmentPoint } from "@/app/api/river-segments/route";
@@ -1375,84 +1373,153 @@ function DecisionCardUI({ card }: { card: DecisionCard }) {
   );
 }
 
-// ─── RiverDetailContent ───────────────────────────────────────────────────────
+// ─── River Tactics type ───────────────────────────────────────────────────────
 
-function RiverDetailContent({
+type RiverTactics = {
+  id: string;
+  river_id: string;
+  about: string | null;
+  character: string | null;
+  best_sections: Array<{ name: string; description: string }> | null;
+  best_months: Array<{ month: string; notes: string }> | null;
+  techniques: string | null;
+  regulations_notes: string | null;
+};
+
+// ─── Hatch calendar data ──────────────────────────────────────────────────────
+
+type HatchEntry = { name: string; color: string; months: number[] };
+
+const HATCH_CALENDAR: HatchEntry[] = [
+  { name: "Midge",        color: "#9ca3af", months: [1,2,3,4,5,6,7,8,9,10,11,12] },
+  { name: "Skwala",       color: "#84a150", months: [3,4] },
+  { name: "BWO",          color: "#60a5fa", months: [3,4,5,9,10,11] },
+  { name: "March Brown",  color: "#c4a882", months: [4,5] },
+  { name: "Caddis",       color: "#f97316", months: [4,5,6,7,8,9] },
+  { name: "Salmonfly",    color: "#ef4444", months: [5,6] },
+  { name: "Golden Stone", color: "#d97706", months: [5,6,7] },
+  { name: "PMD",          color: "#fbbf24", months: [6,7,8] },
+  { name: "Yellow Sally", color: "#fde68a", months: [6,7,8] },
+  { name: "Trico",        color: "#6b7280", months: [7,8,9] },
+  { name: "Hopper",       color: "#4ade80", months: [7,8,9] },
+  { name: "Mahogany",     color: "#92400e", months: [9,10] },
+  { name: "Oct Caddis",   color: "#c2410c", months: [10,11] },
+];
+
+const MONTH_ABBR = ["J","F","M","A","M","J","J","A","S","O","N","D"];
+
+function HatchCalendar({ currentMonth }: { currentMonth: number }) {
+  return (
+    <div className="mri-card p-3 overflow-x-auto">
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)] mb-2">Montana Hatch Calendar</div>
+      <div style={{ minWidth: 300 }}>
+        {/* Month headers */}
+        <div style={{ display: "grid", gridTemplateColumns: "68px repeat(12, 1fr)", gap: "2px 1px", marginBottom: 6 }}>
+          <div />
+          {MONTH_ABBR.map((m, i) => (
+            <div key={i} style={{
+              textAlign: "center", fontSize: 9,
+              fontWeight: i + 1 === currentMonth ? 700 : 400,
+              color: i + 1 === currentMonth ? "#2d5a1b" : "var(--mri-text-dim)",
+              background: i + 1 === currentMonth ? "#dcf0d4" : "transparent",
+              borderRadius: 3, padding: "2px 0",
+            }}>{m}</div>
+          ))}
+        </div>
+        {/* Hatch rows */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+          {HATCH_CALENDAR.map((hatch) => {
+            const isCurrentMonthActive = hatch.months.includes(currentMonth);
+            return (
+              <div key={hatch.name} style={{ display: "grid", gridTemplateColumns: "68px repeat(12, 1fr)", gap: "2px 1px", alignItems: "center" }}>
+                <div style={{
+                  fontSize: 9, fontWeight: isCurrentMonthActive ? 700 : 400,
+                  color: isCurrentMonthActive ? "var(--mri-text)" : "var(--mri-text-dim)",
+                  paddingRight: 4, whiteSpace: "nowrap" as const, overflow: "hidden", textOverflow: "ellipsis",
+                }}>{hatch.name}</div>
+                {Array.from({ length: 12 }, (_, i) => {
+                  const active = hatch.months.includes(i + 1);
+                  const isCurrent = i + 1 === currentMonth;
+                  return (
+                    <div key={i} style={{
+                      height: 9, borderRadius: 2,
+                      background: active ? hatch.color : "#f3f4f6",
+                      outline: isCurrent && active ? "1.5px solid rgba(0,0,0,0.25)" : "none",
+                      opacity: active ? 1 : 0.3,
+                    }} />
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ marginTop: 6, fontSize: 9, color: "var(--mri-text-dim)" }}>
+          <span style={{ display: "inline-block", width: 9, height: 9, background: "#dcf0d4", outline: "1px solid #c4d9bc", borderRadius: 2, verticalAlign: "middle", marginRight: 3 }} />
+          Current month
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Tab sub-components ───────────────────────────────────────────────────────
+
+function TodayTab({
   selected,
-  selectedFishIndex,
-  todaysRead,
+  decisionCard,
+  flyShopReport,
   historyRows,
   detailedAnalytics,
-  breakdown,
-  detailMetricsOpen,
-  transparencyOpen,
-  onToggleMetrics,
-  onToggleTransparency,
-  decisionCard,
-  selectedStationSiteNo,
-  onStationClick,
 }: {
   selected: River;
-  selectedFishIndex: ReturnType<typeof getFishabilityIndex>;
-  todaysRead: string;
+  decisionCard: DecisionCard | null;
+  flyShopReport: FlyShopReportResponse | null;
   historyRows: HistoryRow[];
   detailedAnalytics: RiverDetailAnalytics | null;
-  breakdown: ReturnType<typeof deriveScoreBreakdown> | null;
-  detailMetricsOpen: boolean;
-  transparencyOpen: boolean;
-  onToggleMetrics: () => void;
-  onToggleTransparency: () => void;
-  decisionCard: DecisionCard | null;
-  selectedStationSiteNo: string | null;
-  onStationClick: (seg: RiverSegmentPoint) => void;
 }) {
   const tc = getTierColors(selected.bite_tier);
   const score = selected.fishability_score_calc;
-  const riverId = selected.river_id;
-
-  const isHot = selected.bite_tier === "HOT";
 
   return (
     <div className="space-y-3">
-      {/* Decision Card — at top of detail panel */}
-      {decisionCard && <DecisionCardUI card={decisionCard} />}
+      <GoBanner card={decisionCard} />
+      {decisionCard?.regulation && <RegulationNotice card={decisionCard} />}
+      {flyShopReport && <FlyShopReportCard report={flyShopReport} />}
 
-      {/* Station strip — multi-gauge longitudinal view */}
-      <RiverStationStrip riverId={riverId} selectedSiteNo={selectedStationSiteNo} onStationClick={onStationClick} />
-
-      {/* Tier accent bar — top of panel, visible for all tiers except GOOD */}
-      {tc.accent && (
-        <div style={{ height: 3, background: tc.accent, borderRadius: "2px 2px 0 0", marginBottom: -4 }} />
-      )}
-      {/* Score + tier */}
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <div
-            className="text-[56px] font-bold leading-none tracking-tight"
-            style={{ color: isHot ? "#1a3d0e" : tc.text }}
-          >
-            {score != null ? Math.round(score) : "—"}
+      {/* Decision card rows: ACCESS, CLARITY, BEST TIME, BEST WINDOW — no HATCH */}
+      {decisionCard && (
+        <div style={{ background: "var(--mri-surface)", border: "0.5px solid var(--mri-border)", borderRadius: 12, boxShadow: "var(--mri-shadow-sm)" }}>
+          <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.12em", color: "var(--mri-text-dim)", padding: "8px 12px 4px" }}>
+            Fishing Intel
           </div>
-          <div className="text-[11px] text-[var(--mri-text-dim)] mt-1">{formatUpdatedAgo(selected.updated_at)}</div>
+          <DecisionCardRow icon={<AccessIcon icon={decisionCard.access.icon} />} label={decisionCard.access.label} detail={decisionCard.access.detail} />
+          <DecisionCardRow icon={<ClarityIcon />} label={decisionCard.clarity.label} detail={decisionCard.clarity.detail} />
+          <DecisionCardRow icon={<BestTimeIcon />} label={decisionCard.bestTime.label} detail={decisionCard.bestTime.detail} />
+          <DecisionCardRow
+            icon={<BestWindowIcon />}
+            label={decisionCard.bestWindow.label}
+            detail={decisionCard.bestWindow.reason}
+            labelColor={decisionCard.bestWindow.urgency === "high" ? "#dc2626" : decisionCard.bestWindow.urgency === "medium" ? "#d4900a" : "#2d5a1b"}
+            last
+          />
         </div>
-        <div className="flex-shrink-0 text-right">
-          <span
-            className="inline-flex items-center gap-1.5 text-[12px] font-semibold px-2.5 py-1 rounded-full"
-            style={{ background: tc.bg, color: tc.text }}
-          >
+      )}
+
+      {/* Score block — compact */}
+      <div className="mri-card px-3 py-2.5 flex items-center gap-3">
+        <div className="text-[44px] font-bold leading-none tracking-tight" style={{ color: tc.text }}>
+          {score != null ? Math.round(score) : "—"}
+        </div>
+        <div>
+          <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold px-2.5 py-1 rounded-full" style={{ background: tc.bg, color: tc.text }}>
             <span className="w-1.5 h-1.5 rounded-full" style={{ background: tc.dot }} />
             {tc.label}
           </span>
-          <div className="mt-1 text-[10px] text-[var(--mri-text-dim)]">{selectedFishIndex.band}</div>
+          <div className="mt-1 text-[10px] text-[var(--mri-text-dim)]">{formatUpdatedAgo(selected.updated_at)}</div>
         </div>
       </div>
 
-      {/* Score bar */}
-      <div className="mri-score-bar-track">
-        <div className="mri-score-bar-fill" style={{ width: `${score ?? 0}%`, background: tc.dot }} />
-      </div>
-
-      {/* 2x2 metric grid */}
+      {/* Metric cards */}
       <div className="grid grid-cols-2 gap-2">
         <div className="mri-card p-3">
           <div className="text-[10px] font-medium text-[var(--mri-text-dim)] uppercase tracking-wide">Flow</div>
@@ -1462,6 +1529,9 @@ function RiverDetailContent({
               <span className="ml-1 text-[12px] text-[var(--mri-text-muted)]">{getFlowTrendArrow(selected.change_48h_pct_calc)}</span>
             )}
           </div>
+          {selected.change_48h_pct_calc != null && (
+            <div className="text-[10px] text-[var(--mri-text-dim)] mt-0.5">{formatSignedPercent(selected.change_48h_pct_calc)} / 48h</div>
+          )}
         </div>
         <div className="mri-card p-3">
           <div className="text-[10px] font-medium text-[var(--mri-text-dim)] uppercase tracking-wide">Temp</div>
@@ -1472,77 +1542,501 @@ function RiverDetailContent({
             <div className="text-[10px] text-[var(--mri-text-dim)] mt-0.5">{getTempStatusLabel(selected)}</div>
           )}
         </div>
-        <div className="mri-card p-3">
+        <div className="mri-card p-3 col-span-2">
           <div className="text-[10px] font-medium text-[var(--mri-text-dim)] uppercase tracking-wide">Wind</div>
           <div className="text-[15px] font-semibold text-[var(--mri-text)] mt-1 leading-tight">
-            {detailedAnalytics?.weather.windSpeedMph != null
-              ? `${detailedAnalytics.weather.windSpeedMph.toFixed(0)} mph`
-              : "—"}
-          </div>
-          {detailedAnalytics?.weather.windDirection && (
-            <div className="text-[10px] text-[var(--mri-text-dim)] mt-0.5">{detailedAnalytics.weather.windDirection}</div>
-          )}
-        </div>
-        <div className="mri-card p-3">
-          <div className="text-[10px] font-medium text-[var(--mri-text-dim)] uppercase tracking-wide">Hatch</div>
-          <div className="text-[13px] font-semibold text-[var(--mri-text)] mt-1 leading-tight">
-            {decisionCard?.hatch.label ?? detailedAnalytics?.biology.hatchLikelihood ?? "—"}
+            {detailedAnalytics?.weather.windSpeedMph != null ? `${detailedAnalytics.weather.windSpeedMph.toFixed(0)} mph` : "—"}
+            {detailedAnalytics?.weather.windDirection && (
+              <span className="ml-1.5 text-[12px] font-normal text-[var(--mri-text-muted)]">{detailedAnalytics.weather.windDirection}</span>
+            )}
           </div>
         </div>
       </div>
-
-      {/* Tactical read */}
-      <div
-        className="mri-card p-3"
-        style={{ borderLeft: "3px solid #2d5a1b" }}
-      >
-        <div className="text-[10px] font-semibold text-[#2d5a1b] uppercase tracking-wide mb-1">Today&apos;s Read</div>
-        <div className="text-[13px] text-[var(--mri-text-muted)] leading-relaxed">{todaysRead}</div>
-      </div>
-
-      {/* Hyperlocal access-point weather */}
-      <AccessWeatherPanel riverId={riverId} />
 
       {/* 14-day trend chart */}
       <TrendChart historyRows={historyRows} />
+    </div>
+  );
+}
 
-      {/* Detailed metrics toggle */}
-      <button
-        className="w-full text-left text-[12px] font-medium text-[var(--mri-text-muted)] hover:text-[var(--mri-text)] py-2 border-t border-[var(--mri-border)] transition-colors"
-        onClick={onToggleMetrics}
-      >
-        {detailMetricsOpen ? "Hide Detailed Metrics ↑" : "Detailed Metrics ↓"}
-      </button>
+function HatchesTab({
+  decisionCard,
+  flyShopReport,
+  selected,
+}: {
+  decisionCard: DecisionCard | null;
+  flyShopReport: FlyShopReportResponse | null;
+  selected: River;
+}) {
+  const currentMonth = new Date().getMonth() + 1;
+  const hatchLabel = flyShopReport?.primary_hatch ?? decisionCard?.hatch.label ?? "Unknown";
+  const hatchDetail = decisionCard?.hatch.detail ?? "";
+  const isShopConfirmed = Boolean(flyShopReport?.primary_hatch);
+  const elevationFt = selected.elevation_ft;
+  const isHighElev = elevationFt != null && elevationFt > 5000;
+  const isTailwater = selected.is_tailwater ?? false;
 
-      {detailMetricsOpen && (
-        <div className="space-y-3">
-          <DetailedMetricsContent analytics={detailedAnalytics} />
-          <button
-            className="w-full text-left text-[12px] font-medium text-[var(--mri-text-muted)] hover:text-[var(--mri-text)] py-1 transition-colors"
-            onClick={onToggleTransparency}
-          >
-            {transparencyOpen ? "Hide score breakdown ↑" : "How this score is calculated ↓"}
-          </button>
-          {transparencyOpen && breakdown && (
-            <div className="mri-card p-3 text-[11px]">
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-                <div className="text-[var(--mri-text-muted)]">Flow Score</div>
-                <div className="text-right font-semibold text-[var(--mri-text)]">{formatNum(breakdown.flowScore)}</div>
-                <div className="text-[var(--mri-text-muted)]">Stability Score</div>
-                <div className="text-right font-semibold text-[var(--mri-text)]">{formatNum(breakdown.stabilityScore)}</div>
-                <div className="text-[var(--mri-text-muted)]">Thermal Score</div>
-                <div className="text-right font-semibold text-[var(--mri-text)]">
-                  {breakdown.thermalScore == null ? "Unavailable" : formatNum(breakdown.thermalScore)}
-                </div>
-                <div className="text-[var(--mri-text-muted)]">Wind Penalty</div>
-                <div className="text-right font-semibold text-[var(--mri-text)]">{formatNum(breakdown.windPenalty)}</div>
-                <div className="border-t border-[var(--mri-border)] pt-1.5 font-semibold text-[var(--mri-text)]">Total Score</div>
-                <div className="border-t border-[var(--mri-border)] pt-1.5 text-right font-semibold text-[var(--mri-text)]">{formatNum(breakdown.totalScore)}</div>
+  return (
+    <div className="space-y-3">
+      {/* Active hatch */}
+      <div className="mri-card p-3" style={{ borderLeft: "3px solid #92400e" }}>
+        <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)] mb-1">Active Hatch</div>
+        <div className="text-[16px] font-bold text-[var(--mri-text)] leading-tight">{hatchLabel}</div>
+        {hatchDetail && (
+          <div className="text-[11px] text-[var(--mri-text-muted)] mt-1 leading-relaxed">{hatchDetail}</div>
+        )}
+        <div className="mt-2 text-[10px]" style={{ color: isShopConfirmed ? "#2d5a1b" : "var(--mri-text-dim)" }}>
+          {isShopConfirmed ? `Confirmed by ${flyShopReport!.shop_name}` : "Estimated from water temp + date"}
+        </div>
+      </div>
+
+      {/* Recommended flies from shop */}
+      {(flyShopReport?.recommended_flies?.length ?? 0) > 0 && (
+        <div className="mri-card p-3">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)] mb-2">Recommended Flies</div>
+          <div className="flex flex-wrap gap-1.5">
+            {flyShopReport!.recommended_flies.map((fly) => (
+              <span key={fly} style={{ background: "#f0f4ee", border: "0.5px solid #c4d9bc", borderRadius: 10, padding: "3px 8px", fontSize: 11, color: "#2d5a1b", fontWeight: 500 }}>
+                {fly}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Elevation note */}
+      {isHighElev && (
+        <div className="mri-card p-3" style={{ background: "#eff6ff", borderLeft: "3px solid #60a5fa" }}>
+          <div className="text-[11px]" style={{ color: "#1d4ed8", lineHeight: 1.4 }}>
+            High elevation ({elevationFt?.toLocaleString()} ft) — hatches run 2–3 weeks behind lower-elevation rivers
+          </div>
+        </div>
+      )}
+
+      {/* Tailwater note */}
+      {isTailwater && (
+        <div className="mri-card p-3" style={{ background: "#f0f4ee", borderLeft: "3px solid #2d5a1b" }}>
+          <div className="text-[11px] text-[var(--mri-text-muted)] leading-relaxed">
+            Tailwater fishery — dam regulation creates more consistent hatches year-round. Midge and BWO reliable even when freestone rivers are blown out.
+          </div>
+        </div>
+      )}
+
+      <HatchCalendar currentMonth={currentMonth} />
+    </div>
+  );
+}
+
+function ConditionsTab({
+  selected,
+  detailedAnalytics,
+  decisionCard,
+  selectedStationSiteNo,
+  onStationClick,
+}: {
+  selected: River;
+  detailedAnalytics: RiverDetailAnalytics | null;
+  decisionCard: DecisionCard | null;
+  selectedStationSiteNo: string | null;
+  onStationClick: (seg: RiverSegmentPoint) => void;
+}) {
+  const h = detailedAnalytics?.hydrology;
+  const th = detailedAnalytics?.thermal;
+  const st = detailedAnalytics?.sourceTrust;
+  const flow = selected.flow_cfs;
+  const temp = selected.water_temp_f;
+  const change = selected.change_48h_pct_calc;
+
+  return (
+    <div className="space-y-3">
+      {/* Flow */}
+      <div className="mri-card p-3">
+        <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)] mb-1">Flow</div>
+        <div className="flex items-end gap-2">
+          <div className="text-[28px] font-bold text-[var(--mri-text)] leading-none">
+            {flow != null ? Math.round(flow).toLocaleString() : "—"}
+          </div>
+          <div className="text-[13px] text-[var(--mri-text-muted)] pb-0.5">cfs</div>
+          {flow != null && (
+            <div className="text-[14px] text-[var(--mri-text-muted)] pb-0.5">{getFlowTrendArrow(change)}</div>
+          )}
+        </div>
+        {(change != null || h?.flowRatio != null) && (
+          <div className="text-[11px] text-[var(--mri-text-muted)] mt-1 flex flex-wrap gap-2">
+            {change != null && <span>{formatSignedPercent(change)} in 48h</span>}
+            {h?.flowRatio != null && (
+              <span>{h.flowRatio > 1.05 ? "· Above median" : h.flowRatio < 0.95 ? "· Below median" : "· Near median"}</span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Temp */}
+      <div className="mri-card p-3">
+        <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)] mb-1">Water Temp</div>
+        <div className="flex items-end gap-2">
+          <div className="text-[28px] font-bold leading-none" style={{ color: temp != null && temp > 68 ? "#dc2626" : "var(--mri-text)" }}>
+            {temp != null ? temp.toFixed(1) : "—"}
+          </div>
+          <div className="text-[13px] text-[var(--mri-text-muted)] pb-0.5">°F</div>
+        </div>
+        {th?.thermalTrendLabel && (
+          <div className="text-[11px] text-[var(--mri-text-muted)] mt-1">
+            {th.thermalTrendLabel}
+            {th.thermalTrendDelta24hF != null && (
+              <span> ({th.thermalTrendDelta24hF > 0 ? "+" : ""}{th.thermalTrendDelta24hF.toFixed(1)}°F / 24h)</span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Clarity + Stability */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className="mri-card p-3">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)] mb-1">Clarity</div>
+          <div className="text-[13px] font-semibold text-[var(--mri-text)]">{decisionCard?.clarity.label ?? "—"}</div>
+          <div className="text-[10px] text-[var(--mri-text-muted)] mt-0.5 leading-snug">{decisionCard?.clarity.detail ?? ""}</div>
+        </div>
+        <div className="mri-card p-3">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)] mb-1">Stability</div>
+          <div className="text-[13px] font-semibold text-[var(--mri-text)]">{h?.stabilityLabel ?? "—"}</div>
+          {h?.stabilityIndexRaw != null && (
+            <div className="text-[10px] text-[var(--mri-text-dim)] mt-0.5">CV {h.stabilityIndexRaw.toFixed(3)}</div>
+          )}
+        </div>
+      </div>
+
+      {/* Station corridor */}
+      <RiverStationStrip riverId={selected.river_id} selectedSiteNo={selectedStationSiteNo} onStationClick={onStationClick} />
+
+      {/* Data source line */}
+      {st && (
+        <div className="text-[10px] text-[var(--mri-text-dim)] space-y-0.5 px-1 leading-relaxed">
+          {st.flowSourceSiteNo && (
+            <div>Flow: USGS {st.flowSourceSiteNo}{st.flowSourceSiteName ? ` · ${st.flowSourceSiteName}` : ""}</div>
+          )}
+          {st.tempSourceSiteNo && (
+            <div>Temp: USGS {st.tempSourceSiteNo}{st.tempSourceSiteName ? ` · ${st.tempSourceSiteName}` : ""}</div>
+          )}
+          {st.lastHydrologyPullAt && (
+            <div>Last pull: {formatDetailedTime(st.lastHydrologyPullAt)}</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WeatherTab({
+  analytics,
+  riverId,
+}: {
+  analytics: RiverDetailAnalytics | null;
+  riverId: string;
+}) {
+  const w = analytics?.weather;
+  const f = analytics?.forecast;
+
+  return (
+    <div className="space-y-3">
+      {/* Today */}
+      {w && (
+        <div className="mri-card p-3">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)] mb-2">Today</div>
+          <div className="flex flex-wrap gap-4">
+            {w.airTempF != null && (
+              <div>
+                <div className="text-[10px] text-[var(--mri-text-muted)]">Air temp</div>
+                <div className="text-[20px] font-bold text-[var(--mri-text)] leading-tight">{Math.round(w.airTempF)}°F</div>
+                {(w.highTempF != null || w.lowTempF != null) && (
+                  <div className="text-[10px] text-[var(--mri-text-dim)]">
+                    {w.highTempF != null ? `H: ${Math.round(w.highTempF)}°` : ""}
+                    {w.lowTempF != null ? ` L: ${Math.round(w.lowTempF)}°` : ""}
+                  </div>
+                )}
               </div>
+            )}
+            {w.windSpeedMph != null && (
+              <div>
+                <div className="text-[10px] text-[var(--mri-text-muted)]">Wind</div>
+                <div className="text-[20px] font-bold text-[var(--mri-text)] leading-tight">{Math.round(w.windSpeedMph)} mph</div>
+                {w.windDirection && <div className="text-[10px] text-[var(--mri-text-dim)]">{w.windDirection}</div>}
+                {w.gustMph != null && w.gustMph > w.windSpeedMph + 5 && (
+                  <div className="text-[10px] text-[var(--mri-text-dim)]">gusts {Math.round(w.gustMph)}</div>
+                )}
+              </div>
+            )}
+            {w.precipChancePct != null && (
+              <div>
+                <div className="text-[10px] text-[var(--mri-text-muted)]">Precip</div>
+                <div className="text-[20px] font-bold text-[var(--mri-text)] leading-tight">{Math.round(w.precipChancePct)}%</div>
+              </div>
+            )}
+            {w.cloudCoverPct != null && (
+              <div>
+                <div className="text-[10px] text-[var(--mri-text-muted)]">Cloud cover</div>
+                <div className="text-[20px] font-bold text-[var(--mri-text)] leading-tight">{Math.round(w.cloudCoverPct)}%</div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 3-day forecast */}
+      {f && (
+        <div className="grid grid-cols-3 gap-2">
+          {([
+            { dayLabel: "Tomorrow", day: f.day1 },
+            { dayLabel: "Day 2", day: f.day2 },
+            { dayLabel: "Day 3", day: f.day3 },
+          ]).map(({ dayLabel, day }) => (
+            <div key={dayLabel} className="mri-card p-2.5">
+              <div className="text-[9px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)] mb-1">{dayLabel}</div>
+              {!day.available ? (
+                <div className="text-[10px] text-[var(--mri-text-dim)]">N/A</div>
+              ) : (
+                <>
+                  <div className="text-[17px] font-bold text-[var(--mri-text)] leading-tight">
+                    {day.airTempF != null ? `${Math.round(day.airTempF)}°` : "—"}
+                  </div>
+                  <div className="text-[10px] text-[var(--mri-text-muted)] mt-0.5">
+                    {day.windMph != null ? `${Math.round(day.windMph)} mph` : "—"}
+                  </div>
+                  {day.precipChancePct != null && day.precipChancePct > 10 && (
+                    <div className="text-[10px] text-[var(--mri-text-muted)]">{Math.round(day.precipChancePct)}% precip</div>
+                  )}
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 3-day outlook summaries */}
+      {f && (f.windOutlook || f.fishingOutlook || f.flowOutlook) && (
+        <div className="mri-card p-3 space-y-2">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)]">3-Day Outlook</div>
+          {f.windOutlook && (
+            <div className="text-[12px] text-[var(--mri-text-muted)]">
+              <span className="font-semibold text-[var(--mri-text)]">Wind: </span>{f.windOutlook}
+            </div>
+          )}
+          {f.fishingOutlook && (
+            <div className="text-[12px] text-[var(--mri-text-muted)]">
+              <span className="font-semibold text-[var(--mri-text)]">Fishing: </span>{f.fishingOutlook}
+            </div>
+          )}
+          {f.flowOutlook && (
+            <div className="text-[12px] text-[var(--mri-text-muted)]">
+              <span className="font-semibold text-[var(--mri-text)]">Flow: </span>{f.flowOutlook}
             </div>
           )}
         </div>
       )}
+
+      {/* Access point weather accordion */}
+      <AccessWeatherPanel riverId={riverId} />
+    </div>
+  );
+}
+
+function TacticsTab({ riverId }: { riverId: string }) {
+  const [tactics, setTactics] = useState<RiverTactics | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setTactics(null);
+    if (!UUID_RE.test(riverId)) { setLoading(false); return; }
+    fetch(`/api/river-tactics/${encodeURIComponent(riverId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: RiverTactics | null) => { if (!cancelled) { setTactics(data); setLoading(false); } })
+      .catch(() => { if (!cancelled) { setTactics(null); setLoading(false); } });
+    return () => { cancelled = true; };
+  }, [riverId]);
+
+  if (loading) {
+    return (
+      <div className="mri-card p-4 animate-pulse">
+        <div className="h-3 w-24 bg-gray-200 rounded mb-3" />
+        <div className="space-y-2">
+          <div className="h-3 w-full bg-gray-100 rounded" />
+          <div className="h-3 w-4/5 bg-gray-100 rounded" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!tactics) {
+    return (
+      <div className="space-y-3">
+        <div className="mri-card p-4 text-center">
+          <div className="text-[13px] text-[var(--mri-text-muted)]">Tactics content coming soon for this river.</div>
+        </div>
+        <div className="text-center">
+          <a href="https://fwp.mt.gov/fish/regulations" target="_blank" rel="noopener noreferrer"
+            className="text-[11px] text-[var(--mri-text-dim)] underline underline-offset-2">
+            📋 MT Fishing Regulations ↗
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {tactics.about && (
+        <div className="mri-card p-3">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)] mb-1">About</div>
+          <div className="text-[13px] text-[var(--mri-text-muted)] leading-relaxed">{tactics.about}</div>
+        </div>
+      )}
+      {tactics.character && (
+        <div className="mri-card p-3">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)] mb-1">Character</div>
+          <div className="text-[13px] text-[var(--mri-text-muted)] leading-relaxed">{tactics.character}</div>
+        </div>
+      )}
+      {tactics.best_sections && tactics.best_sections.length > 0 && (
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)] mb-2">Best Sections</div>
+          <div className="space-y-1.5">
+            {tactics.best_sections.map((s, i) => (
+              <div key={i} className="mri-card p-3">
+                <div className="text-[12px] font-semibold text-[var(--mri-text)] mb-0.5">{s.name}</div>
+                <div className="text-[11px] text-[var(--mri-text-muted)] leading-relaxed">{s.description}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {tactics.techniques && (
+        <div className="mri-card p-3">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)] mb-1">Primary Techniques</div>
+          <div className="text-[13px] text-[var(--mri-text-muted)] leading-relaxed">{tactics.techniques}</div>
+        </div>
+      )}
+      {tactics.regulations_notes && (
+        <div className="mri-card p-3">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mri-text-dim)] mb-1">Regulations Note</div>
+          <div className="text-[13px] text-[var(--mri-text-muted)] leading-relaxed">{tactics.regulations_notes}</div>
+        </div>
+      )}
+      <div className="text-center pb-1">
+        <a href="https://fwp.mt.gov/fish/regulations" target="_blank" rel="noopener noreferrer"
+          className="text-[11px] text-[var(--mri-text-dim)] underline underline-offset-2">
+          📋 MT Fishing Regulations ↗
+        </a>
+      </div>
+    </div>
+  );
+}
+
+// ─── RiverDetailContent ───────────────────────────────────────────────────────
+
+type DetailTab = "today" | "hatches" | "conditions" | "weather" | "tactics";
+
+const DETAIL_TABS: { id: DetailTab; label: string }[] = [
+  { id: "today", label: "Today" },
+  { id: "hatches", label: "Hatches" },
+  { id: "conditions", label: "Conditions" },
+  { id: "weather", label: "Weather" },
+  { id: "tactics", label: "Tactics" },
+];
+
+function RiverDetailContent({
+  selected,
+  historyRows,
+  detailedAnalytics,
+  decisionCard,
+  flyShopReport,
+  selectedStationSiteNo,
+  onStationClick,
+}: {
+  selected: River;
+  historyRows: HistoryRow[];
+  detailedAnalytics: RiverDetailAnalytics | null;
+  decisionCard: DecisionCard | null;
+  flyShopReport: FlyShopReportResponse | null;
+  selectedStationSiteNo: string | null;
+  onStationClick: (seg: RiverSegmentPoint) => void;
+}) {
+  const [tab, setTab] = useState<DetailTab>("today");
+  const touchStartX = useRef<number | null>(null);
+
+  // Reset to TODAY when a different river is selected
+  useEffect(() => { setTab("today"); }, [selected.river_id]);
+
+  function handleTouchStart(e: React.TouchEvent) {
+    touchStartX.current = e.touches[0].clientX;
+  }
+
+  function handleTouchEnd(e: React.TouchEvent) {
+    if (touchStartX.current == null) return;
+    const dx = e.changedTouches[0].clientX - touchStartX.current;
+    touchStartX.current = null;
+    if (Math.abs(dx) < 50) return;
+    const ids = DETAIL_TABS.map((t) => t.id);
+    const idx = ids.indexOf(tab);
+    if (dx < 0 && idx < ids.length - 1) setTab(ids[idx + 1]);
+    if (dx > 0 && idx > 0) setTab(ids[idx - 1]);
+  }
+
+  return (
+    <div>
+      {/* Sticky tab bar */}
+      <div
+        className="sticky top-0 z-10 flex border-b border-[var(--mri-border)]"
+        style={{ background: "#f2f0eb", marginBottom: 12, marginLeft: -16, marginRight: -16, paddingLeft: 16, paddingRight: 16 }}
+      >
+        {DETAIL_TABS.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            style={{
+              flex: 1, paddingTop: 10, paddingBottom: 10,
+              fontSize: 11, fontWeight: 600,
+              color: tab === t.id ? "var(--mri-text)" : "var(--mri-text-dim)",
+              borderBottom: tab === t.id ? "2px solid #2d5a1b" : "2px solid transparent",
+              background: "none", cursor: "pointer", transition: "color 120ms",
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Swipeable tab content */}
+      <div onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+        {tab === "today" && (
+          <TodayTab
+            selected={selected}
+            decisionCard={decisionCard}
+            flyShopReport={flyShopReport}
+            historyRows={historyRows}
+            detailedAnalytics={detailedAnalytics}
+          />
+        )}
+        {tab === "hatches" && (
+          <HatchesTab decisionCard={decisionCard} flyShopReport={flyShopReport} selected={selected} />
+        )}
+        {tab === "conditions" && (
+          <ConditionsTab
+            selected={selected}
+            detailedAnalytics={detailedAnalytics}
+            decisionCard={decisionCard}
+            selectedStationSiteNo={selectedStationSiteNo}
+            onStationClick={onStationClick}
+          />
+        )}
+        {tab === "weather" && (
+          <WeatherTab analytics={detailedAnalytics} riverId={selected.river_id} />
+        )}
+        {tab === "tactics" && (
+          <TacticsTab riverId={selected.river_id} />
+        )}
+      </div>
     </div>
   );
 }
@@ -1598,12 +2092,6 @@ export default function OnxShell({
   const [layersOpen, setLayersOpen] = useState(false);
   const [advancedLayersOpen, setAdvancedLayersOpen] = useState(false);
 
-  // ── Detail panel expandables
-  const [detailMetricsOpen, setDetailMetricsOpen] = useState(false);
-  const [transparencyOpen, setTransparencyOpen] = useState(false);
-  const [mobileDetailMetricsOpen, setMobileDetailMetricsOpen] = useState(false);
-  const [mobileTransparencyOpen, setMobileTransparencyOpen] = useState(false);
-
   // ── Map / data state
   // mounted gates the dynamic MapView render — eliminates server/client hydration
   // mismatch caused by ssr:false. The placeholder renders on both server and client
@@ -1654,10 +2142,6 @@ export default function OnxShell({
     if (!selectedId) return null;
     return filtered.find((r) => r.river_id === selectedId) ?? rivers.find((r) => r.river_id === selectedId) ?? null;
   }, [filtered, rivers, selectedId]);
-
-  const breakdown = useMemo(() => (selected ? deriveScoreBreakdown(selected) : null), [selected]);
-  const selectedFishIndex = useMemo(() => getFishabilityIndex(selected?.fishability_score_calc ?? null), [selected]);
-  const todaysRead = useMemo(() => generateTodaysRead(selected), [selected]);
 
   const detailedAnalytics = useMemo(
     () =>
@@ -1859,13 +2343,9 @@ export default function OnxShell({
     try { localStorage.setItem(LAYERS_STORAGE_KEY, JSON.stringify({ basemap, layerState })); } catch { /* ignore */ }
   }, [basemap, layerState]);
 
-  // ── When river selected on mobile, open detail sheet; reset metrics state
+  // ── When river selected on mobile, open detail sheet
   useEffect(() => {
     if (selected) {
-      setDetailMetricsOpen(false);
-      setMobileDetailMetricsOpen(false);
-      setTransparencyOpen(false);
-      setMobileTransparencyOpen(false);
       if (isMobile) setMobileDetailOpen(true);
     } else {
       setMobileDetailOpen(false);
@@ -2213,45 +2693,15 @@ export default function OnxShell({
               <div className="text-[13px] text-[var(--mri-text-muted)] mt-0.5">{selected.gauge_label ?? ""}</div>
             </div>
 
-            <div className="mb-3">
-              <GoBanner card={decisionCard} />
-            </div>
-            {decisionCard?.regulation && (
-              <div className="mb-3">
-                <RegulationNotice card={decisionCard} />
-              </div>
-            )}
-            {flyShopReport && (
-              <div className="mb-3">
-                <FlyShopReportCard report={flyShopReport} />
-              </div>
-            )}
-
             <RiverDetailContent
               selected={selected}
-              selectedFishIndex={selectedFishIndex}
-              todaysRead={todaysRead}
               historyRows={historyRows}
               detailedAnalytics={detailedAnalytics}
-              breakdown={breakdown}
-              detailMetricsOpen={mobileDetailMetricsOpen}
-              transparencyOpen={mobileTransparencyOpen}
-              onToggleMetrics={() => setMobileDetailMetricsOpen((v) => !v)}
-              onToggleTransparency={() => setMobileTransparencyOpen((v) => !v)}
               decisionCard={decisionCard}
+              flyShopReport={flyShopReport}
               selectedStationSiteNo={selectedStationSiteNo}
               onStationClick={handleStationClick}
             />
-            <div className="mt-4 pb-2 text-center">
-              <a
-                href="https://fwp.mt.gov/fish/regulations"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[11px] text-[var(--mri-text-dim)] underline underline-offset-2"
-              >
-                📋 MT Fishing Regulations ↗
-              </a>
-            </div>
           </div>
         </section>
       )}
@@ -2379,8 +2829,8 @@ export default function OnxShell({
         {/* Detail panel — pinned to bottom of sidebar */}
         {selected && (
           <div
-            className="mri-scroll flex-shrink-0 overflow-auto border-t border-[var(--mri-border)] bg-white px-3 pt-3 pb-4"
-            style={{ maxHeight: "62vh" }}
+            className="mri-scroll flex-shrink-0 overflow-auto border-t border-[var(--mri-border)] bg-white px-4 pt-3 pb-4"
+            style={{ maxHeight: "62vh", background: "#f2f0eb" }}
           >
             <div className="mb-2">
               <div className="flex items-start justify-between gap-2">
@@ -2398,32 +2848,12 @@ export default function OnxShell({
               </div>
             </div>
 
-            <div className="mb-3">
-              <GoBanner card={decisionCard} />
-            </div>
-            {decisionCard?.regulation && (
-              <div className="mb-3">
-                <RegulationNotice card={decisionCard} />
-              </div>
-            )}
-            {flyShopReport && (
-              <div className="mb-3">
-                <FlyShopReportCard report={flyShopReport} />
-              </div>
-            )}
-
             <RiverDetailContent
               selected={selected}
-              selectedFishIndex={selectedFishIndex}
-              todaysRead={todaysRead}
               historyRows={historyRows}
               detailedAnalytics={detailedAnalytics}
-              breakdown={breakdown}
-              detailMetricsOpen={detailMetricsOpen}
-              transparencyOpen={transparencyOpen}
-              onToggleMetrics={() => setDetailMetricsOpen((v) => !v)}
-              onToggleTransparency={() => setTransparencyOpen((v) => !v)}
               decisionCard={decisionCard}
+              flyShopReport={flyShopReport}
               selectedStationSiteNo={selectedStationSiteNo}
               onStationClick={handleStationClick}
             />
