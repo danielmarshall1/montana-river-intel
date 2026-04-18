@@ -1468,13 +1468,11 @@ function TodayTab({
   selected,
   decisionCard,
   flyShopReport,
-  historyRows,
   detailedAnalytics,
 }: {
   selected: River;
   decisionCard: DecisionCard | null;
   flyShopReport: FlyShopReportResponse | null;
-  historyRows: HistoryRow[];
   detailedAnalytics: RiverDetailAnalytics | null;
 }) {
   const tc = getTierColors(selected.bite_tier);
@@ -1532,6 +1530,11 @@ function TodayTab({
           {selected.change_48h_pct_calc != null && (
             <div className="text-[10px] text-[var(--mri-text-dim)] mt-0.5">{formatSignedPercent(selected.change_48h_pct_calc)} / 48h</div>
           )}
+          {detailedAnalytics?.sourceTrust?.flowSourceSiteNo && (
+            <div className="mt-1" style={{ fontSize: 10, color: "#999" }}>
+              USGS · {detailedAnalytics.sourceTrust.flowSourceSiteName ?? detailedAnalytics.sourceTrust.flowSourceSiteNo}
+            </div>
+          )}
         </div>
         <div className="mri-card p-3">
           <div className="text-[10px] font-medium text-[var(--mri-text-dim)] uppercase tracking-wide">Temp</div>
@@ -1540,6 +1543,11 @@ function TodayTab({
           </div>
           {selected.temp_status && (
             <div className="text-[10px] text-[var(--mri-text-dim)] mt-0.5">{getTempStatusLabel(selected)}</div>
+          )}
+          {detailedAnalytics?.sourceTrust?.tempSourceSiteNo && (
+            <div className="mt-1" style={{ fontSize: 10, color: "#999" }}>
+              USGS · {detailedAnalytics.sourceTrust.tempSourceSiteName ?? detailedAnalytics.sourceTrust.tempSourceSiteNo}
+            </div>
           )}
         </div>
         <div className="mri-card p-3 col-span-2">
@@ -1553,8 +1561,6 @@ function TodayTab({
         </div>
       </div>
 
-      {/* 14-day trend chart */}
-      <TrendChart historyRows={historyRows} />
     </div>
   );
 }
@@ -1633,12 +1639,14 @@ function ConditionsTab({
   decisionCard,
   selectedStationSiteNo,
   onStationClick,
+  historyRows,
 }: {
   selected: River;
   detailedAnalytics: RiverDetailAnalytics | null;
   decisionCard: DecisionCard | null;
   selectedStationSiteNo: string | null;
   onStationClick: (seg: RiverSegmentPoint) => void;
+  historyRows: HistoryRow[];
 }) {
   const h = detailedAnalytics?.hydrology;
   const th = detailedAnalytics?.thermal;
@@ -1708,6 +1716,9 @@ function ConditionsTab({
 
       {/* Station corridor */}
       <RiverStationStrip riverId={selected.river_id} selectedSiteNo={selectedStationSiteNo} onStationClick={onStationClick} />
+
+      {/* 14-day trend chart */}
+      <TrendChart historyRows={historyRows} />
 
       {/* Data source line */}
       {st && (
@@ -1964,9 +1975,19 @@ function RiverDetailContent({
 }) {
   const [tab, setTab] = useState<DetailTab>("today");
   const touchStartX = useRef<number | null>(null);
+  const tabScrollRef = useRef<HTMLDivElement | null>(null);
+  const tabButtonRefs = useRef<Partial<Record<DetailTab, HTMLButtonElement | null>>>({});
 
   // Reset to TODAY when a different river is selected
   useEffect(() => { setTab("today"); }, [selected.river_id]);
+
+  // Scroll active tab into view when tab changes
+  useEffect(() => {
+    const btn = tabButtonRefs.current[tab];
+    if (btn && tabScrollRef.current) {
+      btn.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+    }
+  }, [tab]);
 
   function handleTouchStart(e: React.TouchEvent) {
     touchStartX.current = e.touches[0].clientX;
@@ -1987,24 +2008,49 @@ function RiverDetailContent({
     <div>
       {/* Sticky tab bar */}
       <div
-        className="sticky top-0 z-10 flex border-b border-[var(--mri-border)]"
-        style={{ background: "#f2f0eb", marginBottom: 12, marginLeft: -16, marginRight: -16, paddingLeft: 16, paddingRight: 16 }}
+        className="sticky top-0 z-10"
+        style={{ background: "#f2f0eb", marginBottom: 12, marginLeft: -16, marginRight: -16, paddingLeft: 12, paddingRight: 12, paddingTop: 8, paddingBottom: 8 }}
       >
-        {DETAIL_TABS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            style={{
-              flex: 1, paddingTop: 10, paddingBottom: 10,
-              fontSize: 11, fontWeight: 600,
-              color: tab === t.id ? "var(--mri-text)" : "var(--mri-text-dim)",
-              borderBottom: tab === t.id ? "2px solid #2d5a1b" : "2px solid transparent",
-              background: "none", cursor: "pointer", transition: "color 120ms",
-            }}
-          >
-            {t.label}
-          </button>
-        ))}
+        <div
+          ref={tabScrollRef}
+          style={{
+            display: "flex",
+            background: "#ede9e2",
+            borderRadius: 8,
+            padding: 3,
+            gap: 2,
+            overflowX: "auto",
+            scrollbarWidth: "none",
+          }}
+        >
+          {DETAIL_TABS.map((t) => {
+            const isActive = tab === t.id;
+            return (
+              <button
+                key={t.id}
+                ref={(el) => { tabButtonRefs.current[t.id] = el; }}
+                onClick={() => setTab(t.id)}
+                style={{
+                  flexShrink: 0,
+                  paddingTop: 6, paddingBottom: 6,
+                  paddingLeft: 12, paddingRight: 12,
+                  fontSize: 12,
+                  fontWeight: isActive ? 600 : 400,
+                  color: isActive ? "#1a3d0e" : "#888",
+                  background: isActive ? "#fff" : "transparent",
+                  borderRadius: 6,
+                  border: "none",
+                  cursor: "pointer",
+                  boxShadow: isActive ? "0 1px 3px rgba(0,0,0,0.12)" : "none",
+                  transition: "background 120ms, color 120ms, box-shadow 120ms",
+                  whiteSpace: "nowrap" as const,
+                }}
+              >
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Swipeable tab content */}
@@ -2014,7 +2060,6 @@ function RiverDetailContent({
             selected={selected}
             decisionCard={decisionCard}
             flyShopReport={flyShopReport}
-            historyRows={historyRows}
             detailedAnalytics={detailedAnalytics}
           />
         )}
@@ -2028,6 +2073,7 @@ function RiverDetailContent({
             decisionCard={decisionCard}
             selectedStationSiteNo={selectedStationSiteNo}
             onStationClick={onStationClick}
+            historyRows={historyRows}
           />
         )}
         {tab === "weather" && (
