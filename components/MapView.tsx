@@ -62,8 +62,7 @@ const RIVER_NAMES_LAYER = "river-labels";
 const STATEWIDE_HYDRO_SOURCE = "statewide-hydrology-source";
 const STATEWIDE_HYDRO_LAYER = "statewide-hydrology-line";
 
-const FEDERAL_LANDS_SOURCE = "public-lands-federal-source";
-const FEDERAL_LANDS_LAYER = "public-lands-federal-layer";
+// Federal BLM layer consolidated into SMA (padus_public_lands).
 const STATE_LANDS_SOURCE = "public-lands-state-source";
 const STATE_LANDS_LAYER = "public-lands-state-layer";
 
@@ -77,10 +76,10 @@ const HYDRO_TEMP_LAYER = "hydro-temp-stress-layer";
 
 const PADUS_SOURCE = "padus-public-lands-source";
 const PADUS_LAYER = "padus-public-lands-layer";
+// BLM Surface Management Agency cached tiles — verified 200/34KB for Montana.
+// Renders colored polygons: green=NFS, yellow=BLM, purple=NPS, teal=FWS.
+// USGS PAD-US v3 endpoint is dead; USFS WMS export renders opaque white mask.
 const PADUS_TILES =
-  "https://gis.usgs.gov/sciencebase2/rest/services/padus3/combined/MapServer/tile/{z}/{y}/{x}";
-
-const BLM_TILES =
   "https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA_Cached_without_PriUnk/MapServer/tile/{z}/{y}/{x}";
 const STATE_LANDS_GEOJSON =
   "https://fwp-gis.mt.gov/arcgis/rest/services/fwplnd/fwpLands/MapServer/5/query?where=1%3D1&outFields=NAME&returnGeometry=true&f=geojson";
@@ -231,7 +230,6 @@ function toneRasterBasemap(map: mapboxgl.Map) {
       !lid.includes("label") &&
       !lid.includes("reference") &&
       !lid.includes("boundaries") &&
-      id !== FEDERAL_LANDS_LAYER &&
       id !== PADUS_LAYER;
     if (!isImagery) continue;
 
@@ -860,46 +858,13 @@ function syncStatewideHydrologyLayer(map: mapboxgl.Map, enabled: boolean) {
   if (map.getLayer(STATEWIDE_HYDRO_LAYER)) map.removeLayer(STATEWIDE_HYDRO_LAYER);
 }
 
-function syncFederalLandsLayer(map: mapboxgl.Map, enabled: boolean) {
-  if (enabled) {
-    if (!map.getSource(FEDERAL_LANDS_SOURCE)) {
-      map.addSource(FEDERAL_LANDS_SOURCE, {
-        type: "raster",
-        tiles: [BLM_TILES],
-        tileSize: 256,
-        attribution: "BLM Surface Management Agency",
-      });
-    }
-    if (!map.getLayer(FEDERAL_LANDS_LAYER)) {
-      map.addLayer({
-        id: FEDERAL_LANDS_LAYER,
-        type: "raster",
-        source: FEDERAL_LANDS_SOURCE,
-        minzoom: 8,
-        paint: {
-          "raster-opacity": 0.38,
-          "raster-saturation": -0.40,
-          "raster-contrast": -0.18,
-          "raster-brightness-min": 0.18,
-          "raster-brightness-max": 0.92,
-        },
-      });
-    }
-    try {
-      if (map.getLayer(STATEWIDE_HYDRO_LAYER)) {
-        map.moveLayer(FEDERAL_LANDS_LAYER, STATEWIDE_HYDRO_LAYER);
-      } else if (map.getLayer(RIVER_CASING_LAYER)) {
-        map.moveLayer(FEDERAL_LANDS_LAYER, RIVER_CASING_LAYER);
-      }
-    } catch {
-      /* ignore */
-    }
-    return;
-  }
-
-  if (map.getLayer(FEDERAL_LANDS_LAYER)) {
-    map.removeLayer(FEDERAL_LANDS_LAYER);
-  }
+// Federal BLM layer consolidated into SMA (padus_public_lands).
+// This stub removes any previously cached federal layer on map load.
+function syncFederalLandsLayer(map: mapboxgl.Map, _enabled: boolean) {
+  const legacyLayer = "public-lands-federal-layer";
+  const legacySource = "public-lands-federal-source";
+  if (map.getLayer(legacyLayer)) map.removeLayer(legacyLayer);
+  if (map.getSource(legacySource)) map.removeSource(legacySource);
 }
 
 function syncPadusLayer(map: mapboxgl.Map, enabled: boolean) {
@@ -909,7 +874,7 @@ function syncPadusLayer(map: mapboxgl.Map, enabled: boolean) {
         type: "raster",
         tiles: [PADUS_TILES],
         tileSize: 256,
-        attribution: "USGS PAD-US v3",
+        attribution: "BLM Surface Management Agency",
       });
     }
     if (!map.getLayer(PADUS_LAYER)) {
@@ -919,7 +884,7 @@ function syncPadusLayer(map: mapboxgl.Map, enabled: boolean) {
         source: PADUS_SOURCE,
         minzoom: 6,
         paint: {
-          "raster-opacity": 0.45,
+          "raster-opacity": 0.35,
         },
       });
     }
@@ -1361,7 +1326,7 @@ export function MapView({
     );
     syncStatewideHydrologyLayer(map, layerStateRef.current.statewide_hydrology);
     syncPadusLayer(map, layerStateRef.current.padus_public_lands);
-    syncFederalLandsLayer(map, layerStateRef.current.public_federal);
+    syncFederalLandsLayer(map, false); // one-time cleanup of legacy layer
     syncStateLandsLayer(map, layerStateRef.current.public_state);
     // Fishing access is handled exclusively by the dedicated useEffect which has
     // reliable access to the current selectedRiverId via props — not refs.
@@ -1805,7 +1770,6 @@ export function MapView({
 
     syncStatewideHydrologyLayer(map, effectiveLayerState.statewide_hydrology);
     syncPadusLayer(map, effectiveLayerState.padus_public_lands);
-    syncFederalLandsLayer(map, effectiveLayerState.public_federal);
     syncStateLandsLayer(map, effectiveLayerState.public_state);
     syncActiveStationsLayer(map, effectiveLayerState.mri_active_stations, activeStationsGeojson, selectedRiver, highlightedStationSiteNo);
     syncHydrologyOverlays(
@@ -1819,7 +1783,6 @@ export function MapView({
     mapReady,
     effectiveLayerState.statewide_hydrology,
     effectiveLayerState.padus_public_lands,
-    effectiveLayerState.public_federal,
     effectiveLayerState.public_state,
     effectiveLayerState.mri_active_stations,
     effectiveLayerState.hydro_flow_magnitude,
@@ -2054,20 +2017,19 @@ export function MapView({
               gap: 3,
             }}
           >
-            <div style={{ fontWeight: 600, color: "#333", marginBottom: 1, fontSize: 10 }}>Public Lands</div>
+            <div style={{ fontWeight: 600, color: "#333", marginBottom: 1, fontSize: 10 }}>Public Lands (SMA)</div>
             {([
               { color: "#2d6a2d", label: "National Forest" },
               { color: "#c8a84b", label: "BLM" },
               { color: "#1a4d1a", label: "National Park" },
-              { color: "#4a7fb5", label: "State" },
-              { color: "#6b4c8f", label: "Wilderness" },
+              { color: "#4a90a4", label: "Fish & Wildlife" },
             ] as const).map(({ color, label }) => (
               <div key={label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <div style={{ width: 10, height: 10, borderRadius: 2, background: color, flexShrink: 0 }} />
                 <span style={{ color: "#333" }}>{label}</span>
               </div>
             ))}
-            <div style={{ marginTop: 2, fontSize: 9, color: "#888" }}>USGS PAD-US v3</div>
+            <div style={{ marginTop: 2, fontSize: 9, color: "#888" }}>BLM Surface Management Agency</div>
           </div>
         )}
       </div>

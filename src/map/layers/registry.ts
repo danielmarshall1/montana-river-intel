@@ -4,7 +4,6 @@ export type LayerGroup = "Core" | "Public Lands" | "Advanced";
 
 export type LayerId =
   | "statewide_hydrology"
-  | "public_federal"
   | "public_state"
   | "padus_public_lands"
   | "access_fishing_sites"
@@ -159,28 +158,11 @@ export const LAYER_REGISTRY: LayerDefinition[] = [
   // ── Public Lands ─────────────────────────────────────────────────────────
   {
     id: "padus_public_lands",
-    label: "Public Lands (PAD-US)",
+    label: "Public Lands (SMA)",
     group: "Public Lands",
     defaultOn: false,
     source: {
       id: "padus-public-lands-source",
-      type: "raster",
-      tiles: [
-        "https://gis.usgs.gov/sciencebase2/rest/services/padus3/combined/MapServer/tile/{z}/{y}/{x}",
-      ],
-      tileSize: 256,
-      attribution: "USGS PAD-US v3",
-    },
-    layers: ["padus-public-lands-layer"],
-    minZoomNote: "Visible at zoom 6+",
-  },
-  {
-    id: "public_federal",
-    label: "Federal BLM",
-    group: "Public Lands",
-    defaultOn: false,
-    source: {
-      id: "public-lands-federal-source",
       type: "raster",
       tiles: [
         "https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA_Cached_without_PriUnk/MapServer/tile/{z}/{y}/{x}",
@@ -188,8 +170,8 @@ export const LAYER_REGISTRY: LayerDefinition[] = [
       tileSize: 256,
       attribution: "BLM Surface Management Agency",
     },
-    layers: ["public-lands-federal-layer"],
-    minZoomNote: "Visible at zoom 7+",
+    layers: ["padus-public-lands-layer"],
+    minZoomNote: "Visible at zoom 6+",
   },
   {
     id: "public_state",
@@ -281,7 +263,7 @@ export const LAYER_REGISTRY: LayerDefinition[] = [
   },
 ];
 
-export const LAYERS_STORAGE_KEY = "mri.layers.v3"; // bumped to reset cached layer state
+export const LAYERS_STORAGE_KEY = "mri.layers.v4"; // bumped: removed public_federal, SMA consolidation
 
 export const DEFAULT_BASEMAP: BasemapId =
   BASEMAP_OPTIONS.find((b) => b.defaultOn)?.id ?? "dark";
