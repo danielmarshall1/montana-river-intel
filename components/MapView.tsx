@@ -8,6 +8,7 @@ import { RIVER_FOCUS_POINTS } from "@/lib/river-focus-points";
 import { MRI_COLORS } from "@/lib/theme";
 import { createDefaultLayerState, type BasemapId, type LayerId } from "@/src/map/layers/registry";
 import { MapControls } from "./MapControls";
+import { type Waypoint, WAYPOINT_COLORS } from "@/lib/waypoints";
 
 const MONTANA_CENTER: [number, number] = [-109.75, 47.05];
 const MONTANA_BOUNDS: [[number, number], [number, number]] = [
@@ -44,6 +45,9 @@ interface MapViewProps {
   initialStyleUrl?: string;
   onMapReady?: (map: mapboxgl.Map) => void;
   highlightedStationSiteNo?: string | null;
+  waypoints?: Waypoint[];
+  onWaypointSave?: (wp: Omit<Waypoint, "id" | "created_at">) => void;
+  onWaypointRemove?: (id: string) => void;
 }
 
 const RIVERS_SOURCE = "rivers-source";
@@ -1244,6 +1248,125 @@ function syncLabels(map: mapboxgl.Map, visible: boolean) {
   }
 }
 
+// ─── Waypoint helpers ─────────────────────────────────────────────────────────
+
+function createWaypointEl(wp: Waypoint): HTMLElement {
+  const fill = WAYPOINT_COLORS[wp.color] ?? "#16a34a";
+  const shortLabel = wp.label.slice(0, 3);
+  const el = document.createElement("div");
+  el.style.cssText = "width:30px;height:40px;position:relative;cursor:pointer;";
+  el.innerHTML = `
+    <div style="width:28px;height:28px;background:${fill};border-radius:50%;border:2.5px solid white;
+      box-shadow:0 2px 6px rgba(0,0,0,0.38);display:flex;align-items:center;justify-content:center;
+      position:absolute;top:0;left:0;overflow:hidden;">
+      <span style="color:white;font-size:8px;font-weight:700;white-space:nowrap;overflow:hidden;
+        max-width:22px;text-overflow:ellipsis;">${escapeHtml(shortLabel)}</span>
+    </div>
+    <div style="width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;
+      border-top:12px solid ${fill};position:absolute;bottom:0;left:50%;transform:translateX(-50%);"></div>
+  `;
+  return el;
+}
+
+function openAddWaypointPopup(
+  map: mapboxgl.Map,
+  lngLat: mapboxgl.LngLat,
+  onSave: (wp: Omit<Waypoint, "id" | "created_at">) => void
+) {
+  const colors: Array<{ key: Waypoint["color"]; hex: string }> = [
+    { key: "green", hex: WAYPOINT_COLORS.green },
+    { key: "red", hex: WAYPOINT_COLORS.red },
+    { key: "blue", hex: WAYPOINT_COLORS.blue },
+    { key: "yellow", hex: WAYPOINT_COLORS.yellow },
+  ];
+  const colorSwatches = colors.map((c) =>
+    `<label style="cursor:pointer;" title="${c.key}">
+      <input type="radio" name="wp-color" value="${c.key}" ${c.key === "green" ? "checked" : ""}
+        style="position:absolute;opacity:0;width:0;height:0;">
+      <span class="wp-swatch" data-color="${c.key}"
+        style="display:inline-block;width:20px;height:20px;border-radius:50%;background:${c.hex};
+          border:2px solid transparent;box-sizing:border-box;transition:border-color 0.1s;">
+      </span>
+    </label>`
+  ).join("");
+
+  const popup = new mapboxgl.Popup({ closeButton: true, closeOnClick: false, offset: 12, maxWidth: "220px" })
+    .setLngLat(lngLat)
+    .setHTML(`
+      <div style="font-family:system-ui,sans-serif;padding:2px 0;">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#555;margin-bottom:6px;">Add Waypoint</div>
+        <input id="wp-label-input" placeholder="My spot" maxlength="32"
+          style="width:100%;box-sizing:border-box;border:1px solid #ddd;border-radius:5px;
+            padding:5px 8px;font-size:13px;outline:none;margin-bottom:8px;"/>
+        <div style="display:flex;gap:6px;align-items:center;margin-bottom:10px;">
+          ${colorSwatches}
+        </div>
+        <div style="display:flex;gap:6px;">
+          <button id="wp-save-btn"
+            style="flex:1;background:#2d5a1b;color:white;border:none;border-radius:5px;
+              padding:6px 0;font-size:12px;font-weight:600;cursor:pointer;">Save</button>
+          <button id="wp-cancel-btn"
+            style="flex:1;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;
+              border-radius:5px;padding:6px 0;font-size:12px;cursor:pointer;">Cancel</button>
+        </div>
+      </div>
+    `)
+    .addTo(map);
+
+  const container = popup.getElement();
+
+  // Update swatch border when color radio changes
+  container.querySelectorAll("input[name='wp-color']").forEach((input) => {
+    input.addEventListener("change", () => {
+      container.querySelectorAll(".wp-swatch").forEach((s) => {
+        (s as HTMLElement).style.border = "2px solid transparent";
+      });
+      const swatch = container.querySelector(`.wp-swatch[data-color="${(input as HTMLInputElement).value}"]`);
+      if (swatch) (swatch as HTMLElement).style.border = "2.5px solid #1a1a1a";
+    });
+  });
+  // Set initial border on green
+  const defaultSwatch = container.querySelector(".wp-swatch[data-color='green']");
+  if (defaultSwatch) (defaultSwatch as HTMLElement).style.border = "2.5px solid #1a1a1a";
+
+  container.querySelector("#wp-cancel-btn")?.addEventListener("click", () => popup.remove());
+
+  container.querySelector("#wp-save-btn")?.addEventListener("click", () => {
+    const labelInput = container.querySelector("#wp-label-input") as HTMLInputElement | null;
+    const colorInput = container.querySelector("input[name='wp-color']:checked") as HTMLInputElement | null;
+    const label = labelInput?.value?.trim() || "My spot";
+    const color = (colorInput?.value ?? "green") as Waypoint["color"];
+    onSave({ lat: lngLat.lat, lng: lngLat.lng, label, note: "", color });
+    popup.remove();
+  });
+}
+
+function openWaypointInfoPopup(
+  map: mapboxgl.Map,
+  wp: Waypoint,
+  markerLngLat: mapboxgl.LngLat,
+  onRemove: (id: string) => void
+) {
+  const popup = new mapboxgl.Popup({ closeButton: true, closeOnClick: true, offset: 12, maxWidth: "200px" })
+    .setLngLat(markerLngLat)
+    .setHTML(`
+      <div style="font-family:system-ui,sans-serif;padding:2px 0;">
+        <div style="font-size:13px;font-weight:700;color:#1a1a1a;margin-bottom:4px;">${escapeHtml(wp.label)}</div>
+        ${wp.note ? `<div style="font-size:11px;color:#555;margin-bottom:6px;">${escapeHtml(wp.note)}</div>` : ""}
+        <div style="font-size:10px;color:#999;margin-bottom:8px;">${new Date(wp.created_at).toLocaleDateString()}</div>
+        <button id="wp-delete-btn"
+          style="width:100%;background:#dc2626;color:white;border:none;border-radius:5px;
+            padding:5px 0;font-size:12px;font-weight:600;cursor:pointer;">Delete waypoint</button>
+      </div>
+    `)
+    .addTo(map);
+
+  popup.getElement().querySelector("#wp-delete-btn")?.addEventListener("click", () => {
+    onRemove(wp.id);
+    popup.remove();
+  });
+}
+
 export function MapView({
   rivers,
   selectedRiver,
@@ -1262,6 +1385,9 @@ export function MapView({
   initialStyleUrl,
   onMapReady,
   highlightedStationSiteNo,
+  waypoints = [],
+  onWaypointSave,
+  onWaypointRemove,
 }: MapViewProps) {
   const effectiveLayerState = layerState ?? createDefaultLayerState();
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -1304,6 +1430,19 @@ export function MapView({
   onMapReadyRef.current = onMapReady;
   const highlightedStationSiteNoRef = useRef<string | null | undefined>(highlightedStationSiteNo);
   highlightedStationSiteNoRef.current = highlightedStationSiteNo;
+
+  // ── Waypoint state
+  const waypointMarkersRef = useRef<Map<string, mapboxgl.Marker>>(new Map());
+  const waypointsRef = useRef(waypoints);
+  waypointsRef.current = waypoints;
+  const onWaypointSaveRef = useRef(onWaypointSave);
+  onWaypointSaveRef.current = onWaypointSave;
+  const onWaypointRemoveRef = useRef(onWaypointRemove);
+  onWaypointRemoveRef.current = onWaypointRemove;
+  // Long-press state (not React state — avoids re-renders)
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressStartRef = useRef<{ x: number; y: number } | null>(null);
+  const longPressDraggedRef = useRef(false);
 
   const syncRuntimeLayers = useCallback((map: mapboxgl.Map) => {
     toneRasterBasemap(map);
@@ -1595,6 +1734,63 @@ export function MapView({
           )
           .addTo(map);
       });
+
+      // ── Long-press to add waypoint ─────────────────────────────────────────
+      const cancelLongPress = () => {
+        if (longPressTimerRef.current) {
+          clearTimeout(longPressTimerRef.current);
+          longPressTimerRef.current = null;
+        }
+        longPressStartRef.current = null;
+      };
+
+      const startLongPress = (clientX: number, clientY: number, lngLat: mapboxgl.LngLat) => {
+        longPressDraggedRef.current = false;
+        longPressStartRef.current = { x: clientX, y: clientY };
+        longPressTimerRef.current = setTimeout(() => {
+          if (longPressDraggedRef.current) return;
+          if (!layerStateRef.current.my_waypoints) return;
+          openAddWaypointPopup(map, lngLat, (wp) => {
+            onWaypointSaveRef.current?.(wp);
+          });
+        }, 500);
+      };
+
+      map.on("mousedown", (e) => {
+        startLongPress(e.originalEvent.clientX, e.originalEvent.clientY, e.lngLat);
+      });
+      map.on("mouseup", cancelLongPress);
+      map.on("mousemove", (e) => {
+        if (!longPressStartRef.current) return;
+        const dx = e.originalEvent.clientX - longPressStartRef.current.x;
+        const dy = e.originalEvent.clientY - longPressStartRef.current.y;
+        if (Math.sqrt(dx * dx + dy * dy) > 6) {
+          longPressDraggedRef.current = true;
+          cancelLongPress();
+        }
+      });
+
+      map.getCanvas().addEventListener("touchstart", (e) => {
+        if (e.touches.length !== 1) { cancelLongPress(); return; }
+        const t = e.touches[0];
+        const rect = map.getContainer().getBoundingClientRect();
+        const lngLat = map.unproject([t.clientX - rect.left, t.clientY - rect.top]);
+        startLongPress(t.clientX, t.clientY, lngLat as unknown as mapboxgl.LngLat);
+      }, { passive: true });
+
+      map.getCanvas().addEventListener("touchend", cancelLongPress, { passive: true });
+      map.getCanvas().addEventListener("touchcancel", cancelLongPress, { passive: true });
+
+      map.getCanvas().addEventListener("touchmove", (e) => {
+        if (!longPressStartRef.current || e.touches.length !== 1) { cancelLongPress(); return; }
+        const t = e.touches[0];
+        const dx = t.clientX - longPressStartRef.current.x;
+        const dy = t.clientY - longPressStartRef.current.y;
+        if (Math.sqrt(dx * dx + dy * dy) > 10) {
+          longPressDraggedRef.current = true;
+          cancelLongPress();
+        }
+      }, { passive: true });
     }
 
     return () => {
@@ -1941,6 +2137,53 @@ export function MapView({
       map.off("style.load", handleStyleLoad);
     };
   }, [syncRuntimeLayers]);
+
+  // ── Sync waypoints → Mapbox markers ─────────────────────────────────────────
+  const waypointsKey = waypoints.map((w) => w.id).join(",");
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const existing = waypointMarkersRef.current;
+    const incomingIds = new Set(waypoints.map((w) => w.id));
+
+    // Remove markers no longer in waypoints
+    Array.from(existing.entries()).forEach(([id, marker]) => {
+      if (!incomingIds.has(id)) {
+        marker.remove();
+        existing.delete(id);
+      }
+    });
+
+    // Add new markers
+    for (const wp of waypoints) {
+      if (existing.has(wp.id)) continue;
+      const el = createWaypointEl(wp);
+      const marker = new mapboxgl.Marker({ element: el, anchor: "bottom" })
+        .setLngLat([wp.lng, wp.lat])
+        .addTo(map);
+      el.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openWaypointInfoPopup(map, wp, marker.getLngLat(), (id) => {
+          onWaypointRemoveRef.current?.(id);
+        });
+      });
+      existing.set(wp.id, marker);
+    }
+
+    // Show/hide based on layer toggle
+    const visible = effectiveLayerState.my_waypoints;
+    Array.from(existing.values()).forEach((marker) => {
+      marker.getElement().style.display = visible ? "" : "none";
+    });
+  }, [waypointsKey, mapReady, effectiveLayerState.my_waypoints]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync waypoint visibility when toggle changes (without re-creating markers)
+  useEffect(() => {
+    const visible = effectiveLayerState.my_waypoints;
+    Array.from(waypointMarkersRef.current.values()).forEach((marker) => {
+      marker.getElement().style.display = visible ? "" : "none";
+    });
+  }, [effectiveLayerState.my_waypoints]);
 
   return (
     <div

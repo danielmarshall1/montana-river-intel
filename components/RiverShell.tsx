@@ -39,6 +39,7 @@ import type {
   RiverSourceSiteSummary,
   RiverWeatherDay,
 } from "@/lib/types";
+import { type Waypoint, loadWaypoints, saveWaypoints, addWaypoint, removeWaypoint } from "@/lib/waypoints";
 
 // Dynamic import — keeps the 946 KB mapbox-gl chunk out of the critical path.
 // ssr:false because mapbox-gl is browser-only. The mounted guard in RiverShell
@@ -1469,11 +1470,13 @@ function TodayTab({
   decisionCard,
   flyShopReport,
   detailedAnalytics,
+  snowpackPct,
 }: {
   selected: River;
   decisionCard: DecisionCard | null;
   flyShopReport: FlyShopReportResponse | null;
   detailedAnalytics: RiverDetailAnalytics | null;
+  snowpackPct: number | null;
 }) {
   const tc = getTierColors(selected.bite_tier);
   const score = selected.fishability_score_calc;
@@ -1482,6 +1485,23 @@ function TodayTab({
     <div className="space-y-3">
       <GoBanner card={decisionCard} />
       {decisionCard?.regulation && <RegulationNotice card={decisionCard} />}
+
+      {/* Snowpack banner */}
+      {snowpackPct != null && snowpackPct > 120 && (
+        <div className="mri-card p-3" style={{ background: "#fffbeb", borderLeft: "3px solid #d4900a" }}>
+          <div className="text-[11px] leading-relaxed" style={{ color: "#92400e" }}>
+            High snowpack ({Math.round(snowpackPct)}% of normal) — expect elevated runoff and off-color water through June
+          </div>
+        </div>
+      )}
+      {snowpackPct != null && snowpackPct < 80 && (
+        <div className="mri-card p-3" style={{ background: "#eff6ff", borderLeft: "3px solid #2563eb" }}>
+          <div className="text-[11px] leading-relaxed" style={{ color: "#1d4ed8" }}>
+            Low snowpack ({Math.round(snowpackPct)}% of normal) — lower flows expected, clearer water likely
+          </div>
+        </div>
+      )}
+
       {flyShopReport && <FlyShopReportCard report={flyShopReport} />}
 
       {/* Decision card rows: ACCESS, CLARITY, BEST TIME, BEST WINDOW — no HATCH */}
@@ -1514,6 +1534,7 @@ function TodayTab({
             {tc.label}
           </span>
           <div className="mt-1 text-[10px] text-[var(--mri-text-dim)]">{formatUpdatedAgo(selected.updated_at)}</div>
+          <div className="mt-0.5 text-[9px] text-[var(--mri-text-dim)]">Score reflects flow, temperature, stability, wind, and seasonal conditions.</div>
         </div>
       </div>
 
@@ -1576,7 +1597,9 @@ function HatchesTab({
 }) {
   const currentMonth = new Date().getMonth() + 1;
   const hatchLabel = flyShopReport?.primary_hatch ?? decisionCard?.hatch.label ?? "Unknown";
-  const hatchDetail = decisionCard?.hatch.detail ?? "";
+  const hatchDetail = flyShopReport?.primary_hatch
+    ? (flyShopReport.tactical_notes ?? "")
+    : (decisionCard?.hatch.detail ?? "");
   const isShopConfirmed = Boolean(flyShopReport?.primary_hatch);
   const elevationFt = selected.elevation_ft;
   const isHighElev = elevationFt != null && elevationFt > 5000;
@@ -1964,6 +1987,7 @@ function RiverDetailContent({
   flyShopReport,
   selectedStationSiteNo,
   onStationClick,
+  snowpackPct,
 }: {
   selected: River;
   historyRows: HistoryRow[];
@@ -1972,6 +1996,7 @@ function RiverDetailContent({
   flyShopReport: FlyShopReportResponse | null;
   selectedStationSiteNo: string | null;
   onStationClick: (seg: RiverSegmentPoint) => void;
+  snowpackPct: number | null;
 }) {
   const [tab, setTab] = useState<DetailTab>("today");
   const touchStartX = useRef<number | null>(null);
@@ -2061,6 +2086,7 @@ function RiverDetailContent({
             decisionCard={decisionCard}
             flyShopReport={flyShopReport}
             detailedAnalytics={detailedAnalytics}
+            snowpackPct={snowpackPct}
           />
         )}
         {tab === "hatches" && (
@@ -2162,6 +2188,12 @@ export default function RiverShell({
 
   const [basemap, setBasemap] = useState<BasemapId>("hybrid");
   const [layerState, setLayerState] = useState<Record<LayerId, boolean>>(createDefaultLayerState());
+
+  // ── Waypoints
+  const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
+
+  // ── Snowpack
+  const [snowpackPct, setSnowpackPct] = useState<number | null>(null);
 
   // ── Derived state
   const basemapById = useMemo(
@@ -2367,6 +2399,24 @@ export default function RiverShell({
     return () => { cancelled = true; };
   }, [selected?.river_id]);
 
+  // ── Waypoints — load from localStorage on mount
+  useEffect(() => {
+    setWaypoints(loadWaypoints());
+  }, []);
+
+  // ── Snowpack — fetch when river changes
+  useEffect(() => {
+    if (!selected?.river_id) { setSnowpackPct(null); return; }
+    let cancelled = false;
+    fetch(`/api/snowpack/${encodeURIComponent(selected.river_id)}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data: { snowpack_pct_median: number | null } | null) => {
+        if (!cancelled) setSnowpackPct(data?.snowpack_pct_median ?? null);
+      })
+      .catch(() => { if (!cancelled) setSnowpackPct(null); });
+    return () => { cancelled = true; };
+  }, [selected?.river_id]);
+
   // ── localStorage layer persistence
   useEffect(() => {
     try {
@@ -2451,6 +2501,22 @@ export default function RiverShell({
     }
   }
 
+  function handleWaypointSave(wp: Omit<Waypoint, "id" | "created_at">) {
+    setWaypoints((prev) => {
+      const next = addWaypoint(prev, wp);
+      saveWaypoints(next);
+      return next;
+    });
+  }
+
+  function handleWaypointRemove(id: string) {
+    setWaypoints((prev) => {
+      const next = removeWaypoint(prev, id);
+      saveWaypoints(next);
+      return next;
+    });
+  }
+
   // ── Mobile bottom sheet drag
   // Uses setPointerCapture so iOS Safari routes all pointer events to the handle
   // element — no document-level listeners, no passive/active conflict.
@@ -2528,6 +2594,9 @@ export default function RiverShell({
             className="absolute inset-0"
             onMapReady={(m) => { mapRef.current = m; }}
             highlightedStationSiteNo={selectedStationSiteNo}
+            waypoints={waypoints}
+            onWaypointSave={handleWaypointSave}
+            onWaypointRemove={handleWaypointRemove}
           />
         ) : (
           <div style={{ position: "absolute", inset: 0, background: "#e8e4dc" }} />
@@ -2747,6 +2816,7 @@ export default function RiverShell({
               flyShopReport={flyShopReport}
               selectedStationSiteNo={selectedStationSiteNo}
               onStationClick={handleStationClick}
+              snowpackPct={snowpackPct}
             />
           </div>
         </section>
@@ -2859,6 +2929,7 @@ export default function RiverShell({
                 flyShopReport={flyShopReport}
                 selectedStationSiteNo={selectedStationSiteNo}
                 onStationClick={handleStationClick}
+                snowpackPct={snowpackPct}
               />
             </div>
           </>

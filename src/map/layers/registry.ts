@@ -1,6 +1,6 @@
 export type BasemapId = "dark" | "light" | "satellite" | "hybrid" | "topo";
 
-export type LayerGroup = "Core" | "Public Lands" | "Advanced";
+export type LayerGroup = "Core" | "Public Lands" | "Advanced" | "My Spots";
 
 export type LayerId =
   | "statewide_hydrology"
@@ -15,7 +15,8 @@ export type LayerId =
   | "mri_labels"
   | "hydro_flow_magnitude"
   | "hydro_change_indicator"
-  | "hydro_temp_stress";
+  | "hydro_temp_stress"
+  | "my_waypoints";
 
 export type SourceType = "raster" | "geojson" | "none";
 
@@ -261,6 +262,15 @@ export const LAYER_REGISTRY: LayerDefinition[] = [
     layers: ["hydro-temp-stress-layer"],
     locked: true,
   },
+  // ── My Spots ─────────────────────────────────────────────────────────────────
+  {
+    id: "my_waypoints",
+    label: "My Waypoints",
+    group: "My Spots",
+    defaultOn: true,
+    source: { id: "none", type: "none" },
+    layers: [],
+  },
 ];
 
 export const LAYERS_STORAGE_KEY = "mri.layers.v4"; // bumped: removed public_federal, SMA consolidation
@@ -275,4 +285,4 @@ export function createDefaultLayerState(): Record<LayerId, boolean> {
   }, {} as Record<LayerId, boolean>);
 }
 
-export const LAYER_GROUP_ORDER: LayerGroup[] = ["Core", "Public Lands", "Advanced"];
+export const LAYER_GROUP_ORDER: LayerGroup[] = ["Core", "Public Lands", "Advanced", "My Spots"];
