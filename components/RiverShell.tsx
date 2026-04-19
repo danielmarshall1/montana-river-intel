@@ -41,7 +41,7 @@ import type {
 } from "@/lib/types";
 
 // Dynamic import — keeps the 946 KB mapbox-gl chunk out of the critical path.
-// ssr:false because mapbox-gl is browser-only. The mounted guard in OnxShell
+// ssr:false because mapbox-gl is browser-only. The mounted guard in RiverShell
 // ensures this is only rendered after hydration, eliminating any SSR mismatch.
 const MapView = dynamic(
   () => import("@/components/MapView").then((m) => ({ default: m.MapView })),
@@ -2089,7 +2089,7 @@ function RiverDetailContent({
 
 // ─── Main Shell ───────────────────────────────────────────────────────────────
 
-export default function OnxShell({
+export default function RiverShell({
   rivers,
   stationGeojson,
   riverLinesGeojson: initialRiverLinesGeojson,
@@ -2508,8 +2508,8 @@ export default function OnxShell({
   return (
     <div className="relative h-[100dvh] w-full overflow-hidden" style={{ background: "#f2f0eb" }}>
 
-      {/* ── Map layer (always behind) ── */}
-      <div className="absolute inset-0 z-0">
+      {/* ── Map layer — full screen on mobile, offset on desktop ── */}
+      <div className="absolute inset-0 z-0 md:top-[52px] md:left-[420px]">
         {mounted ? (
           <MapView
             rivers={filtered}
@@ -2521,7 +2521,7 @@ export default function OnxShell({
             activeStationsGeojson={stationGeojson ?? null}
             basemap={basemap}
             layerState={layerState}
-            rightPanelOpen={!isMobile && !!selected}
+            rightPanelOpen={false}
             drawerState="collapsed"
             selectionSeq={selectionSeq}
             onSelectRiver={(r) => selectRiver(r.river_id)}
@@ -2753,54 +2753,61 @@ export default function OnxShell({
       )}
 
       {/* ══════════════════════════════════════════════════════════════════════════
-          DESKTOP LAYOUT (≥ 640px)
+          DESKTOP LAYOUT (≥ 768px / md breakpoint)
+          Mobile layout above is unchanged (all elements use sm:hidden / hidden sm:flex).
+          Desktop restructure: top nav + left intelligence panel + right map.
       ══════════════════════════════════════════════════════════════════════════ */}
 
-      {/* Desktop left rail */}
-      <aside className="absolute left-0 top-0 bottom-0 z-20 w-12 hidden sm:flex flex-col items-center py-4 gap-2 mri-rail">
+      {/* Desktop top nav bar */}
+      <header
+        className="hidden md:flex fixed top-0 left-0 right-0 z-30 items-center gap-4 px-5"
+        style={{ height: 52, background: "#fff", borderBottom: "0.5px solid #e0ddd8" }}
+      >
         {/* Logo */}
-        <div className="mb-1 text-center">
-          <div className="text-[11px] font-bold text-[#2d5a1b] leading-tight">MRI</div>
+        <div className="flex-shrink-0 text-[17px] font-semibold text-[#2d5a1b] tracking-tight">
+          Montana River Intel
         </div>
 
-        <button
-          className={`mri-rail-btn ${layersOpen ? "mri-rail-btn-active" : ""}`}
-          title="Map layers"
-          onClick={() => setLayersOpen((v) => !v)}
-        >
-          <Layers size={16} strokeWidth={2.5} />
-        </button>
+        {/* Search — centered */}
+        <div className="flex-1 flex justify-center">
+          <div className="relative w-full max-w-[320px]">
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search rivers…"
+              className="mri-input w-full"
+            />
+            {search && (
+              <button
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--mri-text-dim)]"
+                onClick={() => setSearch("")}
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+        </div>
 
-        <button className="mri-rail-btn" title="Zoom in" onClick={zoomIn}>
-          <Plus size={16} strokeWidth={2.5} />
-        </button>
+        {/* Right controls */}
+        <div className="flex-shrink-0 flex items-center gap-3">
+          <button
+            className={`mri-rail-btn ${layersOpen ? "mri-rail-btn-active" : ""}`}
+            title="Map layers"
+            onClick={() => setLayersOpen((v) => !v)}
+          >
+            <Layers size={16} strokeWidth={2.5} />
+          </button>
+          {latestPullAt && (
+            <div className="text-[11px] text-[var(--mri-text-dim)] whitespace-nowrap">
+              Updated {formatPullTime(latestPullAt)} MT
+            </div>
+          )}
+        </div>
+      </header>
 
-        <button className="mri-rail-btn" title="Zoom out" onClick={zoomOut}>
-          <Minus size={16} strokeWidth={2.5} />
-        </button>
-
-        <button className="mri-rail-btn" title="Fit to rivers" onClick={fitToRivers}>
-          <Maximize2 size={15} strokeWidth={2.5} />
-        </button>
-
-        <button className="mri-rail-btn" title="Recenter Montana" onClick={recenter}>
-          <Crosshair size={15} strokeWidth={2.5} />
-        </button>
-
-        <a
-          href="https://fwp.mt.gov/fish/regulations"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mri-rail-btn mt-auto"
-          title="MT Fishing Regulations (FWP)"
-        >
-          <ScrollText size={15} strokeWidth={2.5} />
-        </a>
-      </aside>
-
-      {/* Desktop layers panel — floats next to left rail */}
+      {/* Desktop layers panel — floats over the map area */}
       {layersOpen && (
-        <div className="absolute left-14 top-4 z-30 hidden sm:block">
+        <div className="absolute z-30 hidden md:block" style={{ top: 60, left: 428 }}>
           <LayersPanel
             basemap={basemap}
             layerState={layerState}
@@ -2814,96 +2821,101 @@ export default function OnxShell({
         </div>
       )}
 
-      {/* Desktop right sidebar */}
-      <aside className="absolute top-0 right-0 bottom-0 z-20 w-[280px] hidden sm:flex flex-col mri-sidebar-right">
-
-        {/* Sidebar header */}
-        <div className="flex-shrink-0 px-3 pt-4 pb-3 border-b border-[var(--mri-border)]">
-          <div className="flex items-baseline justify-between mb-2">
-            <div className="text-[12px] font-semibold text-[var(--mri-text)]">{filtered.length} rivers</div>
-            <div className="text-[10px] text-[var(--mri-text-dim)]">{dateLabel}</div>
-          </div>
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search rivers…"
-            className="mri-input"
-          />
-          <div className="flex gap-1.5 mt-2 flex-wrap">
-            {(["All", "Good", "Fair", "Tough"] as const).map((t) => (
-              <button key={t} onClick={() => setTier(t)} className={`mri-chip ${tier === t ? "mri-chip-active" : ""}`}>
-                {t}
+      {/* Desktop left intelligence panel — 420px fixed, full height below nav */}
+      <aside
+        className="hidden md:flex absolute left-0 bottom-0 z-20 flex-col"
+        style={{ top: 52, width: 420, background: "#f2f0eb", borderRight: "0.5px solid #e0ddd8" }}
+      >
+        {selected ? (
+          /* ── Detail view ── */
+          <>
+            {/* Back + river header */}
+            <div
+              className="flex-shrink-0 px-4 pt-4 pb-3"
+              style={{ borderBottom: "0.5px solid #e0ddd8" }}
+            >
+              <button
+                className="flex items-center gap-1 text-[13px] font-medium text-[#2d5a1b] mb-3 -ml-0.5"
+                onClick={() => setSelectedId(null)}
+              >
+                <ChevronLeft size={15} strokeWidth={2.5} />
+                Rivers
               </button>
-            ))}
-          </div>
-          {latestPullAt && (
-            <div className="mt-2 text-[10px] text-[var(--mri-text-dim)]">
-              Last pull {formatPullTime(latestPullAt)} MT
-            </div>
-          )}
-        </div>
-
-        {/* River list — fills remaining space above detail panel */}
-        <div
-          className="mri-scroll overflow-auto px-2 py-2"
-          style={{ flex: selected ? "0 1 auto" : "1 1 0", minHeight: selected ? 80 : undefined }}
-        >
-          {filtered.length === 0 ? (
-            <div className="text-[12px] text-[var(--mri-text-muted)] text-center mt-6">No rivers match</div>
-          ) : (
-            <div className="space-y-0.5">
-              {filtered.map((r) => (
-                <RiverRow
-                  key={r.river_id}
-                  river={r}
-                  selected={r.river_id === selectedId}
-                  onSelect={() => selectRiver(r.river_id === selectedId ? null : r.river_id)}
-                  onMouseEnter={() => {
-                    prefetchTimer.current = setTimeout(() => {
-                      fetchRiverDetailAnalyticsByIdOrSlug(r.river_id);
-                    }, 200);
-                  }}
-                  onMouseLeave={() => {
-                    if (prefetchTimer.current) clearTimeout(prefetchTimer.current);
-                  }}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Detail panel — pinned to bottom of sidebar */}
-        {selected && (
-          <div
-            className="mri-scroll flex-shrink-0 overflow-auto border-t border-[var(--mri-border)] bg-white px-4 pt-3 pb-4"
-            style={{ maxHeight: "62vh", background: "#f2f0eb" }}
-          >
-            <div className="mb-2">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <div className="text-[15px] font-bold text-[var(--mri-text)] leading-tight">{selected.river_name}</div>
-                  <div className="text-[11px] text-[var(--mri-text-muted)] mt-0.5">{selected.gauge_label ?? ""}</div>
-                </div>
-                <button
-                  className="flex-shrink-0 mri-rail-btn mt-0.5"
-                  onClick={() => { setSelectedId(null); }}
-                  title="Close detail"
-                >
-                  <X size={13} />
-                </button>
+              <div className="text-[18px] font-bold text-[var(--mri-text)] leading-tight">
+                {selected.river_name}
+              </div>
+              <div className="text-[12px] text-[var(--mri-text-muted)] mt-0.5">
+                {selected.gauge_label ?? ""}
               </div>
             </div>
 
-            <RiverDetailContent
-              selected={selected}
-              historyRows={historyRows}
-              detailedAnalytics={detailedAnalytics}
-              decisionCard={decisionCard}
-              flyShopReport={flyShopReport}
-              selectedStationSiteNo={selectedStationSiteNo}
-              onStationClick={handleStationClick}
-            />
-          </div>
+            {/* Scrollable detail content */}
+            <div className="mri-scroll flex-1 overflow-auto px-4 pt-3 pb-8">
+              <RiverDetailContent
+                selected={selected}
+                historyRows={historyRows}
+                detailedAnalytics={detailedAnalytics}
+                decisionCard={decisionCard}
+                flyShopReport={flyShopReport}
+                selectedStationSiteNo={selectedStationSiteNo}
+                onStationClick={handleStationClick}
+              />
+            </div>
+          </>
+        ) : (
+          /* ── River list view ── */
+          <>
+            {/* Filter chips — sticky below nav */}
+            <div
+              className="flex-shrink-0 px-4 pt-3 pb-2.5"
+              style={{ borderBottom: "0.5px solid #e0ddd8" }}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-medium text-[var(--mri-text-dim)]">
+                  {filtered.length} rivers · {dateLabel}
+                </span>
+              </div>
+              <div className="flex gap-1.5 flex-wrap">
+                {(["All", "Good", "Fair", "Tough"] as const).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => setTier(t)}
+                    className={`mri-chip ${tier === t ? "mri-chip-active" : ""}`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* River list */}
+            <div className="mri-scroll flex-1 overflow-auto px-3 py-2">
+              {filtered.length === 0 ? (
+                <div className="text-[12px] text-[var(--mri-text-muted)] text-center mt-8">
+                  No rivers match
+                </div>
+              ) : (
+                <div className="space-y-0.5">
+                  {filtered.map((r) => (
+                    <RiverRow
+                      key={r.river_id}
+                      river={r}
+                      selected={r.river_id === selectedId}
+                      onSelect={() => selectRiver(r.river_id === selectedId ? null : r.river_id)}
+                      onMouseEnter={() => {
+                        prefetchTimer.current = setTimeout(() => {
+                          fetchRiverDetailAnalyticsByIdOrSlug(r.river_id);
+                        }, 200);
+                      }}
+                      onMouseLeave={() => {
+                        if (prefetchTimer.current) clearTimeout(prefetchTimer.current);
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
         )}
       </aside>
     </div>

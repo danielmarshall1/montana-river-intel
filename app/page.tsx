@@ -1,6 +1,6 @@
 import { fetchActiveStationGeojsonByRiverIds, fetchFishabilityData } from "@/lib/supabase";
 import { fetchRiverLinesGeojson } from "@/lib/supabase-server";
-import OnxShell from "@/components/OnxShell";
+import RiverShell from "@/components/RiverShell";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 900;
@@ -25,5 +25,5 @@ export default async function HomePage() {
   } catch (e) {
     console.error("[HomePage]", e);
   }
-  return <OnxShell rivers={rivers} stationGeojson={stationGeojson} riverLinesGeojson={riverLinesGeojson} />;
+  return <RiverShell rivers={rivers} stationGeojson={stationGeojson} riverLinesGeojson={riverLinesGeojson} />;
 }
