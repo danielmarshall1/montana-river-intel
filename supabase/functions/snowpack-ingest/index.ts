@@ -1,86 +1,103 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-// NRCS SNOTEL CSV endpoint — all MT stations with SWE value and % of 1981 median
+// NRCS SNOTEL CSV: Date, Station Id, Station Name, SWE (in), % of 1981 Median
 const NRCS_URL =
   "https://wcc.sc.egov.usda.gov/reportGenerator/view_csv/customMultipleStationReport/daily/start_of_period/state=%22MT%22%20AND%20element=%22WTEQ%22%20AND%20outServiceDate=%222100-01-01%22%7Cname/-7,0/WTEQ::value,WTEQ::pctOfMedian_1981";
 
-// Map SNOTEL station name keywords → basin name.
-// Station names that contain these substrings are assigned to the basin.
-const BASIN_KEYWORDS: Array<{ basin: string; keywords: string[] }> = [
-  { basin: "Clark Fork", keywords: ["clark fork", "upper clark fork", "st. regis", "st regis", "lolo", "flint creek"] },
-  { basin: "Bitterroot", keywords: ["bitterroot", "lost trail", "sula"] },
-  { basin: "Big Hole", keywords: ["big hole", "bloody dick", "pattengail", "wisdom", "jackson", "gibbons"] },
-  { basin: "Madison", keywords: ["madison", "grizzly", "earthquake", "cherry creek", "fountain"] },
-  { basin: "Gallatin", keywords: ["gallatin", "shower falls", "garnet mountain"] },
-  { basin: "Yellowstone", keywords: ["yellowstone", "corwin springs", "lamar", "gardiner", "cooke city"] },
-  { basin: "Missouri", keywords: ["missouri", "divide", "marias", "smith river", "musselshell"] },
-  { basin: "Flathead", keywords: ["flathead", "hungry horse", "spotted bear", "north fork", "south fork", "middle fork"] },
-  { basin: "Kootenai", keywords: ["kootenai", "libby", "rexford", "mt. henry", "vermilion"] },
-  { basin: "Blackfoot", keywords: ["blackfoot", "stemple pass"] },
-];
+// Station ID → basin — verified from NRCS station list for Montana
+const STATION_BASIN: Record<string, string> = {
+  // Big Hole
+  "355": "Big Hole",    // Bloody Dick
+  "448": "Big Hole",    // Divide
+  "346": "Big Hole",    // Bisson Creek
+  "656": "Big Hole",    // Mule Creek
 
-// Basin → river slug mapping for DB lookup
-const BASIN_RIVER_SLUGS: Record<string, string[]> = {
-  "Clark Fork": ["clark-fork-st-regis"],
-  "Bitterroot": ["bitterroot-missoula"],
-  "Big Hole": ["big-hole-melrose"],
-  "Madison": ["madison-west-yellowstone"],
-  "Gallatin": ["gallatin-gateway"],
-  "Yellowstone": ["yellowstone-livingston", "yellowstone-corwin-springs"],
-  "Missouri": ["missouri-toston"],
-  "Flathead": ["flathead-columbia-falls", "nf-flathead-columbia-falls"],
-  "Kootenai": ["kootenai-below-libby-dam", "kootenai-libby"],
-  "Blackfoot": ["blackfoot-missoula"],
+  // Bitterroot
+  "760": "Bitterroot",  // Skalkaho Summit
+  "649": "Bitterroot",  // Mount Lockhart
+
+  // Clark Fork (Upper) — Missoula/Deer Lodge/St Regis drainages
+  "578": "Clark Fork",  // Lick Creek
+  "410": "Clark Fork",  // Combination
+  "932": "Clark Fork",  // Poorman Creek
+  "722": "Clark Fork",  // Rocker Peak
+
+  // Gallatin
+  "590": "Gallatin",    // Lone Mountain
+  "754": "Gallatin",    // Shower Falls
+  "365": "Gallatin",    // Brackett Creek
+  "813": "Gallatin",    // Tepee Creek
+
+  // Madison
+  "609": "Madison",     // Madison Plateau
+  "930": "Madison",     // Peterson Meadows
+
+  // Yellowstone
+  "670": "Yellowstone", // Northeast Entrance
+  "924": "Yellowstone", // West Yellowstone
+
+  // Flathead (all forks)
+  "530": "Flathead",    // Hoodoo Basin
+  "664": "Flathead",    // Noisy Basin
+  "787": "Flathead",    // Stahl Peak
+  "480": "Flathead",    // Fisher Creek
+  "436": "Flathead",    // Darkhorse Lake
+  "635": "Flathead",    // Monument Peak
+  "836": "Flathead",    // Twin Lakes
+  "385": "Flathead",    // Carrot Basin
+  "667": "Flathead",    // North Fork Jocko
+
+  // Kootenai
+  "500": "Kootenai",   // Grave Creek
+  "700": "Kootenai",   // Porcupine
+  "876": "Kootenai",   // Wood Creek
+
+  // Missouri / Smith River headwaters
+  "1009": "Missouri",  // Stringer Creek
+  "781": "Missouri",   // Spur Park
+
+  // Blackfoot
+  "313": "Blackfoot",  // Barker Lakes — near Lincoln MT
 };
 
-function classifyStation(stationName: string): string | null {
-  const lower = stationName.toLowerCase();
-  for (const { basin, keywords } of BASIN_KEYWORDS) {
-    if (keywords.some((kw) => lower.includes(kw))) return basin;
+function parseNrcsCsv(csvText: string): Map<string, { pctSum: number; count: number }> {
+  // CSV columns: Date, Station Id, Station Name, SWE value, Pct of Median
+  const basinAccum = new Map<string, { pctSum: number; count: number }>();
+
+  // Find the most recent date in the data
+  let latestDate = "";
+  for (const line of csvText.split("\n")) {
+    if (line.startsWith("#") || line.trim() === "" || line.startsWith("Date")) continue;
+    const date = line.split(",")[0]?.trim();
+    if (date && date > latestDate) latestDate = date;
   }
-  return null;
-}
+  if (!latestDate) return basinAccum;
 
-interface StationReading {
-  name: string;
-  pctOfMedian: number | null;
-}
-
-function parseNrcsCsv(csvText: string): StationReading[] {
-  const lines = csvText.split("\n");
-  const readings: StationReading[] = [];
-
-  for (const line of lines) {
-    // Skip comment lines and header
-    if (line.startsWith("#") || line.trim() === "" || line.toLowerCase().includes("station name")) continue;
-
-    // CSV columns: Station Name, State, Network, ..., Date, Value (in), % of Median
-    // The exact column order can vary — find the pct column by looking for numeric values
+  for (const line of csvText.split("\n")) {
+    if (line.startsWith("#") || line.trim() === "" || line.startsWith("Date")) continue;
     const parts = line.split(",").map((p) => p.trim().replace(/^"|"$/g, ""));
-    if (parts.length < 3) continue;
+    if (parts.length < 5) continue;
 
-    // Station name is always first
-    const name = parts[0];
-    if (!name) continue;
+    const [date, stationId, , , pctRaw] = parts;
+    if (date !== latestDate) continue;
+    if (!stationId) continue;
 
-    // Find the last numeric value that could be pct of median (typically last column)
-    let pctOfMedian: number | null = null;
-    for (let i = parts.length - 1; i >= 0; i--) {
-      const val = parseFloat(parts[i]);
-      if (!isNaN(val) && val >= 0 && val <= 500) {
-        pctOfMedian = val;
-        break;
-      }
-    }
+    const basin = STATION_BASIN[stationId];
+    if (!basin) continue;
 
-    readings.push({ name, pctOfMedian });
+    const pct = parseFloat(pctRaw);
+    if (isNaN(pct) || pct <= 0) continue;
+
+    const existing = basinAccum.get(basin) ?? { pctSum: 0, count: 0 };
+    existing.pctSum += pct;
+    existing.count += 1;
+    basinAccum.set(basin, existing);
   }
 
-  return readings;
+  return basinAccum;
 }
 
 Deno.serve(async (req: Request) => {
-  // Validate method / auth
   if (req.method !== "POST" && req.method !== "GET") {
     return new Response("Method not allowed", { status: 405 });
   }
@@ -93,78 +110,48 @@ Deno.serve(async (req: Request) => {
 
   const supabase = createClient(supabaseUrl, serviceKey);
 
-  // Fetch NRCS data
   let csvText: string;
   try {
     const res = await fetch(NRCS_URL, {
       headers: { Accept: "text/csv, text/plain, */*" },
       signal: AbortSignal.timeout(30_000),
     });
-    if (!res.ok) throw new Error(`NRCS fetch failed: ${res.status}`);
+    if (!res.ok) throw new Error(`NRCS fetch ${res.status}`);
     csvText = await res.text();
   } catch (err) {
     console.error("[snowpack-ingest] fetch error:", err);
     return new Response(JSON.stringify({ error: String(err) }), { status: 502 });
   }
 
-  const stations = parseNrcsCsv(csvText);
-  const readingDate = new Date().toISOString().slice(0, 10);
-
-  // Aggregate stations → basins
-  const basinData = new Map<string, { sum: number; count: number }>();
-  for (const s of stations) {
-    const basin = classifyStation(s.name);
-    if (!basin || s.pctOfMedian == null) continue;
-    const existing = basinData.get(basin) ?? { sum: 0, count: 0 };
-    existing.sum += s.pctOfMedian;
-    existing.count += 1;
-    basinData.set(basin, existing);
-  }
+  const basinData = parseNrcsCsv(csvText);
 
   if (basinData.size === 0) {
     return new Response(JSON.stringify({ message: "No stations matched any basin" }), { status: 200 });
   }
 
-  // Fetch river_id for each slug
-  const allSlugs = Object.values(BASIN_RIVER_SLUGS).flat();
-  const { data: riverRows, error: riverErr } = await supabase
-    .from("rivers")
-    .select("id,slug")
-    .in("slug", allSlugs);
+  const readingDate = new Date().toISOString().slice(0, 10);
 
-  if (riverErr) {
-    console.error("[snowpack-ingest] river lookup error:", riverErr);
-    return new Response(JSON.stringify({ error: riverErr.message }), { status: 500 });
-  }
-
-  const slugToId = new Map<string, string>();
-  for (const row of (riverRows ?? []) as Array<{ id: string; slug: string }>) {
-    slugToId.set(row.slug, row.id);
-  }
-
-  // Build upsert rows — one row per (basin, river) pair
+  // One row per basin — river_id left null; API route resolves basin from slug lookup
   const upsertRows: Array<{
     basin_name: string;
-    river_id: string | null;
+    river_id: null;
     snowpack_pct_median: number;
     reading_date: string;
     station_count: number;
   }> = [];
 
-  for (const [basin, { sum, count }] of basinData) {
-    const avgPct = Math.round((sum / count) * 10) / 10;
-    const slugs = BASIN_RIVER_SLUGS[basin] ?? [];
+  const summary: Record<string, string> = {};
 
-    if (slugs.length === 0) {
-      // Still record basin-level reading without a river_id
-      upsertRows.push({ basin_name: basin, river_id: null, snowpack_pct_median: avgPct, reading_date: readingDate, station_count: count });
-      continue;
-    }
-
-    for (const slug of slugs) {
-      const riverId = slugToId.get(slug) ?? null;
-      upsertRows.push({ basin_name: basin, river_id: riverId, snowpack_pct_median: avgPct, reading_date: readingDate, station_count: count });
-    }
+  for (const [basin, { pctSum, count }] of basinData.entries()) {
+    const avgPct = Math.round((pctSum / count) * 10) / 10;
+    summary[basin] = `${avgPct}% (${count} stations)`;
+    upsertRows.push({
+      basin_name: basin,
+      river_id: null,
+      snowpack_pct_median: avgPct,
+      reading_date: readingDate,
+      station_count: count,
+    });
   }
 
   const { error: upsertErr } = await supabase
@@ -172,20 +159,12 @@ Deno.serve(async (req: Request) => {
     .upsert(upsertRows, { onConflict: "basin_name,reading_date", ignoreDuplicates: false });
 
   if (upsertErr) {
-    console.error("[snowpack-ingest] upsert error:", upsertErr);
     return new Response(JSON.stringify({ error: upsertErr.message }), { status: 500 });
   }
 
-  const summary = Object.fromEntries(
-    Array.from(basinData.entries()).map(([basin, { sum, count }]) => [
-      basin,
-      `${Math.round((sum / count) * 10) / 10}% (${count} stations)`,
-    ])
-  );
-
   console.log("[snowpack-ingest] complete", summary);
-  return new Response(JSON.stringify({ date: readingDate, basins: summary, rows: upsertRows.length }), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
-  });
+  return new Response(
+    JSON.stringify({ date: readingDate, basins: summary, rows: upsertRows.length }),
+    { status: 200, headers: { "Content-Type": "application/json" } }
+  );
 });
