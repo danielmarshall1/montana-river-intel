@@ -1760,11 +1760,12 @@ export function MapView({
         startLongPress(e.originalEvent.clientX, e.originalEvent.clientY, e.lngLat);
       });
       map.on("mouseup", cancelLongPress);
+      map.on("drag", cancelLongPress);
       map.on("mousemove", (e) => {
         if (!longPressStartRef.current) return;
         const dx = e.originalEvent.clientX - longPressStartRef.current.x;
         const dy = e.originalEvent.clientY - longPressStartRef.current.y;
-        if (Math.sqrt(dx * dx + dy * dy) > 6) {
+        if (Math.sqrt(dx * dx + dy * dy) > 10) {
           longPressDraggedRef.current = true;
           cancelLongPress();
         }
