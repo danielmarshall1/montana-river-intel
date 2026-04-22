@@ -1,11 +1,15 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // NRCS SNOTEL CSV: Date, Station Id, Station Name, SWE (in), % of 1981 Median
-const NRCS_URL =
-  "https://wcc.sc.egov.usda.gov/reportGenerator/view_csv/customMultipleStationReport/daily/start_of_period/state=%22MT%22%20AND%20element=%22WTEQ%22%20AND%20outServiceDate=%222100-01-01%22%7Cname/-7,0/WTEQ::value,WTEQ::pctOfMedian_1981";
+// Fetched per-state (MT, ID, WY) and merged — NRCS doesn't support multi-state OR queries
+function nrcsUrl(state: string): string {
+  return `https://wcc.sc.egov.usda.gov/reportGenerator/view_csv/customMultipleStationReport/daily/start_of_period/state=%22${state}%22%20AND%20element=%22WTEQ%22%20AND%20outServiceDate=%222100-01-01%22%7Cname/-7,0/WTEQ::value,WTEQ::pctOfMedian_1981`;
+}
 
-// Station ID → basin — verified from NRCS station list for Montana
+// Station ID → basin — verified from NRCS station list
 const STATION_BASIN: Record<string, string> = {
+  // ── Montana ─────────────────────────────────────────────────────────────────
+
   // Big Hole
   "355": "Big Hole",    // Bloody Dick
   "448": "Big Hole",    // Divide
@@ -58,6 +62,61 @@ const STATION_BASIN: Record<string, string> = {
 
   // Blackfoot
   "313": "Blackfoot",  // Barker Lakes — near Lincoln MT
+
+  // ── Idaho ────────────────────────────────────────────────────────────────────
+
+  // Upper Snake — Henry's Fork, SF Snake, Teton River drainages
+  "546": "Upper Snake",   // Island Park — Henry's Fork headwaters
+  "471": "Upper Snake",   // Emigrant Summit — Teton Pass / upper Snake
+
+  // Salmon River
+  "312": "Salmon",        // Banner Summit — Valley Creek → Salmon River
+  "639": "Salmon",        // Morgan Creek — Salmon River tributary
+  "926": "Salmon",        // Smiley Mountain — upper Salmon near Salmon city
+
+  // Boise River (includes SF Boise)
+  "306": "Boise",         // Atlanta Summit — SF Boise / Middle Fork headwaters
+  "637": "Boise",         // Mores Creek Summit — Boise River drainage
+  "978": "Boise",         // Bogus Basin — foothills, Boise River
+
+  // Wood River (Big Wood River)
+  "537": "Wood River",    // Hyndman — Sun Valley, Big Wood River
+  "490": "Wood River",    // Galena Summit — Big Wood headwaters
+  "450": "Wood River",    // Dollarhide Summit — Big Wood drainage
+
+  // Clearwater River
+  "588": "Clearwater",    // Lolo Pass — Lochsa River (Clearwater tributary)
+  "623": "Clearwater",    // Mica Creek — Clearwater basin
+  "1142": "Clearwater",   // Pierce R.S. — North Fork Clearwater
+
+  // ── Wyoming ──────────────────────────────────────────────────────────────────
+
+  // Upper Green River
+  "342": "Upper Green",   // Big Sandy Opening — Green River tributary
+  "468": "Upper Green",   // Elkhart Park G.S. — Fremont/New Fork → Green River
+  "661": "Upper Green",   // New Fork Lake — New Fork River → Green River
+
+  // Wind River
+  "822": "Wind River",    // Togwotee Pass — Wind River headwaters
+  "878": "Wind River",    // Younts Peak — Wind River headwaters
+
+  // Snake Headwaters (Jackson Hole — Snake + Gros Ventre)
+  "506": "Snake Headwaters", // Gros Ventre Summit — Gros Ventre drainage
+  "764": "Snake Headwaters", // Snake River Station — Snake River, Jackson Hole
+  "554": "Snake Headwaters", // Kelley R.S. — Kelly WY, Gros Ventre River
+
+  // North Platte / Laramie River
+  "367": "North Platte",  // Brooklyn Lake — Laramie River headwaters
+  "772": "North Platte",  // South Brush Creek — Laramie / North Platte drainage
+  "1196": "North Platte", // Med Bow — Medicine Bow Mtns, Laramie River
+
+  // Shoshone / Clarks Fork Yellowstone
+  "350": "Shoshone",      // Blackwater — North Fork Shoshone River tributary
+  "326": "Shoshone",      // Beartooth Lake — Beartooth Plateau, near Clarks Fork headwaters
+
+  // Bighorn River
+  "377": "Bighorn",       // Burgess Junction — Bighorn Mountains, feeds Bighorn drainage
+  "402": "Bighorn",       // Cloud Peak Reservoir — Bighorn Mountains
 };
 
 function parseNrcsCsv(csvText: string): Map<string, { pctSum: number; count: number }> {
@@ -110,20 +169,35 @@ Deno.serve(async (req: Request) => {
 
   const supabase = createClient(supabaseUrl, serviceKey);
 
-  let csvText: string;
-  try {
-    const res = await fetch(NRCS_URL, {
-      headers: { Accept: "text/csv, text/plain, */*" },
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (!res.ok) throw new Error(`NRCS fetch ${res.status}`);
-    csvText = await res.text();
-  } catch (err) {
-    console.error("[snowpack-ingest] fetch error:", err);
-    return new Response(JSON.stringify({ error: String(err) }), { status: 502 });
-  }
+  // Fetch MT, ID, WY in parallel — NRCS doesn't support multi-state queries
+  const states = ["MT", "ID", "WY"];
+  const fetchResults = await Promise.allSettled(
+    states.map((st) =>
+      fetch(nrcsUrl(st), {
+        headers: { Accept: "text/csv, text/plain, */*" },
+        signal: AbortSignal.timeout(30_000),
+      }).then((r) => {
+        if (!r.ok) throw new Error(`NRCS ${st} fetch ${r.status}`);
+        return r.text();
+      })
+    )
+  );
 
-  const basinData = parseNrcsCsv(csvText);
+  // Merge results — skip states that failed (log warnings)
+  const basinData = new Map<string, { pctSum: number; count: number }>();
+  for (let i = 0; i < states.length; i++) {
+    const result = fetchResults[i];
+    if (result.status === "rejected") {
+      console.warn(`[snowpack-ingest] ${states[i]} fetch failed:`, result.reason);
+      continue;
+    }
+    for (const [basin, accum] of parseNrcsCsv(result.value).entries()) {
+      const existing = basinData.get(basin) ?? { pctSum: 0, count: 0 };
+      existing.pctSum += accum.pctSum;
+      existing.count += accum.count;
+      basinData.set(basin, existing);
+    }
+  }
 
   if (basinData.size === 0) {
     return new Response(JSON.stringify({ message: "No stations matched any basin" }), { status: 200 });

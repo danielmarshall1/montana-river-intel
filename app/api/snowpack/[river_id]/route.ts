@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 
 // River slug → snowpack basin name (mirrors STATION_BASIN in snowpack-ingest)
 const SLUG_TO_BASIN: Record<string, string> = {
+  // ── Montana ─────────────────────────────────────────────────────────────────
   "big-hole-melrose":            "Big Hole",
   "bitterroot-missoula":         "Bitterroot",
   "clark-fork-st-regis":         "Clark Fork",
@@ -18,6 +19,29 @@ const SLUG_TO_BASIN: Record<string, string> = {
   "kootenai-below-libby-dam":    "Kootenai",
   "kootenai-libby":              "Kootenai",
   "blackfoot-missoula":          "Blackfoot",
+
+  // ── Idaho ────────────────────────────────────────────────────────────────────
+  "henrys-fork-ashton":          "Upper Snake",
+  "sf-snake-palisades":          "Upper Snake",
+  "teton-river-newdale":         "Upper Snake",
+  "salmon-river-salmon":         "Salmon",
+  "sf-boise-featherville":       "Boise",
+  "boise-river-boise":           "Boise",
+  "big-wood-hailey":             "Wood River",
+  "clearwater-orofino":          "Clearwater",
+  // silver-creek-picabo omitted — spring creek, groundwater-fed, snowpack not predictive
+
+  // ── Wyoming ──────────────────────────────────────────────────────────────────
+  "green-river-fontenelle":      "Upper Green",
+  "wind-river-riverton":         "Wind River",
+  "snake-river-jackson":         "Snake Headwaters",
+  "gros-ventre-jackson":         "Snake Headwaters",
+  "north-platte-grey-reef":      "North Platte",
+  "north-platte-miracle-mile":   "North Platte",
+  "laramie-river-laramie":       "North Platte",
+  "shoshone-river-cody":         "Shoshone",
+  "clarks-fork-yellowstone":     "Shoshone",
+  "bighorn-river-thermopolis":   "Bighorn",
 };
 
 export async function GET(
