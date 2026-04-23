@@ -15,6 +15,7 @@
 import "dotenv/config";
 
 type RiverRow = {
+  id: string;
   slug: string;
   usgs_site_no: string;
   latitude: number | null;
@@ -58,10 +59,33 @@ async function supabaseFetch(path: string, init: RequestInit) {
 
 async function getActiveRivers(): Promise<RiverRow[]> {
   const res = await supabaseFetch(
-    `/rest/v1/rivers?select=slug,usgs_site_no,latitude,longitude&is_active=eq.true`,
+    `/rest/v1/rivers?select=id,slug,usgs_site_no,latitude,longitude&is_active=eq.true`,
     { method: "GET" }
   );
   return (await res.json()) as RiverRow[];
+}
+
+// Returns the dedicated temp site_no from river_usgs_map_roles when the primary
+// flow gauge has no temp sensor. Returns null if no separate temp site is configured.
+async function getTempSite(
+  riverId: string,
+  primarySiteNo: string
+): Promise<string | null> {
+  const res = await supabaseFetch(
+    `/rest/v1/river_usgs_map_roles` +
+      `?river_id=eq.${riverId}` +
+      `&role=eq.temp` +
+      `&is_active=eq.true` +
+      `&order=priority.asc` +
+      `&limit=1` +
+      `&select=site_no`,
+    { method: "GET" }
+  );
+  const rows = (await res.json()) as { site_no: string }[];
+  if (!rows.length) return null;
+  // Don't double-fetch if the temp site is the same as the flow site
+  const site = rows[0].site_no;
+  return site === primarySiteNo ? null : site;
 }
 
 async function upsertDaily(site: string, dateISO: string, payload: any) {
@@ -253,6 +277,20 @@ async function main() {
   for (const r of rivers) {
     try {
       const usgs = await fetchUSGSInstant(r.usgs_site_no);
+
+      // If the primary flow gauge has no temp sensor, look for a dedicated temp site
+      if (usgs.water_temp_f === null) {
+        const tempSite = await getTempSite(r.id, r.usgs_site_no);
+        if (tempSite) {
+          const tempData = await fetchUSGSInstant(tempSite);
+          if (tempData.water_temp_f !== null) {
+            usgs.water_temp_f = tempData.water_temp_f;
+            console.log(
+              `   🌡️  ${r.slug}: temp from ${tempSite} → ${tempData.water_temp_f}°F`
+            );
+          }
+        }
+      }
 
       let weather: {
         wind_am_mph: number | null;
