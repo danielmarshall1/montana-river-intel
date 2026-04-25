@@ -1562,7 +1562,9 @@ function TodayTab({
           <div className="text-[15px] font-semibold text-[var(--mri-text)] mt-1 leading-tight">
             {selected.water_temp_f != null ? `${Number(selected.water_temp_f).toFixed(1)}°F` : "—"}
           </div>
-          {selected.temp_status && (
+          {selected.water_temp_f == null ? (
+            <div className="text-[10px] text-[var(--mri-text-dim)] mt-0.5">No sensor at this gauge</div>
+          ) : selected.temp_status && (
             <div className="text-[10px] text-[var(--mri-text-dim)] mt-0.5">{getTempStatusLabel(selected)}</div>
           )}
           {detailedAnalytics?.sourceTrust?.tempSourceSiteNo && (
