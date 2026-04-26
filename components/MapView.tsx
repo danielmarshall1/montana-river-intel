@@ -833,7 +833,7 @@ function syncStatewideHydrologyLayer(map: mapboxgl.Map, enabled: boolean) {
     if (!map.getSource(STATEWIDE_HYDRO_SOURCE)) {
       map.addSource(STATEWIDE_HYDRO_SOURCE, {
         type: "geojson",
-        data: "https://hydro.nationalmap.gov/arcgis/rest/services/nhd/MapServer/2/query?where=1%3D1&geometry=-116.2,44.2,-104,49.2&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=GNIS_NAME&returnGeometry=true&geometryPrecision=4&maxAllowableOffset=0.005&f=geojson" as any,
+        data: "https://hydro.nationalmap.gov/arcgis/rest/services/nhd/MapServer/2/query?where=1%3D1&geometry=-116.2,44.2,-104,49.2&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelContains&outFields=GNIS_NAME&returnGeometry=true&geometryPrecision=4&maxAllowableOffset=0.005&f=geojson" as any,
       } as any);
     }
     if (!map.getLayer(STATEWIDE_HYDRO_LAYER)) {
