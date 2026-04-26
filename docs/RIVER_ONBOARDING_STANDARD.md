@@ -65,6 +65,27 @@ Critical: wrong or stale gauges silently corrupt scores.
   the geometry of smaller tributaries.
   Contains returns only segments fully within the bbox.
   This is the correct approach for all NHD fetches.
+- [ ] GEOMETRY VALIDATION GUARDS
+  For rivers with common names (Snake, Colorado, Green,
+  Platte, etc.) add these guards after fetching geometry.
+  If any guard fails — raise exception, do NOT insert.
+  This prevents silent wrong geometry from going live.
+
+  Required guards:
+  1. Centroid lat within expected range
+  2. Centroid lon within expected range
+  3. Max lat does not exceed expected corridor
+  4. Min lon does not go beyond expected corridor
+
+  Example guard ranges for SF Snake River:
+  - centroid lat: 43.3–43.6
+  - centroid lon: -111.2 to -111.7
+  - max_lat < 43.68
+  - min_lon > -111.80
+
+  Define ranges based on primary USGS gauge coordinates:
+  - Shorter rivers: gauge lat/lon ± 0.5 degrees
+  - Longer rivers (Salmon, Wind, Clarks Fork): ± 1.0 degrees
 
 ## Phase 4 — Score Validation
 After first ingest run:
