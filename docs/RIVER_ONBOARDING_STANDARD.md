@@ -57,6 +57,14 @@ Critical: wrong or stale gauges silently corrupt scores.
   tributaries
 - [ ] For rivers named "Snake River" or other common names:
   Use tight bbox to isolate correct section
+- [ ] CRITICAL: Use esriSpatialRelContains not
+  esriSpatialRelIntersects when fetching NHD segments.
+  Intersects returns segments that cross the bbox
+  boundary — this causes adjacent river mainstems
+  (Snake River, Colorado River, etc) to bleed into
+  the geometry of smaller tributaries.
+  Contains returns only segments fully within the bbox.
+  This is the correct approach for all NHD fetches.
 
 ## Phase 4 — Score Validation
 After first ingest run:
@@ -167,6 +175,14 @@ Check ON CONFLICT DO UPDATE SET includes updated_at
 **Score too high in runoff season**
 Symptom: Freestone river scores 70+ in May
 Fix: Verify is_tailwater = false, check seasonal multiplier
+
+**Stray segments from adjacent drainage**
+Symptom: River line extends beyond expected corridor
+into neighboring state or wrong drainage
+Cause: NHD fetch used esriSpatialRelIntersects
+Fix: Re-fetch with esriSpatialRelContains and
+delete segments where longitude/latitude is outside
+the expected river corridor bounding box
 
 ## State-by-State Notes
 
