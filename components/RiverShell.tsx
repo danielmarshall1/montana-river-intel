@@ -2121,6 +2121,7 @@ export default function RiverShell({
   rivers,
   stationGeojson,
   riverLinesGeojson: initialRiverLinesGeojson,
+  displayRiversGeojson,
   dateLabel = new Date().toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
@@ -2130,6 +2131,7 @@ export default function RiverShell({
   rivers: River[];
   stationGeojson?: GeoJSON.FeatureCollection<GeoJSON.Point, Record<string, unknown>> | null;
   riverLinesGeojson?: GeoJSON.FeatureCollection<GeoJSON.Geometry, Record<string, unknown>> | null;
+  displayRiversGeojson?: GeoJSON.FeatureCollection<GeoJSON.Geometry, Record<string, unknown>> | null;
   dateLabel?: string;
 }) {
   type MobileListSnap = "hidden" | "peek" | "mid" | "full";
@@ -2586,6 +2588,7 @@ export default function RiverShell({
             selectedRiverId={selectedId}
             selectedRiverGeojson={selectedGeojson}
             riverLinesGeojson={initialRiverLinesGeojson ?? null}
+            displayRiversGeojson={displayRiversGeojson ?? null}
             activeStationsGeojson={stationGeojson ?? null}
             basemap={basemap}
             layerState={layerState}

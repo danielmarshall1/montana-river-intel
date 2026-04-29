@@ -1,5 +1,5 @@
 import { fetchActiveStationGeojsonByRiverIds, fetchFishabilityData } from "@/lib/supabase";
-import { fetchRiverLinesGeojson } from "@/lib/supabase-server";
+import { fetchDisplayRiversGeojson, fetchRiverLinesGeojson } from "@/lib/supabase-server";
 import RiverShell from "@/components/RiverShell";
 
 export const dynamic = "force-dynamic";
@@ -16,14 +16,21 @@ export default async function HomePage() {
     type: "FeatureCollection",
     features: [],
   };
+  let displayRiversGeojson: GeoJSON.FeatureCollection<GeoJSON.Geometry, Record<string, unknown>> = {
+    type: "FeatureCollection",
+    features: [],
+  };
   try {
     rivers = await fetchFishabilityData(useMock);
     if (!useMock && rivers.length > 0) {
-      stationGeojson = await fetchActiveStationGeojsonByRiverIds(rivers.map((r) => r.river_id));
-      riverLinesGeojson = await fetchRiverLinesGeojson(rivers);
+      [stationGeojson, riverLinesGeojson, displayRiversGeojson] = await Promise.all([
+        fetchActiveStationGeojsonByRiverIds(rivers.map((r) => r.river_id)),
+        fetchRiverLinesGeojson(rivers),
+        fetchDisplayRiversGeojson(),
+      ]);
     }
   } catch (e) {
     console.error("[HomePage]", e);
   }
-  return <RiverShell rivers={rivers} stationGeojson={stationGeojson} riverLinesGeojson={riverLinesGeojson} />;
+  return <RiverShell rivers={rivers} stationGeojson={stationGeojson} riverLinesGeojson={riverLinesGeojson} displayRiversGeojson={displayRiversGeojson} />;
 }

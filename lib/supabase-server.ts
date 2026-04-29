@@ -53,6 +53,26 @@ function featureFromJoinRow(
   };
 }
 
+export async function fetchDisplayRiversGeojson(): Promise<GeoJSON.FeatureCollection<GeoJSON.Geometry, Record<string, unknown>>> {
+  const client = createSupabaseServer();
+  if (!client) return { type: "FeatureCollection", features: [] };
+
+  const { data, error } = await client
+    .from("rivers")
+    .select("id,slug,river_name,river_geometries!inner(geom)")
+    .eq("is_active", false)
+    .in("slug", ["snake-river-display"]);
+
+  if (error || !data) return { type: "FeatureCollection", features: [] };
+
+  const features: GeoJSON.Feature<GeoJSON.Geometry, Record<string, unknown>>[] = [];
+  for (const row of data as RiverGeometryJoinRow[]) {
+    const feature = featureFromJoinRow(row);
+    if (feature) features.push(feature);
+  }
+  return { type: "FeatureCollection", features };
+}
+
 export async function fetchRiverLinesGeojson(
   rivers: Pick<FishabilityRow, "river_id" | "slug" | "river_name">[]
 ): Promise<GeoJSON.FeatureCollection<GeoJSON.Geometry, Record<string, unknown>>> {

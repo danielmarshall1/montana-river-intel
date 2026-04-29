@@ -34,6 +34,7 @@ interface MapViewProps {
   selectedRiverId: string | null;
   selectedRiverGeojson: GeoJSON.GeoJSON | null;
   riverLinesGeojson?: GeoJSON.FeatureCollection | null;
+  displayRiversGeojson?: GeoJSON.FeatureCollection | null;
   activeStationsGeojson?: GeoJSON.FeatureCollection<GeoJSON.Point, Record<string, unknown>> | null;
   basemap?: BasemapId;
   layerState?: Record<LayerId, boolean>;
@@ -62,6 +63,9 @@ const RIVER_CASING_LAYER = "rivers-casing";
 const RIVER_BASE_LAYER = "rivers-base";
 const RIVER_SELECTED_LAYER = "rivers-selected";
 const RIVER_NAMES_LAYER = "river-labels";
+
+const DISPLAY_RIVERS_SOURCE = "display-rivers-source";
+const DISPLAY_RIVERS_LAYER = "display-rivers-line";
 
 const STATEWIDE_HYDRO_SOURCE = "statewide-hydrology-source";
 const STATEWIDE_HYDRO_LAYER = "statewide-hydrology-line";
@@ -828,6 +832,50 @@ function syncSelectedRiverLine(
   }
 }
 
+function syncDisplayRiversLayer(
+  map: mapboxgl.Map,
+  geojson: GeoJSON.FeatureCollection | null,
+  anchorBeforeId?: string
+) {
+  if (!geojson || geojson.features.length === 0) return;
+
+  const src = map.getSource(DISPLAY_RIVERS_SOURCE) as
+    | { setData?: (d: GeoJSON.GeoJSON) => void }
+    | undefined;
+
+  if (!src) {
+    map.addSource(DISPLAY_RIVERS_SOURCE, { type: "geojson", data: geojson });
+  } else {
+    src.setData?.(geojson);
+  }
+
+  if (!map.getLayer(DISPLAY_RIVERS_LAYER)) {
+    map.addLayer(
+      {
+        id: DISPLAY_RIVERS_LAYER,
+        type: "line",
+        source: DISPLAY_RIVERS_SOURCE,
+        minzoom: 4,
+        maxzoom: 24,
+        layout: { "line-join": "round", "line-cap": "round" },
+        paint: {
+          "line-color": "#3d6e8a",
+          "line-width": [
+            "interpolate", ["linear"], ["zoom"],
+            4, 0.8,
+            6, 1.4,
+            8, 2.2,
+            10, 3.2,
+            12, 4.5,
+          ],
+          "line-opacity": 0.45,
+        },
+      },
+      anchorBeforeId
+    );
+  }
+}
+
 function syncStatewideHydrologyLayer(map: mapboxgl.Map, enabled: boolean) {
   if (enabled) {
     if (!map.getSource(STATEWIDE_HYDRO_SOURCE)) {
@@ -1374,6 +1422,7 @@ export function MapView({
   selectedRiverId,
   selectedRiverGeojson,
   riverLinesGeojson,
+  displayRiversGeojson,
   activeStationsGeojson,
   basemap = "hybrid",
   layerState,
@@ -1399,6 +1448,7 @@ export function MapView({
   const selectedRiverIdRef = useRef(selectedRiverId);
   const selectedRiverGeojsonRef = useRef(selectedRiverGeojson);
   const riverLinesGeojsonRef = useRef<GeoJSON.FeatureCollection | null>(riverLinesGeojson ?? null);
+  const displayRiversGeojsonRef = useRef<GeoJSON.FeatureCollection | null>(displayRiversGeojson ?? null);
   const activeStationsGeojsonRef = useRef<
     GeoJSON.FeatureCollection<GeoJSON.Point, Record<string, unknown>> | null
   >(activeStationsGeojson ?? null);
@@ -1425,6 +1475,7 @@ export function MapView({
   selectedRiverIdRef.current = selectedRiverId;
   selectedRiverGeojsonRef.current = selectedRiverGeojson;
   riverLinesGeojsonRef.current = riverLinesGeojson ?? null;
+  displayRiversGeojsonRef.current = displayRiversGeojson ?? null;
   activeStationsGeojsonRef.current = activeStationsGeojson ?? null;
   layerStateRef.current = effectiveLayerState;
   onMapReadyRef.current = onMapReady;
@@ -1462,6 +1513,11 @@ export function MapView({
       layerStateRef.current.mri_river_lines,
       layerStateRef.current.mri_selected_highlight,
       layerStateRef.current.mri_labels
+    );
+    syncDisplayRiversLayer(
+      map,
+      displayRiversGeojsonRef.current,
+      map.getLayer(RIVER_CASING_LAYER) ? RIVER_CASING_LAYER : undefined
     );
     syncStatewideHydrologyLayer(map, layerStateRef.current.statewide_hydrology);
     syncPadusLayer(map, layerStateRef.current.padus_public_lands);
