@@ -855,7 +855,7 @@ function syncDisplayRiversLayer(
         id: DISPLAY_RIVERS_LAYER,
         type: "line",
         source: DISPLAY_RIVERS_SOURCE,
-        minzoom: 4,
+        minzoom: 0,
         maxzoom: 24,
         layout: { "line-join": "round", "line-cap": "round" },
         paint: {
