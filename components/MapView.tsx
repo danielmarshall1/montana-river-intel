@@ -2195,6 +2195,17 @@ export function MapView({
     };
   }, [syncRuntimeLayers]);
 
+  // ── Re-sync display rivers whenever the geojson prop arrives or changes ──────
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !displayRiversGeojson) return;
+    syncDisplayRiversLayer(
+      map,
+      displayRiversGeojson,
+      map.getLayer(RIVER_CASING_LAYER) ? RIVER_CASING_LAYER : undefined
+    );
+  }, [displayRiversGeojson, mapReady]);
+
   // ── Sync waypoints → Mapbox markers ─────────────────────────────────────────
   const waypointsKey = waypoints.map((w) => w.id).join(",");
   useEffect(() => {
