@@ -57,20 +57,10 @@ export async function fetchDisplayRiversGeojson(): Promise<GeoJSON.FeatureCollec
   const client = createSupabaseServer();
   if (!client) return { type: "FeatureCollection", features: [] };
 
-  const { data, error } = await client
-    .from("rivers")
-    .select("id,slug,river_name,river_geometries!inner(geom)")
-    .eq("is_active", false)
-    .in("slug", ["snake-river-display"]);
+  const { data, error } = await client.rpc("get_display_rivers_geojson");
 
   if (error || !data) return { type: "FeatureCollection", features: [] };
-
-  const features: GeoJSON.Feature<GeoJSON.Geometry, Record<string, unknown>>[] = [];
-  for (const row of data as RiverGeometryJoinRow[]) {
-    const feature = featureFromJoinRow(row);
-    if (feature) features.push(feature);
-  }
-  return { type: "FeatureCollection", features };
+  return data as GeoJSON.FeatureCollection<GeoJSON.Geometry, Record<string, unknown>>;
 }
 
 export async function fetchRiverLinesGeojson(
