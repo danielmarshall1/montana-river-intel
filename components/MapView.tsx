@@ -860,15 +860,15 @@ function syncDisplayRiversLayer(
         layout: { "line-join": "round", "line-cap": "round" },
         paint: {
           "line-color": "#4aa3ff",
+          "line-opacity": 0.8,
           "line-width": [
             "interpolate", ["linear"], ["zoom"],
-            4, 0.8,
-            6, 1.4,
-            8, 2.2,
-            10, 3.2,
-            12, 4.5,
+            4, 1.15,
+            6, 1.8,
+            8, 2.8,
+            10, 4.0,
+            12, 5.5,
           ],
-          "line-opacity": 1,
         },
       },
       anchorBeforeId
