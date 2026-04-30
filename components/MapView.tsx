@@ -859,7 +859,7 @@ function syncDisplayRiversLayer(
         maxzoom: 24,
         layout: { "line-join": "round", "line-cap": "round" },
         paint: {
-          "line-color": "#3d6e8a",
+          "line-color": "#4aa3ff",
           "line-width": [
             "interpolate", ["linear"], ["zoom"],
             4, 0.8,
@@ -868,7 +868,7 @@ function syncDisplayRiversLayer(
             10, 3.2,
             12, 4.5,
           ],
-          "line-opacity": 0.45,
+          "line-opacity": 1,
         },
       },
       anchorBeforeId
